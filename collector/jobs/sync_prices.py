@@ -8,7 +8,7 @@ import pandas as pd
 from collector.errors import SourceLimitReachedError
 from collector.repositories.base import fetch_frame, get_latest_date, upsert_records
 from collector.repositories.sync_state_repo import get_job_state_map, upsert_job_state
-from collector.sources.yahoo_prices import attach_trailing_valuation, fetch_ohlcv
+from collector.sources.eodhd_prices import attach_trailing_valuation, fetch_ohlcv
 from collector.utils.logging import log
 
 
@@ -70,10 +70,10 @@ def run(
     default_start: str,
     lookback_days: int = 45,
     repair_mode: bool = False,
-    fmp_api_key: str | None = None,
+    eodhd_api_key: str | None = None,
     batch_limit: int = 80,
     sleep_seconds: float = 0.3,
-    allow_yahoo_fallback: bool = True,
+    allow_yahoo_fallback: bool = False,
     require_fundamentals: bool = False,
 ) -> dict:
     """일별 가격 데이터를 배치 단위로 동기화한다."""
@@ -115,7 +115,7 @@ def run(
             price_frame = fetch_ohlcv(
                 ticker,
                 start_date,
-                fmp_api_key=fmp_api_key,
+                eodhd_api_key=eodhd_api_key,
                 allow_yahoo_fallback=allow_yahoo_fallback,
             )
         except SourceLimitReachedError:

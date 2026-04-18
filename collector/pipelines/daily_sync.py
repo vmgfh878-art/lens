@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from pprint import pformat
 from pathlib import Path
+from pprint import pformat
 import sys
 
 from dotenv import load_dotenv
@@ -29,20 +29,20 @@ from collector.utils.network import sanitize_proxy_env
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Lens 독립 일일 수집 파이프라인")
+    parser = argparse.ArgumentParser(description="Lens 통합 일일 수집 파이프라인")
     parser.add_argument("--tickers", nargs="*", help="동기화할 티커 목록")
-    parser.add_argument("--repair", action="store_true", help="가격 및 breadth를 전체 범위로 다시 계산")
-    parser.add_argument("--skip-stock-info", action="store_true", help="stock_info 동기화를 건너뜀")
-    parser.add_argument("--skip-macro", action="store_true", help="거시 지표 동기화를 건너뜀")
-    parser.add_argument("--skip-fundamentals", action="store_true", help="재무 지표 동기화를 건너뜀")
-    parser.add_argument("--skip-prices", action="store_true", help="가격 동기화를 건너뜀")
-    parser.add_argument("--skip-sector", action="store_true", help="sector_returns 동기화를 건너뜀")
-    parser.add_argument("--skip-breadth", action="store_true", help="market_breadth 계산을 건너뜀")
-    parser.add_argument("--skip-indicators", action="store_true", help="indicators 계산을 건너뜀")
-    parser.add_argument("--skip-preflight", action="store_true", help="실행 전 사전 점검을 건너뜀")
-    parser.add_argument("--market-only", action="store_true", help="Yahoo 증분 가격 중심 일일 시장 파이프라인으로 실행")
-    parser.add_argument("--min-coverage-pct", type=float, default=0.9, help="market-only 모드 최신 가격 커버리지 최소 비율")
-    parser.add_argument("--min-covered-tickers", type=int, default=None, help="market-only 모드 최신 가격 최소 커버 종목 수")
+    parser.add_argument("--repair", action="store_true", help="가격과 breadth를 전체 범위로 다시 계산")
+    parser.add_argument("--skip-stock-info", action="store_true", help="stock_info 동기화를 건너뛴다")
+    parser.add_argument("--skip-macro", action="store_true", help="거시 지표 동기화를 건너뛴다")
+    parser.add_argument("--skip-fundamentals", action="store_true", help="재무 지표 동기화를 건너뛴다")
+    parser.add_argument("--skip-prices", action="store_true", help="가격 동기화를 건너뛴다")
+    parser.add_argument("--skip-sector", action="store_true", help="sector_returns 동기화를 건너뛴다")
+    parser.add_argument("--skip-breadth", action="store_true", help="market_breadth 계산을 건너뛴다")
+    parser.add_argument("--skip-indicators", action="store_true", help="indicators 계산을 건너뛴다")
+    parser.add_argument("--skip-preflight", action="store_true", help="실행 전 사전 점검을 건너뛴다")
+    parser.add_argument("--market-only", action="store_true", help="EODHD 가격 중심 일일 시장 파이프라인만 실행")
+    parser.add_argument("--min-coverage-pct", type=float, default=0.9, help="market-only 모드 커버리지 최소 비율")
+    parser.add_argument("--min-covered-tickers", type=int, default=None, help="market-only 모드 최소 커버 종목 수")
     parser.add_argument("--price-batch-limit", type=int, default=None, help="market-only 모드 가격 배치 수 override")
     parser.add_argument("--price-lookback-days", type=int, default=None, help="market-only 모드 가격 lookback 버퍼 override")
     parser.add_argument("--breadth-min-tickers", type=int, default=None, help="market-only 모드 breadth 최소 종목 수 override")
@@ -88,7 +88,7 @@ def main() -> None:
     target_tickers = resolve_target_tickers(args.tickers, universe_tickers or known_tickers)
 
     log("=" * 60)
-    log("Lens 독립 일일 수집 시작")
+    log("Lens 통합 일일 수집 시작")
     log(f"대상 티커 수: {len(target_tickers)}개")
     if args.tickers:
         log("대상 소스: CLI 인자")
@@ -131,6 +131,8 @@ def main() -> None:
             settings.use_yahoo_fundamentals_baseline,
         )
     if not args.skip_prices:
+        if not settings.eodhd_api_key:
+            raise SystemExit("EODHD_API_KEY가 없어 가격 동기화를 시작할 수 없습니다.")
         results["prices"] = _run_step(
             "sync_prices",
             run_prices,
@@ -138,7 +140,7 @@ def main() -> None:
             default_start=settings.default_price_start,
             lookback_days=settings.price_lookback_days,
             repair_mode=args.repair,
-            fmp_api_key=settings.fmp_api_key,
+            eodhd_api_key=settings.eodhd_api_key,
             batch_limit=settings.price_batch_limit,
             sleep_seconds=settings.price_sleep_seconds,
             allow_yahoo_fallback=settings.allow_yahoo_fallback,
@@ -165,7 +167,7 @@ def main() -> None:
         )
 
     log("=" * 60)
-    log("Lens 독립 일일 수집 완료")
+    log("Lens 통합 일일 수집 완료")
     log(pformat(results, sort_dicts=False))
     log("=" * 60)
 

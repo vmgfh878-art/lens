@@ -11,15 +11,31 @@ from collector.sources.yf_common import prepare_yfinance
 prepare_yfinance()
 
 
-def _fetch_fmp_ohlcv(ticker: str, start_date: str, api_key: str) -> pd.DataFrame:
-    url = (
-        "https://financialmodelingprep.com/stable/historical-price-eod/full"
-        f"?symbol={ticker}&from={start_date}&apikey={api_key.strip()}"
-    )
+def _to_eodhd_symbol(ticker: str) -> str:
+    """미국 주식 티커를 EODHD 심볼 형식으로 변환한다."""
+    normalized = ticker.strip().upper()
+    if "." in normalized and not normalized.endswith((".US", ".NYSE", ".NASDAQ", ".BATS", ".AMEX")):
+        normalized = normalized.replace(".", "-")
+    if "." in normalized:
+        return normalized
+    return f"{normalized}.US"
+
+
+def _fetch_eodhd_ohlcv(ticker: str, start_date: str, api_key: str) -> pd.DataFrame:
+    symbol = _to_eodhd_symbol(ticker)
+    url = f"https://eodhd.com/api/eod/{symbol}"
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(
+            url,
+            params={
+                "api_token": api_key.strip(),
+                "fmt": "json",
+                "from": start_date,
+            },
+            timeout=30,
+        )
         if response.status_code == 429:
-            raise SourceLimitReachedError("FMP", response.text.strip())
+            raise SourceLimitReachedError("EODHD", response.text.strip())
         response.raise_for_status()
         payload = response.json()
     except SourceLimitReachedError:
@@ -27,18 +43,18 @@ def _fetch_fmp_ohlcv(ticker: str, start_date: str, api_key: str) -> pd.DataFrame
     except Exception:
         return pd.DataFrame()
 
-    if isinstance(payload, dict) and "Error Message" in payload:
-        message = str(payload.get("Error Message", ""))
-        if "Limit Reach" in message:
-            raise SourceLimitReachedError("FMP", message)
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("error") or "").strip()
+        if "limit" in message.lower():
+            raise SourceLimitReachedError("EODHD", message)
         return pd.DataFrame()
 
     if not payload:
         return pd.DataFrame()
 
     frame = pd.DataFrame(payload)
-    if frame.empty:
-        return frame
+    if frame.empty or "date" not in frame.columns:
+        return pd.DataFrame()
 
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.sort_values("date").set_index("date")
@@ -48,23 +64,26 @@ def _fetch_fmp_ohlcv(ticker: str, start_date: str, api_key: str) -> pd.DataFrame
             "high": "High",
             "low": "Low",
             "close": "Close",
+            "adjusted_close": "Adj Close",
             "volume": "Volume",
         }
     )
-    renamed["Adj Close"] = renamed["Close"]
+    if "Adj Close" not in renamed.columns:
+        renamed["Adj Close"] = renamed["Close"]
     renamed["Amount"] = renamed["Close"] * renamed["Volume"]
+    renamed.replace([np.inf, -np.inf], None, inplace=True)
     return renamed.where(pd.notnull(renamed), None)
 
 
 def fetch_ohlcv(
     ticker: str,
     start_date: str,
-    fmp_api_key: str | None = None,
-    allow_yahoo_fallback: bool = True,
+    eodhd_api_key: str | None = None,
+    allow_yahoo_fallback: bool = False,
 ) -> pd.DataFrame:
-    """종목 시세를 읽는다."""
-    if fmp_api_key:
-        frame = _fetch_fmp_ohlcv(ticker, start_date, fmp_api_key)
+    """종목별 OHLCV를 읽는다. 기본 소스는 EODHD다."""
+    if eodhd_api_key:
+        frame = _fetch_eodhd_ohlcv(ticker, start_date, eodhd_api_key)
         if not frame.empty:
             return frame
 

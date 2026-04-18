@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import requests
-import yfinance as yf
 from fredapi import Fred
-
-from collector.sources.yf_common import prepare_yfinance
-
-prepare_yfinance()
 
 
 FRED_SERIES_MAP = {
@@ -36,13 +31,6 @@ FRED_SERIES_MAP = {
 
 FMP_MACRO_MAP = {
     "vix_close": "^VIX",
-}
-
-YAHOO_MACRO_MAP = {
-    "vix_close": "^VIX",
-    "dxy_close": "DX-Y.NYB",
-    "wti_price": "CL=F",
-    "gold_price": "GC=F",
 }
 
 
@@ -100,51 +88,17 @@ def fetch_fmp_macro_frame(start_date: str, api_key: str | None) -> pd.DataFrame:
     return pd.concat(frames, axis=1)
 
 
-def fetch_yahoo_macro_frame(start_date: str) -> pd.DataFrame:
-    """야후에서 보조 시장 지표를 읽는다."""
-    frames: list[pd.DataFrame] = []
-    for column, ticker in YAHOO_MACRO_MAP.items():
-        try:
-            data = yf.download(ticker, start=start_date, progress=False)
-        except Exception:
-            continue
-
-        if data.empty:
-            continue
-
-        if isinstance(data.columns, pd.MultiIndex):
-            price_series = data["Close"][ticker]
-        else:
-            price_series = data["Close"]
-
-        frame = pd.DataFrame(price_series)
-        frame.columns = [column]
-        frames.append(frame)
-
-    if not frames:
-        return pd.DataFrame()
-
-    yahoo_frame = pd.concat(frames, axis=1)
-    if yahoo_frame.index.tz is not None:
-        yahoo_frame.index = yahoo_frame.index.tz_localize(None)
-    return yahoo_frame
-
-
 def build_macro_frame(start_date: str, fred_api_key: str | None, fmp_api_key: str | None = None) -> pd.DataFrame:
-    """FRED와 보조 시장 데이터를 병합해 거시 지표 프레임을 만든다."""
+    """FRED와 FMP 보조 지표를 병합한 거시 프레임을 만든다."""
     fred_frame = fetch_fred_frame(start_date, fred_api_key)
     fmp_frame = fetch_fmp_macro_frame(start_date, fmp_api_key)
-    yahoo_frame = fetch_yahoo_macro_frame(start_date)
 
-    aux_frames = [frame for frame in (fmp_frame, yahoo_frame) if not frame.empty]
-    aux_frame = pd.concat(aux_frames, axis=1) if aux_frames else pd.DataFrame()
-    if not aux_frame.empty:
-        aux_frame = aux_frame.groupby(level=0, axis=1).first()
-
-    if fred_frame.empty and aux_frame.empty:
+    if fred_frame.empty and fmp_frame.empty:
         return pd.DataFrame()
 
-    combined = pd.concat([fred_frame, aux_frame], axis=1)
+    combined = pd.concat([frame for frame in (fred_frame, fmp_frame) if not frame.empty], axis=1)
+    combined = combined.groupby(level=0, axis=1).first()
+
     if "us10y" in combined.columns and "us2y" in combined.columns:
         combined["yield_spread"] = combined["us10y"] - combined["us2y"]
     else:

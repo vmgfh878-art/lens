@@ -63,6 +63,9 @@ def main() -> None:
         raise SystemExit(f"[preflight] {preflight.message}")
     log(f"[preflight] {preflight.message}")
 
+    if not settings.eodhd_api_key:
+        raise SystemExit("EODHD_API_KEY가 없어 초기 가격 백필을 시작할 수 없습니다.")
+
     target_tickers = load_tickers_from_csv(settings.universe_file)
     if not target_tickers:
         raise SystemExit("유니버스 파일에서 티커를 읽지 못했습니다.")
@@ -72,7 +75,7 @@ def main() -> None:
     log("Lens 초기 백필 시작")
     log(f"대상 티커 수: {before['target_count']}개")
     log(
-        "현재 진척: "
+        "현재 진행: "
         f"stock_info={before['stock_info_count']}, "
         f"fundamentals={before['fundamentals_count']}, "
         f"price_data={before['price_count']}"
@@ -110,21 +113,21 @@ def main() -> None:
         quota_hit = quota_hit or results["fundamentals"].get("quota_hit", False)
 
     middle = _summary(target_tickers)
-    if not quota_hit and middle["price_count"] < middle["target_count"]:
+    if middle["price_count"] < middle["target_count"]:
         results["prices"] = run_prices(
             target_tickers,
             default_start=settings.default_price_start,
             lookback_days=settings.price_lookback_days,
             repair_mode=True,
-            fmp_api_key=settings.fmp_api_key,
-            batch_limit=settings.price_batch_limit,
+            eodhd_api_key=settings.eodhd_api_key,
+            batch_limit=len(target_tickers),
             sleep_seconds=settings.price_sleep_seconds,
             allow_yahoo_fallback=settings.allow_yahoo_fallback,
-            require_fundamentals=True,
+            require_fundamentals=False,
         )
         quota_hit = quota_hit or results["prices"].get("quota_hit", False)
 
-    # 파생 테이블은 현재까지 쌓인 raw 기준으로 매번 최신화한다.
+    # 파생 테이블은 현재까지 적재된 raw 데이터를 기준으로 다시 계산한다.
     results["sector_returns"] = run_sector_returns(settings.sector_lookback_days)
     results["market_breadth"] = run_market_breadth(
         repair_mode=True,

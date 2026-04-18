@@ -28,22 +28,22 @@ from collector.utils.network import sanitize_proxy_env
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Lens 일일 시장 데이터 증분 파이프라인")
+    parser = argparse.ArgumentParser(description="Lens 일일 시장 증분 파이프라인")
     parser.add_argument("--tickers", nargs="*", help="동기화할 티커 목록")
-    parser.add_argument("--skip-preflight", action="store_true", help="실행 전 점검을 건너뜀")
-    parser.add_argument("--skip-macro", action="store_true", help="거시 데이터 동기화를 건너뜀")
-    parser.add_argument("--skip-derived", action="store_true", help="sector/breadth/indicators 계산을 건너뜀")
+    parser.add_argument("--skip-preflight", action="store_true", help="실행 전 점검을 건너뛴다")
+    parser.add_argument("--skip-macro", action="store_true", help="거시 데이터 갱신을 건너뛴다")
+    parser.add_argument("--skip-derived", action="store_true", help="파생 계산을 건너뛴다")
     parser.add_argument(
         "--min-coverage-pct",
         type=float,
         default=0.9,
-        help="최신 가격 일자 커버리지 최소 비율. 기본값 0.9",
+        help="최신 가격 일자 커버리지 최소 비율",
     )
     parser.add_argument(
         "--min-covered-tickers",
         type=int,
         default=None,
-        help="최신 가격 일자 최소 커버 종목 수. 미지정 시 비율 기준으로 계산",
+        help="최신 가격 일자 최소 커버 종목 수",
     )
     parser.add_argument(
         "--breadth-min-tickers",
@@ -55,30 +55,30 @@ def parse_args() -> argparse.Namespace:
         "--price-lookback-days",
         type=int,
         default=None,
-        help="가격 증분 수집 시 티커별 재조회 버퍼 일수 override",
+        help="가격 증분 수집 시 종목별 lookback 버퍼 일수 override",
     )
     parser.add_argument(
         "--price-batch-limit",
         type=int,
         default=None,
-        help="가격 동기화 배치 수 override. 기본은 전체 대상 티커 수",
+        help="가격 동기화 배치 크기 override",
     )
     parser.add_argument(
         "--sector-lookback-days",
         type=int,
         default=None,
-        help="sector_returns 재계산 기간 override",
+        help="sector_returns 계산 구간 override",
     )
     parser.add_argument(
         "--indicator-lookback-days",
         type=int,
         default=400,
-        help="indicators 재계산 기간. 기본값 400일",
+        help="indicators 계산 lookback 일수",
     )
     parser.add_argument(
         "--allow-partial",
         action="store_true",
-        help="커버리지가 낮아도 파생 계산까지 계속 진행",
+        help="커버리지가 낮아도 파생 계산을 계속 진행한다",
     )
     return parser.parse_args()
 
@@ -131,6 +131,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
             raise SystemExit(f"[preflight] {preflight.message}")
         log(f"[preflight] {preflight.message}")
 
+    if not settings.eodhd_api_key:
+        raise SystemExit("EODHD_API_KEY가 없어 일일 가격 동기화를 시작할 수 없습니다.")
+
     universe_tickers = load_tickers_from_csv(settings.universe_file)
     known_tickers = list_known_tickers()
     target_tickers = resolve_target_tickers(args.tickers, universe_tickers or known_tickers)
@@ -142,7 +145,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
     log("=" * 60)
     log("Lens 일일 시장 증분 동기화 시작")
     log(f"대상 티커 수: {len(target_tickers)}")
-    log(f"가격 소스: Yahoo 증분")
+    log("가격 소스: EODHD 증분")
     log(f"가격 lookback 버퍼: {price_lookback_days}일")
     log("=" * 60)
 
@@ -164,10 +167,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
         default_start=settings.default_price_start,
         lookback_days=price_lookback_days,
         repair_mode=False,
-        fmp_api_key=None,
+        eodhd_api_key=settings.eodhd_api_key,
         batch_limit=price_batch_limit,
         sleep_seconds=settings.price_sleep_seconds,
-        allow_yahoo_fallback=True,
+        allow_yahoo_fallback=settings.allow_yahoo_fallback,
         require_fundamentals=False,
     )
 
@@ -195,21 +198,24 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
         log("=" * 60)
         log("Lens 일일 시장 증분 동기화 중단")
         log(message)
-        log("커버리지가 기준 미만이라 후속 계산을 중단했습니다.")
+        log("커버리지가 기준 미만이라 후속 계산을 중단합니다.")
         log("=" * 60)
         raise SystemExit(message)
 
-    if not getattr(args, "skip_sector", False):
+    if not getattr(args, "skip_derived", False):
         results["sector_returns"] = _run_step("sync_sector_returns", run_sector_returns, sector_lookback_days)
-    if not getattr(args, "skip_breadth", False):
         results["market_breadth"] = _run_step(
             "compute_market_breadth",
             run_market_breadth,
             repair_mode=False,
             min_ticker_count=breadth_min_tickers,
         )
-    if not getattr(args, "skip_indicators", False):
-        results["indicators"] = _run_step("compute_indicators", run_indicators, args.indicator_lookback_days, target_tickers)
+        results["indicators"] = _run_step(
+            "compute_indicators",
+            run_indicators,
+            args.indicator_lookback_days,
+            target_tickers,
+        )
 
     upsert_job_state(
         job_name="daily_market_sync",

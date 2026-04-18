@@ -35,3 +35,5 @@ services:
         sync: false
       - key: FMP_API_KEY
         sync: false
+      - key: EODHD_API_KEY
+        sync: false

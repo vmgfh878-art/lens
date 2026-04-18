@@ -15,6 +15,7 @@ class CollectorSettings:
 
     fred_api_key: str | None
     fmp_api_key: str | None
+    eodhd_api_key: str | None
     universe_file: str
     fmp_daily_limit: int
     stock_info_batch_limit: int
@@ -36,6 +37,7 @@ def get_settings() -> CollectorSettings:
     return CollectorSettings(
         fred_api_key=os.environ.get("FRED_API_KEY"),
         fmp_api_key=os.environ.get("FMP_API_KEY"),
+        eodhd_api_key=os.environ.get("EODHD_API_KEY"),
         universe_file=os.environ.get("LENS_UNIVERSE_FILE", str(get_default_universe_file())),
         fmp_daily_limit=int(os.environ.get("FMP_DAILY_LIMIT", "80")),
         stock_info_batch_limit=int(os.environ.get("LENS_STOCK_INFO_BATCH_LIMIT", "80")),

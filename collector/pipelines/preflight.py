@@ -56,6 +56,7 @@ def run_preflight() -> PreflightResult:
     details: dict[str, object] = {
         "fred_api_key": bool(settings.fred_api_key),
         "fmp_api_key": bool(settings.fmp_api_key),
+        "eodhd_api_key": bool(settings.eodhd_api_key),
     }
 
     try:
@@ -89,9 +90,11 @@ def run_preflight() -> PreflightResult:
         )
 
     if not settings.fred_api_key:
-        log("[preflight] FRED_API_KEY가 없어 거시 데이터는 Yahoo 보조 지표 위주로 채워집니다.")
+        log("[preflight] FRED_API_KEY가 없어 거시 데이터는 제한적으로 채워집니다.")
     if not settings.fmp_api_key:
-        log("[preflight] FMP_API_KEY가 없어 재무 데이터는 Yahoo baseline까지만 채워집니다.")
+        log("[preflight] FMP_API_KEY가 없어 재무 데이터와 종목 메타데이터는 점진 보강이 어렵습니다.")
+    if not settings.eodhd_api_key:
+        log("[preflight] EODHD_API_KEY가 없어 EODHD 가격 동기화를 실행할 수 없습니다.")
 
     return PreflightResult(
         ok=True,

@@ -1,96 +1,35 @@
 # Lens
 
-Lens는 미국 주식 데이터를 직접 수집해 Supabase에 적재하고, 서비스와 모델에서 바로 사용할 수 있는 파생 피처까지 생성하는 데이터 파이프라인 프로젝트다.
+Lens는 미국 주식 데이터를 수집해 Supabase에 적재하고, 모델 입력용 파생 지표까지 생성하는 데이터 파이프라인 프로젝트다.
 
-## 목표
+## 현재 운영 방향
 
-- S&P 500 유니버스를 기준으로 원천 데이터와 파생 데이터를 분리해 관리한다.
-- 초기 백필과 일일 증분 수집을 분리해 운영한다.
-- 데이터 적재, 파생 피처 계산, API 서빙 구조를 명확히 나눈다.
-- 운영 상태를 `sync_state`에 기록해 실패 구간과 재시도 상태를 추적한다.
+- 유니버스: `S&P 500`
+- 가격 소스: `EODHD`
+- 거시 소스: `FRED` + 일부 `FMP`
+- 재무/종목 메타데이터: `FMP`
+- 저장소: `Supabase`
 
-## 현재 디렉터리 구조
+Yahoo 증분 수집은 로컬과 Render 양쪽에서 모두 실패가 재현되어, 운영용 가격 소스로는 사용하지 않는다.
+
+## 디렉터리 구조
 
 ```text
 lens/
-  ai/                  모델 학습 코드와 전처리 유틸
+  ai/                  학습 전처리와 학습 엔트리포인트
   backend/
-    app/               FastAPI 앱
-    db/                스키마, 부트스트랩 유틸, DB 운영 스크립트
-  collector/           외부 데이터 수집과 일일 파이프라인
+    app/               FastAPI API
+    db/                스키마와 DB 스크립트
+  collector/           데이터 수집기와 일일 파이프라인
   data/
-    universe/          고정 유니버스 파일
-    parquet/           스냅샷 parquet 저장소
-    cache/             외부 수집 캐시
-  frontend/            프론트엔드
+    universe/          유니버스 파일
+    parquet/           parquet 스냅샷
+    cache/             외부 소스 캐시
+  frontend/            Next 프론트엔드
   ops/                 운영 스크립트와 cron 예시
 ```
 
-## 폴더 책임
-
-### `data/`
-
-데이터만 저장한다.
-
-- `data/universe/sp500.csv`
-  - 현재 기본 유니버스
-- `data/parquet/`
-  - 스냅샷 parquet
-- `data/cache/`
-  - 외부 수집 캐시
-
-`data/` 아래에는 실행 코드나 비즈니스 로직을 두지 않는다.
-
-### `backend/app/`
-
-서비스 API 계층이다.
-
-- Supabase 클라이언트
-- 가격 조회 API
-- 예측 조회 API
-- 피처 조회용 서비스 로직
-
-### `backend/db/`
-
-DB 스키마와 적재 유틸, 운영 스크립트를 둔다.
-
-- `backend/db/schema.sql`
-  - Lens DB 스키마
-- `backend/db/bootstrap.py`
-  - parquet 스냅샷 적재 공통 유틸
-- `backend/db/scripts/`
-  - 연결 테스트
-  - parquet export
-  - Kaggle 스냅샷 import
-  - 원본 DB 동기화 스크립트
-
-### `collector/`
-
-실제 운영 수집기다.
-
-- `collector/sources/`
-  - Yahoo, FRED, FMP 어댑터
-- `collector/jobs/`
-  - 단위 수집 잡과 파생 계산 잡
-- `collector/pipelines/bootstrap_backfill.py`
-  - 초기 백필
-- `collector/pipelines/bootstrap_snapshot.py`
-  - parquet 스냅샷 부트스트랩
-- `collector/pipelines/daily_market_sync.py`
-  - 일일 가격 중심 증분 수집
-- `collector/pipelines/daily_sync.py`
-  - 통합 일일 수집 엔트리포인트
-
-## 데이터 흐름
-
-1. 유니버스 파일에서 대상 종목을 읽는다.
-2. `stock_info`, `company_fundamentals`, `price_data`, `macroeconomic_indicators`를 적재한다.
-3. `price_data + stock_info`로 `sector_returns`를 계산한다.
-4. `price_data`로 `market_breadth`를 계산한다.
-5. `price_data + macro + breadth`로 `indicators`를 생성한다.
-6. 각 작업의 진행 상태를 `sync_state`에 기록한다.
-
-## 주요 테이블
+## 핵심 테이블
 
 ### 원천 테이블
 
@@ -105,57 +44,57 @@ DB 스키마와 적재 유틸, 운영 스크립트를 둔다.
 - `market_breadth`
 - `indicators`
 
-### 운영 테이블
+### 운영 상태 테이블
 
 - `sync_state`
 
-### 예측 결과 테이블
+## 파이프라인
 
-- `predictions`
-
-## 실행 경로
-
-### 사전 점검
-
-```powershell
-python collector/pipelines/preflight.py
-```
-
-### 소수 종목 테스트
-
-```powershell
-python collector/pipelines/daily_sync.py --tickers AAPL MSFT NVDA
-```
-
-### 일일 시장 증분 수집
-
-```powershell
-python collector/pipelines/daily_market_sync.py
-```
-
-또는 통합 엔트리포인트에서:
-
-```powershell
-python collector/pipelines/daily_sync.py --market-only
-```
-
-### 초기 백필
+### 1. 초기 백필
 
 ```powershell
 python collector/pipelines/bootstrap_backfill.py
 ```
 
-### 스냅샷 parquet 부트스트랩
+- `stock_info`, `company_fundamentals`, `price_data`를 채운다.
+- 가격은 `EODHD`로 우선 적재한다.
+- 재무 데이터가 아직 다 안 차도 `price_data` 적재를 막지 않는다.
+- `per`, `pbr`는 재무 데이터가 들어온 종목부터 순차적으로 채워진다.
+
+### 2. 일일 시장 증분
 
 ```powershell
-python collector/pipelines/bootstrap_snapshot.py
+python collector/pipelines/daily_market_sync.py --indicator-lookback-days 60
 ```
 
-### 원본 DB 동기화 스크립트
+- `price_data`를 EODHD 증분으로 갱신한다.
+- 최신 거래일 커버리지를 확인한다.
+- 기준 미달이면 `sector_returns`, `market_breadth`, `indicators` 계산을 중단한다.
+
+### 3. 통합 일일 수집
 
 ```powershell
-python backend/db/scripts/sync_source_to_lens.py --indicator-lookback-days 2400
+python collector/pipelines/daily_sync.py
 ```
+
+- `macro`
+- `stock_info`
+- `fundamentals`
+- `prices`
+- `sector_returns`
+- `market_breadth`
+- `indicators`
+
+순서로 실행한다.
+
+### 4. 가격 중심 일일 모드
+
+```powershell
+python collector/pipelines/daily_sync.py --market-only --indicator-lookback-days 60
+```
+
+- 일일 운영에서는 이 경로를 기본으로 권장한다.
+- 핵심은 `EODHD 가격 증분 -> 커버리지 검사 -> 파생 계산`이다.
 
 ## 환경 변수
 
@@ -163,6 +102,7 @@ python backend/db/scripts/sync_source_to_lens.py --indicator-lookback-days 2400
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
+- `EODHD_API_KEY`
 
 ### 권장
 
@@ -180,33 +120,36 @@ python backend/db/scripts/sync_source_to_lens.py --indicator-lookback-days 2400
 - `LENS_INDICATOR_LOOKBACK_DAYS`
 - `LENS_BREADTH_MIN_TICKERS`
 - `FMP_DAILY_LIMIT`
+- `LENS_ALLOW_YAHOO_FALLBACK`
+- `LENS_USE_YAHOO_FUNDAMENTALS_BASELINE`
 
-## 운영 메모
+## EODHD 메모
 
-- 초기 세팅은 `bootstrap_backfill.py`로 천천히 채운다.
-- 일일 운영은 `daily_market_sync.py` 또는 `daily_sync.py --market-only`로 가격 중심 증분 수집을 수행한다.
-- `stock_info`, `company_fundamentals`는 초기 백필과 점진 갱신 대상이다.
-- `price_data`는 일일 운영의 핵심이다.
-- `daily_market_sync.py`는 최신 가격 일자 커버리지를 확인하고 기준 미달이면 후속 계산을 중단한다.
-- 무료 운영 기준에서는 Yahoo 증분 수집의 실행 환경 차이가 크므로, 실제 배포 환경 검증이 필요하다.
+- API 키가 필요하다.
+- 무료 플랜은 일일 호출 수와 과거 기간이 제한적이라 운영용으로는 부족하다.
+- 유료 `EOD Historical Data` 플랜은 공식 문서 기준 월 `$19.99`부터 시작한다.
+- 공식 문서 기준 `EOD Historical API`는 요청 1회로 해당 티커의 긴 가격 이력을 받을 수 있다.
+- 공식 문서 기준 `Bulk API`도 있어, 나중에는 거래일 하루치 전체 시장 수집으로 최적화할 수 있다.
 
-## 다음 배포 방향
+참고:
 
-현재 구조상 가장 자연스러운 배포 조합은 아래와 같다.
+- [EOD Historical Data API](https://eodhd.com/financial-apis/api-for-historical-data-and-volumes/)
+- [Bulk API](https://eodhd.com/knowledgebase/bulk-download-api/)
+- [Pricing](https://eodhd.com/pricing-quantpedia)
 
-- DB: Supabase
-- 일일 수집: Render Cron Job
-- 백엔드 API: Render Web Service
-- 프론트엔드: Vercel
+## Render 배포
 
-## Render 배포 초안
-
-레포 루트의 `render.yaml`은 아래 두 서비스를 전제로 둔다.
+현재 `render.yaml`에는 아래 두 서비스가 정의되어 있다.
 
 - `lens-backend`
-  - FastAPI 웹 서비스
 - `lens-daily-market-sync`
-  - 평일 오전 7시 30분 KST 기준으로 도는 일일 시장 수집 cron
 
-Render에서 Blueprint로 연결한 뒤, 환경 변수 값만 대시보드에서 채우면 된다.
-단, Render cron job은 무료 인스턴스가 아니라 `Starter` 이상 플랜을 써야 한다.
+cron 서비스에는 다음 환경 변수가 필요하다.
+
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `FRED_API_KEY`
+- `FMP_API_KEY`
+- `EODHD_API_KEY`
+
+배포 후에는 먼저 `lens-daily-market-sync`를 수동 실행해서 커버리지와 실행 시간을 확인하는 것을 권장한다.
