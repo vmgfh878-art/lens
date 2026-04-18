@@ -1,14 +1,16 @@
 """
 train.py - 모델 학습 스크립트
-사용법: python train.py --model patchtst --epochs 50
+사용 예: python train.py --model patchtst --epochs 50
 """
 
 import argparse
+
 import torch
-from ai.models.patchtst import PatchTST
-from ai.models.cnn_lstm import CNNLSTM
-from ai.models.tide import TiDE
+
 from ai.loss import AsymmetricBCELoss
+from ai.models.cnn_lstm import CNNLSTM
+from ai.models.patchtst import PatchTST
+from ai.models.tide import TiDE
 
 MODEL_REGISTRY = {
     "patchtst": PatchTST,
@@ -26,8 +28,9 @@ def train(model_name: str, epochs: int):
     criterion = AsymmetricBCELoss(alpha=2.0)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
 
-    # TODO: DataLoader 연결 (data/ 디렉터리의 preprocessing.py 사용)
-    print(f"[{model_name}] 학습 준비 완료. DataLoader 연결 필요.")
+    # TODO: DataLoader 연결 후 학습 루프를 완성할 것
+    # 전처리 유틸은 ai/preprocessing.py를 기준으로 연결한다.
+    print(f"[{model_name}] 학습 준비 완료. DataLoader 연결이 필요합니다.")
 
 
 if __name__ == "__main__":

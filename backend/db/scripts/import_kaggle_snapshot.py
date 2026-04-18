@@ -9,14 +9,14 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 load_dotenv(ROOT_DIR / ".env")
 
-from data.crawler_bot import step_indicators  # noqa: E402
-from db.load_initial_data import run_bootstrap  # noqa: E402
+from backend.db.bootstrap import run_bootstrap  # noqa: E402
+from collector.pipelines.bootstrap_snapshot import step_indicators  # noqa: E402
 
 DEFAULT_SOURCE_DIR = Path(r"C:\Users\user\projects\sisc-web\AI\data\kaggle_data")
 REQUIRED_FILES = [

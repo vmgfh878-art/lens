@@ -1,8 +1,4 @@
-"""Lens용 간단 크롤러.
-
-원본 SISC 수집기의 단계 구조만 가져오고, 실제 적재는 Lens 스키마에 맞춘다.
-v1에서는 로컬 parquet 묶음을 raw source로 사용해 Supabase 적재와 indicators 생성을 검증한다.
-"""
+"""스냅샷 parquet 묶음을 Lens 스키마로 적재한다."""
 
 from __future__ import annotations
 
@@ -12,12 +8,12 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from backend.app.services.feature_svc import FEATURE_COLUMNS, build_features, normalize_timeframe
-from db.load_initial_data import (  # noqa: E402
+from backend.db.bootstrap import (  # noqa: E402
     DEFAULT_DATA_DIR,
     chunked_upsert,
     get_client,
@@ -55,7 +51,7 @@ def build_indicator_records(
 
 
 def step_indicators(source_dir: Path, timeframes: list[str], sample_tickers: list[str] | None = None) -> None:
-    print("\n[7/7] indicators 생성 및 적재 중..")
+    print("\n[7/7] indicators 생성 및 적재 중")
     records = build_indicator_records(source_dir, timeframes, sample_tickers)
     if not records:
         print("[Warn] 적재할 indicators 레코드가 없습니다.")
@@ -66,7 +62,7 @@ def step_indicators(source_dir: Path, timeframes: list[str], sample_tickers: lis
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Lens 간단 크롤러")
+    parser = argparse.ArgumentParser(description="Lens 스냅샷 부트스트랩")
     parser.add_argument(
         "--source-dir",
         default=str(DEFAULT_DATA_DIR),
@@ -93,7 +89,7 @@ def main() -> None:
     source_dir = Path(args.source_dir)
 
     print("=" * 60)
-    print(" Lens 간단 크롤러 시작")
+    print(" Lens 스냅샷 부트스트랩 시작")
     print("=" * 60)
     print(f"source_dir   : {source_dir}")
     print(f"sampleTicker : {args.tickers or 'ALL'}")
@@ -105,7 +101,7 @@ def main() -> None:
         step_indicators(source_dir, args.timeframes, args.tickers)
 
     print("\n" + "=" * 60)
-    print(" Lens 간단 크롤러 완료")
+    print(" Lens 스냅샷 부트스트랩 완료")
     print("=" * 60)
 
 

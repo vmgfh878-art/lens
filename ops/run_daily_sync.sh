@@ -17,4 +17,4 @@ if [[ -f ".env" ]]; then
   set +a
 fi
 
-python db/07_sync_source_to_lens.py "$@" >> "${LOG_FILE}" 2>&1
+python backend/db/scripts/sync_source_to_lens.py "$@" >> "${LOG_FILE}" 2>&1

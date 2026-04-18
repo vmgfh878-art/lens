@@ -18,14 +18,14 @@ import psycopg2
 from dotenv import load_dotenv
 from sshtunnel import SSHTunnelForwarder
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 load_dotenv(ROOT_DIR / ".env")
 
 from backend.app.services.feature_svc import build_features  # noqa: E402
-from db.load_initial_data import chunked_upsert, get_client  # noqa: E402
+from backend.db.bootstrap import chunked_upsert, get_client  # noqa: E402
 
 TABLE_ORDER = [
     "stock_info",

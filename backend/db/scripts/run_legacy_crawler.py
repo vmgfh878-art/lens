@@ -11,7 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT_DIR / ".env")
 
 
@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--export-parquet", action="store_true", help="수집 후 DB 내용을 parquet로 저장")
     parser.add_argument(
         "--output-dir",
-        default=str(Path(__file__).resolve().parents[1] / "data" / "parquet"),
+        default=str(ROOT_DIR / "data" / "parquet"),
         help="parquet 저장 폴더",
     )
     return parser.parse_args()
@@ -80,7 +80,7 @@ def build_crawler_command(args: argparse.Namespace) -> list[str]:
 
 
 def build_export_command(args: argparse.Namespace) -> list[str]:
-    export_script = Path(__file__).resolve().parent / "05_export_parquet.py"
+    export_script = Path(__file__).resolve().parent / "export_parquet.py"
     return [args.python_bin, str(export_script), "--output-dir", args.output_dir]
 
 

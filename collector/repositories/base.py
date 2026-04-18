@@ -7,7 +7,7 @@ import pandas as pd
 from supabase import Client
 
 from backend.app.db import get_supabase
-from db.load_initial_data import chunked_upsert
+from backend.db.bootstrap import chunked_upsert
 
 
 def get_client() -> Client:
@@ -28,7 +28,7 @@ def _apply_filters(query, filters: list[tuple[str, str, Any]] | None):
         elif operator == "in":
             query = query.in_(column, value)
         else:
-            raise ValueError(f"지원하지 않는 필터입니다: {operator}")
+            raise ValueError(f"지원하지 않는 필터 연산자입니다: {operator}")
     return query
 
 
@@ -41,7 +41,7 @@ def fetch_all_rows(
     page_size: int = 1000,
     limit: int | None = None,
 ) -> list[dict]:
-    """Supabase REST를 페이지 단위로 순회하여 전체 행을 읽는다."""
+    """Supabase REST를 페이지 단위로 순회해 전체 행을 읽는다."""
     client = get_client()
     start = 0
     rows: list[dict] = []
