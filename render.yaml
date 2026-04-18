@@ -9,6 +9,8 @@ services:
     healthCheckPath: /
     autoDeploy: true
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -23,6 +25,8 @@ services:
     startCommand: python collector/pipelines/daily_market_sync.py --indicator-lookback-days 60
     autoDeploy: true
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
