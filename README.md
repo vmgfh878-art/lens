@@ -198,3 +198,15 @@ python backend/db/scripts/sync_source_to_lens.py --indicator-lookback-days 2400
 - 일일 수집: Render Cron Job
 - 백엔드 API: Render Web Service
 - 프론트엔드: Vercel
+
+## Render 배포 초안
+
+레포 루트의 `render.yaml`은 아래 두 서비스를 전제로 둔다.
+
+- `lens-backend`
+  - FastAPI 웹 서비스
+- `lens-daily-market-sync`
+  - 평일 오전 7시 30분 KST 기준으로 도는 일일 시장 수집 cron
+
+Render에서 Blueprint로 연결한 뒤, 환경 변수 값만 대시보드에서 채우면 된다.
+단, Render cron job은 무료 인스턴스가 아니라 `Starter` 이상 플랜을 써야 한다.

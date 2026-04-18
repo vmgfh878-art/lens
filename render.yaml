@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: lens-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+
+  - type: cron
+    name: lens-daily-market-sync
+    runtime: python
+    plan: starter
+    schedule: "30 22 * * 1-5"
+    buildCommand: pip install -r backend/requirements.txt && pip install -r collector/requirements.txt
+    startCommand: python collector/pipelines/daily_market_sync.py --indicator-lookback-days 60
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: FMP_API_KEY
+        sync: false
