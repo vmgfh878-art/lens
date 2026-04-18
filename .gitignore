@@ -1,0 +1,28 @@
+# 환경변수 (절대 커밋하면 안 됨)
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+
+# 모델 파일
+*.pt
+*.pth
+*.onnx
+
+# 데이터
+data/parquet/
+*.parquet
+
+# IDE
+.vscode/
+.idea/

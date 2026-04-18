@@ -1,0 +1,6 @@
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.29
+yfinance==0.2.40
+fredapi==0.5.2
+tqdm==4.66.4
+python-dotenv==1.0.1
