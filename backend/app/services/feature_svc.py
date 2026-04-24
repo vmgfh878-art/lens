@@ -1,7 +1,7 @@
 """
 Lens 피처 생성 서비스.
 
-이 파일을 v1 기준 17개 피처 정의의 단일 기준점으로 사용한다.
+이 파일을 v1 기준 기본 피처 정의의 단일 기준점으로 사용한다.
 또한 1D / 1W / 1M 타임프레임별 리샘플링과 피처 생성을 함께 담당한다.
 """
 
@@ -12,7 +12,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-FEATURE_COLUMNS = [
+_BASE_FEATURE_COLUMNS = [
     "log_return",
     "open_ratio",
     "high_ratio",
@@ -31,6 +31,47 @@ FEATURE_COLUMNS = [
     "nh_nl_index",
     "ma200_pct",
 ]
+_REGIME_FEATURE_COLUMNS = [
+    "regime_calm",
+    "regime_neutral",
+    "regime_stress",
+]
+_FUNDAMENTAL_FEATURE_COLUMNS = [
+    "revenue",
+    "net_income",
+    "equity",
+    "eps",
+    "roe",
+    "debt_ratio",
+]
+_MACRO_FEATURE_COLUMNS = [
+    "us10y",
+    "yield_spread",
+    "vix_close",
+    "credit_spread_hy",
+]
+_BREADTH_FEATURE_COLUMNS = [
+    "nh_nl_index",
+    "ma200_pct",
+]
+_FUNDAMENTAL_FLAG_COLUMN = "has_fundamentals"
+_MACRO_FLAG_COLUMN = "has_macro"
+_BREADTH_FLAG_COLUMN = "has_breadth"
+REQUIRED_FEATURE_COLUMNS = [
+    *_BASE_FEATURE_COLUMNS,
+    *_REGIME_FEATURE_COLUMNS,
+    _MACRO_FLAG_COLUMN,
+    _BREADTH_FLAG_COLUMN,
+    _FUNDAMENTAL_FLAG_COLUMN,
+]
+FEATURE_COLUMNS = [
+    *_BASE_FEATURE_COLUMNS,
+    *_REGIME_FEATURE_COLUMNS,
+    *_FUNDAMENTAL_FEATURE_COLUMNS,
+    _MACRO_FLAG_COLUMN,
+    _BREADTH_FLAG_COLUMN,
+    _FUNDAMENTAL_FLAG_COLUMN,
+]
 
 SUPPORTED_TIMEFRAMES = ("1D", "1W", "1M")
 _EPSILON = 1e-9
@@ -42,6 +83,16 @@ _CONTEXT_COLUMNS = (
     "nh_nl_index",
     "ma200_pct",
 )
+_REGIME_COLUMNS = ("regime_calm", "regime_neutral", "regime_stress")
+_FUNDAMENTAL_SOURCE_COLUMNS = (
+    "filing_date",
+    "revenue",
+    "net_income",
+    "equity",
+    "eps",
+    "total_liabilities",
+)
+_OUTPUT_COLUMNS = ["ticker", "date", "timeframe", "regime_label", *FEATURE_COLUMNS]
 
 
 def normalize_timeframe(timeframe: str) -> str:
@@ -55,7 +106,7 @@ def normalize_timeframe(timeframe: str) -> str:
 
 def default_horizon_for_timeframe(timeframe: str) -> int:
     normalized = normalize_timeframe(timeframe)
-    return {"1D": 10, "1W": 12, "1M": 6}[normalized]
+    return {"1D": 5, "1W": 4, "1M": 3}[normalized]
 
 
 def _ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
@@ -156,6 +207,18 @@ def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
         moving_average = frame["close"].rolling(window=window).mean()
         frame[f"ma_{window}_ratio"] = (frame["close"] - moving_average) / (moving_average + _EPSILON)
 
+    # ATR은 절대값 대신 종가 대비 비율로 정규화해 종목 간 변동성 비교에 쓰기 쉽게 만든다.
+    true_range = pd.concat(
+        [
+            frame["high"] - frame["low"],
+            (frame["high"] - previous_close).abs(),
+            (frame["low"] - previous_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr = true_range.rolling(window=14).mean()
+    frame["atr_ratio"] = atr / (frame["close"] + _EPSILON)
+
     frame["rsi"] = _compute_rsi(frame["close"], period=14) / 100.0
 
     exp12 = frame["close"].ewm(span=12, adjust=False).mean()
@@ -171,23 +234,131 @@ def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _apply_regime_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    enriched = frame.copy()
+    if "vix_close" not in enriched.columns:
+        enriched["regime_label"] = np.nan
+        for column in _REGIME_COLUMNS:
+            enriched[column] = np.nan
+        return enriched
+
+    conditions = [
+        enriched["vix_close"] < 15,
+        enriched["vix_close"] >= 25,
+    ]
+    enriched["regime_label"] = np.select(
+        conditions,
+        ["calm", "stress"],
+        default="neutral",
+    )
+    enriched["regime_calm"] = (enriched["regime_label"] == "calm").astype(float)
+    enriched["regime_neutral"] = (enriched["regime_label"] == "neutral").astype(float)
+    enriched["regime_stress"] = (enriched["regime_label"] == "stress").astype(float)
+    return enriched
+
+
+def _apply_context_flags(frame: pd.DataFrame) -> pd.DataFrame:
+    enriched = frame.copy()
+    for column in _MACRO_FEATURE_COLUMNS:
+        if column not in enriched.columns:
+            enriched[column] = np.nan
+    for column in _BREADTH_FEATURE_COLUMNS:
+        if column not in enriched.columns:
+            enriched[column] = np.nan
+
+    enriched[_MACRO_FLAG_COLUMN] = enriched[_MACRO_FEATURE_COLUMNS].notna().any(axis=1)
+    enriched[_BREADTH_FLAG_COLUMN] = enriched[_BREADTH_FEATURE_COLUMNS].notna().any(axis=1)
+    enriched[_MACRO_FEATURE_COLUMNS] = enriched[_MACRO_FEATURE_COLUMNS].fillna(0.0)
+    enriched[_BREADTH_FEATURE_COLUMNS] = enriched[_BREADTH_FEATURE_COLUMNS].fillna(0.0)
+    return enriched
+
+
+def _apply_fundamental_features(
+    frame: pd.DataFrame,
+    fundamentals_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    enriched = frame.copy()
+
+    if fundamentals_df is None or fundamentals_df.empty:
+        for column in _FUNDAMENTAL_FEATURE_COLUMNS:
+            enriched[column] = 0.0
+        enriched[_FUNDAMENTAL_FLAG_COLUMN] = False
+        enriched["fundamental_quarter_count"] = 0
+        return enriched
+
+    fundamentals = fundamentals_df.copy()
+    if "filing_date" not in fundamentals.columns:
+        for column in _FUNDAMENTAL_FEATURE_COLUMNS:
+            enriched[column] = 0.0
+        enriched[_FUNDAMENTAL_FLAG_COLUMN] = False
+        enriched["fundamental_quarter_count"] = 0
+        return enriched
+
+    fundamentals["filing_date"] = pd.to_datetime(fundamentals["filing_date"], errors="coerce")
+    available_columns = [column for column in _FUNDAMENTAL_SOURCE_COLUMNS if column in fundamentals.columns]
+    fundamentals = fundamentals.dropna(subset=["filing_date"])[available_columns].sort_values("filing_date")
+    if fundamentals.empty:
+        for column in _FUNDAMENTAL_FEATURE_COLUMNS:
+            enriched[column] = 0.0
+        enriched[_FUNDAMENTAL_FLAG_COLUMN] = False
+        enriched["fundamental_quarter_count"] = 0
+        return enriched
+
+    # filing_date 기준으로만 과거 값을 붙여 누수를 막는다.
+    merged = pd.merge_asof(
+        enriched.sort_values("date"),
+        fundamentals,
+        left_on="date",
+        right_on="filing_date",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+
+    if "equity" not in merged.columns:
+        merged["equity"] = np.nan
+    if "net_income" not in merged.columns:
+        merged["net_income"] = np.nan
+    if "eps" not in merged.columns:
+        merged["eps"] = np.nan
+    if "revenue" not in merged.columns:
+        merged["revenue"] = np.nan
+    if "total_liabilities" not in merged.columns:
+        merged["total_liabilities"] = np.nan
+
+    valid_equity = merged["equity"].where(merged["equity"] > 0)
+    merged["roe"] = merged["net_income"] / valid_equity
+    merged["debt_ratio"] = merged["total_liabilities"] / valid_equity
+
+    filing_dates = fundamentals["filing_date"].to_numpy(dtype="datetime64[ns]")
+    merged_dates = merged["date"].to_numpy(dtype="datetime64[ns]")
+    merged["fundamental_quarter_count"] = np.searchsorted(filing_dates, merged_dates, side="right")
+
+    insufficient_mask = merged["fundamental_quarter_count"] < 8
+    merged.loc[insufficient_mask, _FUNDAMENTAL_FEATURE_COLUMNS] = np.nan
+    merged[_FUNDAMENTAL_FLAG_COLUMN] = merged[_FUNDAMENTAL_FEATURE_COLUMNS].notna().any(axis=1)
+    merged[_FUNDAMENTAL_FEATURE_COLUMNS] = merged[_FUNDAMENTAL_FEATURE_COLUMNS].fillna(0.0)
+    return merged
+
+
 def build_features(
     price_df: pd.DataFrame,
     macro_df: pd.DataFrame | None = None,
     breadth_df: pd.DataFrame | None = None,
+    fundamentals_df: pd.DataFrame | None = None,
     timeframe: str = "1D",
 ) -> pd.DataFrame:
     """
-    지정한 타임프레임 기준으로 Lens의 17개 피처 데이터프레임을 만든다.
+    지정한 타임프레임 기준으로 Lens의 기본 피처 데이터프레임을 만든다.
 
     규칙:
     - Market OHLCV 핵심 결측은 먼저 제거
     - Macro / breadth 값은 병합 후 forward fill
+    - VIX 기준 시장 국면을 계산해 원핫 3열로 확장
     """
     timeframe = normalize_timeframe(timeframe)
     price_frame = resample_price_frame(price_df, timeframe)
     if price_frame.empty:
-        return pd.DataFrame(columns=["ticker", "date", "timeframe", *FEATURE_COLUMNS])
+        return pd.DataFrame(columns=_OUTPUT_COLUMNS)
 
     macro_frame = _resample_context_frame(
         macro_df,
@@ -219,13 +390,19 @@ def build_features(
         fill_columns = [col for col in _CONTEXT_COLUMNS if col in feature_frame.columns]
         if fill_columns:
             feature_frame[fill_columns] = feature_frame[fill_columns].ffill()
+        feature_frame = _apply_context_flags(feature_frame)
 
+        ticker_fundamentals = None
+        if fundamentals_df is not None and not fundamentals_df.empty and ticker_name is not None:
+            ticker_fundamentals = fundamentals_df[fundamentals_df["ticker"] == ticker_name]
+        feature_frame = _apply_fundamental_features(feature_frame, ticker_fundamentals)
+        feature_frame = _apply_regime_columns(feature_frame)
         feature_frame["timeframe"] = timeframe
-        feature_frame = feature_frame.dropna(subset=FEATURE_COLUMNS)
-        built_frames.append(feature_frame[["ticker", "date", "timeframe", *FEATURE_COLUMNS]].copy())
+        feature_frame = feature_frame.dropna(subset=REQUIRED_FEATURE_COLUMNS)
+        built_frames.append(feature_frame[_OUTPUT_COLUMNS].copy())
 
     if not built_frames:
-        return pd.DataFrame(columns=["ticker", "date", "timeframe", *FEATURE_COLUMNS])
+        return pd.DataFrame(columns=_OUTPUT_COLUMNS)
     return pd.concat(built_frames, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
@@ -233,9 +410,16 @@ def build_latest_feature_rows(
     price_df: pd.DataFrame,
     macro_df: pd.DataFrame | None = None,
     breadth_df: pd.DataFrame | None = None,
+    fundamentals_df: pd.DataFrame | None = None,
     timeframe: str = "1D",
 ) -> pd.DataFrame:
-    features = build_features(price_df=price_df, macro_df=macro_df, breadth_df=breadth_df, timeframe=timeframe)
+    features = build_features(
+        price_df=price_df,
+        macro_df=macro_df,
+        breadth_df=breadth_df,
+        fundamentals_df=fundamentals_df,
+        timeframe=timeframe,
+    )
     if features.empty:
         return features
     return features.groupby("ticker", as_index=False).tail(1).reset_index(drop=True)

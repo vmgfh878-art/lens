@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS public.company_fundamentals (
     id                  BIGSERIAL PRIMARY KEY,
     ticker              VARCHAR(20) NOT NULL REFERENCES public.stock_info(ticker),
     date                DATE NOT NULL,
+    filing_date         DATE,
     revenue             DOUBLE PRECISION,
     net_income          DOUBLE PRECISION,
     total_assets        DOUBLE PRECISION,
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS public.indicators (
     ma_5_ratio       DOUBLE PRECISION,
     ma_20_ratio      DOUBLE PRECISION,
     ma_60_ratio      DOUBLE PRECISION,
+    atr_ratio        DOUBLE PRECISION,
     rsi              DOUBLE PRECISION,
     macd_ratio       DOUBLE PRECISION,
     bb_position      DOUBLE PRECISION,
@@ -144,12 +146,39 @@ CREATE TABLE IF NOT EXISTS public.indicators (
     credit_spread_hy DOUBLE PRECISION,
     nh_nl_index      DOUBLE PRECISION,
     ma200_pct        DOUBLE PRECISION,
+    regime_label     VARCHAR(20),
+    regime_calm      DOUBLE PRECISION,
+    regime_neutral   DOUBLE PRECISION,
+    regime_stress    DOUBLE PRECISION,
+    revenue          DOUBLE PRECISION,
+    net_income       DOUBLE PRECISION,
+    equity           DOUBLE PRECISION,
+    eps              DOUBLE PRECISION,
+    roe              DOUBLE PRECISION,
+    debt_ratio       DOUBLE PRECISION,
+    has_macro        BOOLEAN NOT NULL DEFAULT FALSE,
+    has_breadth      BOOLEAN NOT NULL DEFAULT FALSE,
+    has_fundamentals BOOLEAN NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (ticker, timeframe, date)
 );
 CREATE INDEX IF NOT EXISTS idx_indicators_ticker_timeframe_date
     ON public.indicators (ticker, timeframe, date DESC);
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS atr_ratio DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_label VARCHAR(20);
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_calm DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_neutral DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_stress DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS revenue DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS net_income DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS equity DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS eps DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS roe DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS debt_ratio DOUBLE PRECISION;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_macro BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_breadth BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_fundamentals BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS public.predictions (
     id                  BIGSERIAL PRIMARY KEY,
@@ -163,14 +192,96 @@ CREATE TABLE IF NOT EXISTS public.predictions (
     model_ver           VARCHAR(50) NOT NULL,
     signal              VARCHAR(10) NOT NULL CHECK (signal IN ('BUY', 'SELL', 'HOLD')),
     forecast_dates      JSONB NOT NULL DEFAULT '[]'::jsonb,
+    line_series         JSONB NOT NULL DEFAULT '[]'::jsonb,
     upper_band_series   JSONB NOT NULL DEFAULT '[]'::jsonb,
     lower_band_series   JSONB NOT NULL DEFAULT '[]'::jsonb,
     conservative_series JSONB NOT NULL DEFAULT '[]'::jsonb,
+    band_quantile_low   DOUBLE PRECISION,
+    band_quantile_high  DOUBLE PRECISION,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (ticker, model_name, timeframe, horizon, asof_date)
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_ticker_timeframe_asof
     ON public.predictions (ticker, timeframe, asof_date DESC, decision_time DESC);
+ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS line_series JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_low DOUBLE PRECISION;
+ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_high DOUBLE PRECISION;
+
+CREATE TABLE IF NOT EXISTS public.model_runs (
+    run_id              VARCHAR(100) PRIMARY KEY,
+    wandb_run_id        VARCHAR(100),
+    model_name          VARCHAR(50) NOT NULL,
+    timeframe           VARCHAR(4) NOT NULL CHECK (timeframe IN ('1D', '1W', '1M')),
+    horizon             INT NOT NULL CHECK (horizon > 0),
+    feature_version     VARCHAR(50) NOT NULL DEFAULT 'indicators_v1',
+    band_quantile_low   DOUBLE PRECISION,
+    band_quantile_high  DOUBLE PRECISION,
+    alpha               DOUBLE PRECISION,
+    beta                DOUBLE PRECISION,
+    huber_delta         DOUBLE PRECISION,
+    lambda_line         DOUBLE PRECISION,
+    lambda_band         DOUBLE PRECISION,
+    lambda_width        DOUBLE PRECISION,
+    lambda_cross        DOUBLE PRECISION,
+    train_start         DATE,
+    train_end           DATE,
+    val_metrics         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    test_metrics        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config              JSONB NOT NULL DEFAULT '{}'::jsonb,
+    checkpoint_path     TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
+    id                      BIGSERIAL PRIMARY KEY,
+    run_id                  VARCHAR(100) NOT NULL REFERENCES public.model_runs(run_id),
+    ticker                  VARCHAR(20) NOT NULL REFERENCES public.stock_info(ticker),
+    timeframe               VARCHAR(4) NOT NULL CHECK (timeframe IN ('1D', '1W', '1M')),
+    asof_date               DATE NOT NULL,
+    actual_series           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    pinball_loss            DOUBLE PRECISION,
+    coverage                DOUBLE PRECISION,
+    avg_band_width          DOUBLE PRECISION,
+    normalized_band_width   DOUBLE PRECISION,
+    direction_accuracy      DOUBLE PRECISION,
+    mape                    DOUBLE PRECISION,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (run_id, ticker, timeframe, asof_date)
+);
+CREATE INDEX IF NOT EXISTS idx_prediction_evaluations_lookup
+    ON public.prediction_evaluations (ticker, timeframe, asof_date DESC);
+
+CREATE TABLE IF NOT EXISTS public.backtest_results (
+    id              BIGSERIAL PRIMARY KEY,
+    run_id          VARCHAR(100) NOT NULL REFERENCES public.model_runs(run_id),
+    strategy_name   VARCHAR(100) NOT NULL,
+    timeframe       VARCHAR(4) NOT NULL CHECK (timeframe IN ('1D', '1W', '1M')),
+    return_pct      DOUBLE PRECISION,
+    mdd             DOUBLE PRECISION,
+    sharpe          DOUBLE PRECISION,
+    win_rate        DOUBLE PRECISION,
+    profit_factor   DOUBLE PRECISION,
+    num_trades      INT,
+    meta            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (run_id, strategy_name, timeframe)
+);
+CREATE INDEX IF NOT EXISTS idx_backtest_results_lookup
+    ON public.backtest_results (strategy_name, timeframe, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.job_runs (
+    run_id        UUID PRIMARY KEY,
+    job_name      VARCHAR(100) NOT NULL,
+    scope_key     VARCHAR(150) NOT NULL DEFAULT '__all__',
+    status        VARCHAR(20) NOT NULL CHECK (status IN ('running', 'success', 'failed')),
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at   TIMESTAMPTZ,
+    error_text    TEXT,
+    meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_lookup
+    ON public.job_runs (job_name, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.sync_state (
     job_name         VARCHAR(100) NOT NULL,

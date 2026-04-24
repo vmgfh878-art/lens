@@ -1,3 +1,0 @@
-# 매일 한국 시간 오전 7시 30분에 Lens 일일 동기화를 실행하는 예시다.
-# 서버 시간대가 UTC면 시간을 다시 계산해서 넣어야 한다.
-30 7 * * * cd /path/to/lens && /bin/bash ops/run_daily_sync.sh

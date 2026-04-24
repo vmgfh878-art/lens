@@ -1,0 +1,3 @@
+# 매일 장 시작 전 오전 7시 30분에 Lens 수집 파이프라인을 실행하는 예시다.
+# 서버 시간이 UTC라면 한국 시간에 맞춰 다시 계산해서 넣어야 한다.
+30 7 * * * cd /path/to/lens && /bin/bash backend/ops/run_daily_collector.sh

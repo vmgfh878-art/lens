@@ -26,6 +26,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 from backend.app.services.feature_svc import build_features  # noqa: E402
 from backend.db.bootstrap import chunked_upsert, get_client  # noqa: E402
+from backend.collector.utils.network import sanitize_proxy_env  # noqa: E402
 
 TABLE_ORDER = [
     "stock_info",
@@ -674,6 +675,7 @@ def upsert_indicators(
 
 
 def main() -> None:
+    sanitize_proxy_env()
     args = parse_args()
     invalid_tables = sorted(set(args.tables) - TARGET_TABLES)
     if invalid_tables:

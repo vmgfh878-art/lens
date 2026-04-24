@@ -1,77 +1,44 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-import pandas as pd
+import hashlib
 
-from app.db import get_supabase
-from app.services.model_svc import normalize_timeframe
+from fastapi import APIRouter, Query, Request, Response
+
+from app.services.api_service import get_price_response_data, get_stocks
 
 router = APIRouter()
 
 
-def _aggregate_prices(rows: list[dict], timeframe: str) -> list[dict]:
-    normalized_timeframe = normalize_timeframe(timeframe)
-    if normalized_timeframe == "1D" or not rows:
-        return rows
-
-    frame = pd.DataFrame(rows)
-    if frame.empty:
-        return []
-
-    frame["date"] = pd.to_datetime(frame["date"])
-    frame = frame.sort_values("date").set_index("date")
-    rule = "W-FRI" if normalized_timeframe == "1W" else "ME"
-    aggregated = frame.resample(rule).agg(
-        {
-            "open": "first",
-            "high": "max",
-            "low": "min",
-            "close": "last",
-            "volume": "sum",
-        }
-    )
-    aggregated = aggregated.dropna(subset=["open", "high", "low", "close"]).reset_index()
-    aggregated["date"] = aggregated["date"].dt.strftime("%Y-%m-%d")
-    return aggregated.to_dict(orient="records")
+def _build_price_etag(payload: dict) -> str:
+    rows = payload.get("data") or []
+    latest_date = rows[-1]["date"] if rows else "empty"
+    raw = f"{payload['ticker']}|{payload['timeframe']}|{payload.get('start')}|{payload.get('end')}|{latest_date}|{len(rows)}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"W/\"{digest}\""
 
 
-@router.get("/{ticker}")
+@router.get("/{ticker}", deprecated=True)
 def get_prices(
+    request: Request,
+    response: Response,
     ticker: str,
-    start: str = Query(default="2020-01-01", description="Start date in YYYY-MM-DD format."),
-    end: str | None = Query(default=None, description="Optional end date in YYYY-MM-DD format."),
-    timeframe: str = Query(default="1D", description="Price timeframe: 1D, 1W, or 1M."),
+    start: str | None = Query(default=None, description="조회 시작일"),
+    end: str | None = Query(default=None, description="조회 종료일"),
+    timeframe: str = Query(default="1D", description="가격 타임프레임: 1D, 1W, 1M"),
+    limit: int = Query(default=366, ge=1, le=1500, description="반환할 최대 포인트 수"),
 ):
-    try:
-        normalized_timeframe = normalize_timeframe(timeframe)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    client = get_supabase()
-
-    query = (
-        client.table("price_data")
-        .select("date, open, high, low, close, volume")
-        .eq("ticker", ticker.upper())
-        .gte("date", start)
-        .order("date")
-    )
-    if end:
-        query = query.lte("date", end)
-
-    result = query.execute()
-    rows = result.data or []
-    if not rows:
-        raise HTTPException(status_code=404, detail=f"No price data found for ticker '{ticker.upper()}'.")
-
-    return {
-        "ticker": ticker.upper(),
-        "timeframe": normalized_timeframe,
-        "data": _aggregate_prices(rows, normalized_timeframe),
-    }
+    payload = get_price_response_data(ticker, start=start, end=end, timeframe=timeframe, limit=limit)
+    etag = _build_price_etag(payload)
+    headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
+    return payload
 
 
-@router.get("/")
-def get_tickers():
-    client = get_supabase()
-    result = client.table("stock_info").select("ticker, sector, industry, market_cap").order("ticker").execute()
-    return {"tickers": result.data or []}
+@router.get("/", deprecated=True)
+def get_tickers(
+    search: str | None = Query(default=None, description="티커 검색어"),
+    limit: int = Query(default=50, ge=1, le=500, description="반환할 최대 종목 수"),
+):
+    return {"tickers": get_stocks(search=search, limit=limit)}

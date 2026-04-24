@@ -1,18 +1,21 @@
 """
-Lens 배치 예측용 모델 메타 헬퍼.
+Lens 배치 예측용 모델 메타 서비스.
 
-v1 API는 이미 저장된 배치 예측만 조회하므로,
-이 파일은 모델명 / 타임프레임 / 기본 horizon 검증에 집중한다.
+가격 조회용 타임프레임과 AI 예측 지원 타임프레임을 구분한다.
+- 가격/지표 표시: 1D, 1W, 1M
+- AI 예측: 1D, 1W
 """
 
 from __future__ import annotations
 
+from app.core.exceptions import TimeframeDisabledError
+
 SUPPORTED_MODELS = ("patchtst", "cnn_lstm", "tide")
-SUPPORTED_TIMEFRAMES = ("1D", "1W", "1M")
+SUPPORTED_DISPLAY_TIMEFRAMES = ("1D", "1W", "1M")
+SUPPORTED_AI_TIMEFRAMES = ("1D", "1W")
 DEFAULT_HORIZONS = {
-    "1D": 10,
-    "1W": 12,
-    "1M": 6,
+    "1D": 5,
+    "1W": 4,
 }
 
 
@@ -23,17 +26,31 @@ def normalize_model_name(model_name: str) -> str:
     return normalized
 
 
-def normalize_timeframe(timeframe: str) -> str:
+def normalize_display_timeframe(timeframe: str) -> str:
     normalized = timeframe.strip().upper()
-    if normalized not in SUPPORTED_TIMEFRAMES:
+    if normalized not in SUPPORTED_DISPLAY_TIMEFRAMES:
         raise ValueError(
-            f"Unsupported timeframe '{timeframe}'. Expected one of: {', '.join(SUPPORTED_TIMEFRAMES)}"
+            f"Unsupported timeframe '{timeframe}'. Expected one of: {', '.join(SUPPORTED_DISPLAY_TIMEFRAMES)}"
+        )
+    return normalized
+
+
+def normalize_prediction_timeframe(timeframe: str) -> str:
+    normalized = normalize_display_timeframe(timeframe)
+    if normalized not in SUPPORTED_AI_TIMEFRAMES:
+        raise TimeframeDisabledError(
+            "월봉 AI 예측은 Phase 1에서 비활성화돼 있습니다.",
+            details={
+                "timeframe": normalized,
+                "disabled_reason": "display_only",
+                "supported_prediction_timeframes": list(SUPPORTED_AI_TIMEFRAMES),
+            },
         )
     return normalized
 
 
 def resolve_horizon(timeframe: str, horizon: int | None = None) -> int:
-    normalized_timeframe = normalize_timeframe(timeframe)
+    normalized_timeframe = normalize_prediction_timeframe(timeframe)
     if horizon is None:
         return DEFAULT_HORIZONS[normalized_timeframe]
 

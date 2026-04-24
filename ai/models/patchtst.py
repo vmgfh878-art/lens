@@ -1,16 +1,14 @@
-"""
-PatchTST - Transformer 기반 시계열 예측 모델
-논문: "A Time Series is Worth 64 Words" (2023)
-
-입력: (batch, seq_len, n_features) = (B, 60, 17)
-출력: (batch, n_horizons) = (B, 4)  # 1,3,5,7일 상승확률
-"""
+from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
+from ai.models.common import ForecastOutput, MultiHeadForecastModel
 
-class PatchTST(nn.Module):
+
+class PatchTST(MultiHeadForecastModel):
+    """간결한 PatchTST 스타일 backbone 위에 line/band head를 얹은 모델."""
+
     def __init__(
         self,
         n_features: int = 17,
@@ -20,14 +18,34 @@ class PatchTST(nn.Module):
         d_model: int = 128,
         n_heads: int = 4,
         n_layers: int = 3,
-        n_outputs: int = 4,
+        horizon: int = 5,
         dropout: float = 0.1,
-    ):
-        super().__init__()
-        # TODO: PatchTST 구현
-        self.placeholder = nn.Linear(n_features, n_outputs)
+    ) -> None:
+        super().__init__(hidden_dim=d_model, horizon=horizon)
+        self.seq_len = seq_len
+        self.patch_len = patch_len
+        self.stride = stride
+        self.patch_proj = nn.Linear(n_features * patch_len, d_model)
+        self.position_embedding = nn.Parameter(torch.randn(1, self._num_patches(seq_len), d_model) * 0.02)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=d_model * 4,
+            dropout=dropout,
+            batch_first=True,
+            activation="gelu",
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, seq_len, n_features)
-        # TODO: 실제 PatchTST forward 구현
-        return torch.sigmoid(self.placeholder(x.mean(dim=1)))
+    def _num_patches(self, seq_len: int) -> int:
+        return ((seq_len - self.patch_len) // self.stride) + 1
+
+    def forward(self, x: torch.Tensor) -> ForecastOutput:
+        # 최근 시계열을 patch 단위로 나눈 뒤 Transformer backbone에 통과시킨다.
+        patches = x.unfold(dimension=1, size=self.patch_len, step=self.stride)
+        patches = patches.contiguous().view(x.size(0), patches.size(1), -1)
+        encoded = self.patch_proj(patches) + self.position_embedding[:, : patches.size(1)]
+        hidden = self.encoder(encoded).mean(dim=1)
+        hidden = self.norm(hidden)
+        return self.build_output(hidden)

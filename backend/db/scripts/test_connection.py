@@ -15,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 load_dotenv(ROOT_DIR / ".env")
 
 from backend.app.db import get_supabase  # noqa: E402
+from backend.collector.utils.network import sanitize_proxy_env  # noqa: E402
 
 TABLE_SPECS = [
     ("stock_info", "ticker"),
@@ -22,7 +23,14 @@ TABLE_SPECS = [
     ("macroeconomic_indicators", "date"),
     ("market_breadth", "date"),
     ("indicators", "ticker"),
+    ("company_fundamentals", "ticker"),
+    ("sector_returns", "date"),
+    ("sync_state", "job_name"),
+    ("model_runs", "run_id"),
+    ("prediction_evaluations", "run_id"),
+    ("backtest_results", "run_id"),
     ("predictions", "ticker"),
+    ("job_runs", "run_id"),
 ]
 
 
@@ -32,6 +40,7 @@ def test_supabase_rest() -> None:
     print("=" * 60)
 
     try:
+        sanitize_proxy_env()
         client = get_supabase()
     except Exception as exc:
         print(f"[Error] Supabase REST 연결 실패: {exc}")

@@ -1,4 +1,4 @@
-"""외부 parquet 스냅샷을 Lens 스키마로 적재한다."""
+﻿"""?몃? parquet ?ㅻ깄?룹쓣 Lens ?ㅽ궎留덈줈 ?곸옱?쒕떎."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 load_dotenv(ROOT_DIR / ".env")
 
 from backend.db.bootstrap import run_bootstrap  # noqa: E402
-from collector.pipelines.bootstrap_snapshot import step_indicators  # noqa: E402
+from backend.collector.pipelines.bootstrap_snapshot import step_indicators  # noqa: E402
 
 DEFAULT_SOURCE_DIR = Path(r"C:\Users\user\projects\sisc-web\AI\data\kaggle_data")
 REQUIRED_FILES = [
@@ -32,32 +32,32 @@ OPTIONAL_FILES = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="외부 Kaggle parquet 스냅샷을 Lens DB로 적재")
+    parser = argparse.ArgumentParser(description="?몃? Kaggle parquet ?ㅻ깄?룹쓣 Lens DB濡??곸옱")
     parser.add_argument(
         "--source-dir",
         default=str(DEFAULT_SOURCE_DIR),
-        help="원본 parquet 디렉터리 경로",
+        help="?먮낯 parquet ?붾젆?곕━ 寃쎈줈",
     )
     parser.add_argument(
         "--tickers",
         nargs="*",
-        help="특정 티커만 적재할 때 사용",
+        help="?뱀젙 ?곗빱留??곸옱?????ъ슜",
     )
     parser.add_argument(
         "--timeframes",
         nargs="*",
         default=["1D", "1W", "1M"],
-        help="indicators 생성 타임프레임",
+        help="indicators ?앹꽦 ??꾪봽?덉엫",
     )
     parser.add_argument(
         "--summary-only",
         action="store_true",
-        help="파일 상태만 점검하고 적재는 하지 않음",
+        help="?뚯씪 ?곹깭留??먭??섍퀬 ?곸옱???섏? ?딆쓬",
     )
     parser.add_argument(
         "--skip-indicators",
         action="store_true",
-        help="raw 적재만 하고 indicators 생성은 건너뜀",
+        help="raw ?곸옱留??섍퀬 indicators ?앹꽦? 嫄대꼫?",
     )
     return parser.parse_args()
 
@@ -98,7 +98,7 @@ def validate_source_dir(source_dir: Path) -> tuple[list[dict], list[str]]:
 
 def print_summary(summaries: list[dict], source_dir: Path) -> None:
     print("=" * 60)
-    print(" 외부 parquet 스냅샷 점검")
+    print(" ?몃? parquet ?ㅻ깄???먭?")
     print("=" * 60)
     print(f"source_dir : {source_dir}")
 
@@ -124,10 +124,10 @@ def print_summary(summaries: list[dict], source_dir: Path) -> None:
 
     if price_max and macro_max and price_max < macro_max:
         gap_days = (macro_max - price_max).days
-        print(f"\n[Warn] price_data가 macro보다 {gap_days}일 오래되었습니다.")
+        print(f"\n[Warn] price_data媛 macro蹂대떎 {gap_days}???ㅻ옒?섏뿀?듬땲??")
     if price_max and breadth_max and price_max < breadth_max:
         gap_days = (breadth_max - price_max).days
-        print(f"[Warn] price_data가 market_breadth보다 {gap_days}일 오래되었습니다.")
+        print(f"[Warn] price_data媛 market_breadth蹂대떎 {gap_days}???ㅻ옒?섏뿀?듬땲??")
 
 
 def main() -> None:
@@ -135,19 +135,19 @@ def main() -> None:
     source_dir = Path(args.source_dir)
 
     if not source_dir.exists():
-        raise SystemExit(f"[Error] source_dir가 존재하지 않습니다: {source_dir}")
+        raise SystemExit(f"[Error] source_dir媛 議댁옱?섏? ?딆뒿?덈떎: {source_dir}")
 
     summaries, missing = validate_source_dir(source_dir)
     print_summary(summaries, source_dir)
 
     if missing:
-        raise SystemExit(f"[Error] 필수 parquet 파일이 없습니다: {', '.join(missing)}")
+        raise SystemExit(f"[Error] ?꾩닔 parquet ?뚯씪???놁뒿?덈떎: {', '.join(missing)}")
 
     if args.summary_only:
         return
 
     print("\n" + "=" * 60)
-    print(" Lens raw 데이터 적재")
+    print(" Lens raw ?곗씠???곸옱")
     print("=" * 60)
     run_bootstrap(source_dir, args.tickers)
 
@@ -155,10 +155,11 @@ def main() -> None:
         return
 
     print("\n" + "=" * 60)
-    print(" Lens indicators 생성")
+    print(" Lens indicators ?앹꽦")
     print("=" * 60)
     step_indicators(source_dir, args.timeframes, args.tickers)
 
 
 if __name__ == "__main__":
     main()
+

@@ -1,36 +1,38 @@
-"""
-TiDE - Time-series Dense Encoder (MLP 기반)
-논문: "Long-term Forecasting with TiDE" (2023)
-
-입력: (batch, seq_len, n_features) = (B, 60, 17)
-출력: (batch, n_horizons) = (B, 4)
-"""
+from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
+from ai.models.common import ForecastOutput, MultiHeadForecastModel
 
-class TiDE(nn.Module):
+
+class TiDE(MultiHeadForecastModel):
+    """MLP 기반 TiDE 스타일 backbone 위에 line/band head를 올린다."""
+
     def __init__(
         self,
         n_features: int = 17,
         seq_len: int = 60,
         hidden_dim: int = 256,
         n_layers: int = 4,
-        n_outputs: int = 4,
+        horizon: int = 5,
         dropout: float = 0.2,
-    ):
-        super().__init__()
+    ) -> None:
+        super().__init__(hidden_dim=hidden_dim, horizon=horizon)
         input_dim = n_features * seq_len
-        layers = []
+        layers: list[nn.Module] = []
         in_dim = input_dim
         for _ in range(n_layers):
-            layers += [nn.Linear(in_dim, hidden_dim), nn.ReLU(), nn.Dropout(dropout)]
+            layers.extend(
+                [
+                    nn.Linear(in_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             in_dim = hidden_dim
-        layers.append(nn.Linear(hidden_dim, n_outputs))
-        self.net = nn.Sequential(*layers)
+        self.backbone = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, seq_len, n_features)
-        x = x.flatten(start_dim=1)      # (B, seq_len * n_features)
-        return torch.sigmoid(self.net(x))
+    def forward(self, x: torch.Tensor) -> ForecastOutput:
+        hidden = self.backbone(x.flatten(start_dim=1))
+        return self.build_output(hidden)

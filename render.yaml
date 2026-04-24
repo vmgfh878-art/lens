@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    healthCheckPath: /api/v1/health/live
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
@@ -15,14 +15,16 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
 
   - type: cron
     name: lens-daily-market-sync
     runtime: python
     plan: starter
     schedule: "30 22 * * 1-5"
-    buildCommand: pip install -r backend/requirements.txt && pip install -r collector/requirements.txt
-    startCommand: python collector/pipelines/daily_market_sync.py --indicator-lookback-days 60
+    buildCommand: pip install -r backend/requirements.txt && pip install -r backend/collector/requirements.txt
+    startCommand: python -m backend.collector.pipelines.daily_market_sync --indicator-lookback-days 60
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION

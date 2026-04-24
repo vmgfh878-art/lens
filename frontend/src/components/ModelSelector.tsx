@@ -1,5 +1,7 @@
 "use client";
 
+import { ChangeEvent } from "react";
+
 interface ModelSelectorProps {
   ticker: string;
   onTickerChange: (ticker: string) => void;
@@ -17,16 +19,14 @@ export default function ModelSelector({
 }: ModelSelectorProps) {
   return (
     <div className="flex gap-4 items-center p-4 bg-slate-800 rounded-lg">
-      {/* 종목 검색 */}
       <input
         type="text"
         value={ticker}
-        onChange={(e) => onTickerChange(e.target.value.toUpperCase())}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onTickerChange(e.target.value.toUpperCase())}
         placeholder="티커 입력 (예: AAPL)"
         className="px-3 py-2 rounded bg-slate-700 text-white placeholder-slate-400 w-40"
       />
 
-      {/* 모델 선택 */}
       <div className="flex gap-2">
         {MODELS.map((m) => (
           <button
