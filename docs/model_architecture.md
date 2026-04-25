@@ -388,18 +388,20 @@ class TiDE(MultiHeadForecastModel):
 
 ---
 
-## 7. 결정 필요 항목 요약 (사용자 작성)
+## 7. 결정 필요 항목 요약 (확정 — 2026-04-25)
 
-| 코드 | 항목 | 옵션 | 사용자 결정 |
+| 코드 | 항목 | 확정 옵션 | 비고 |
 |---|---|---|---|
-| **A** | 출력 헤드 구조 | A-1 / A-2 / A-3 | _ |
-| **B** | PatchTST 보강 | B-1 / B-2 / B-3 | _ |
-| **C** | CNN-LSTM 보강 | C-1 / C-2 / C-3 | _ |
-| **D** | TiDE 보강 | D-1 / D-2 | _ |
-| **E1** | Init 통일 | 적용 / 미적용 | _ |
-| **E2** | Dropout 보강 | 적용 / 미적용 | _ |
+| **A** | 출력 헤드 구조 | **A-3** | 두 방식 모두 구현 + ablation |
+| **B** | PatchTST 보강 | **B-2** | RevIN + Channel Independence (논문 fidelity 80%) |
+| **C** | CNN-LSTM 보강 | **C-2** | LayerNorm + residual + grad clip + attention pooling |
+| **D** | TiDE 보강 | **D-1** | 최소 골격 (논문 fidelity 70%). 미래 covariate 처리 생략 (Lens 데이터에 미래 covariate 없음) |
+| **E1** | Init 통일 | **적용** | BERT 식 trunc_normal(std=0.02) 전 모델 |
+| **E2** | Dropout 위치 보강 | **적용** | 모델별 표준 위치 보강. 비율은 sweep |
 
-결정 후 CP3.5 지시서를 이 결정에 맞춰 작성하고, P1-1·P1-2·P2-3 fix와 함께 한 묶음으로 처리한다.
+**시나리오 매핑**: 본 결정은 §8 "최대 fidelity" 시나리오에 해당. 예상 비용 13~18시간.
+
+다음 단계: 위 결정 기반으로 CP3.5 지시서 작성. P1-1·P1-2·P2-3 fix와 함께 한 묶음으로 처리.
 
 ---
 
@@ -418,3 +420,4 @@ class TiDE(MultiHeadForecastModel):
 ## 9. CHANGELOG
 
 - **2026-04-25 (초판)**: CP3 종료 후 리뷰어 라운드에서 P1-1, P1-2, P2-1, P2-2, P2-3 5건 도출. 사용자가 모델 아키텍처 갭 정리·옵션 비교 요청. 본 문서 작성. 결정 필요 항목 6개 (A, B, C, D, E1, E2) 표시.
+- **2026-04-25 (결정 확정)**: 사용자 직접 선택 — A-3 / B-2 / C-2 / D-1 / E-1 적용 / E-2 적용. "비용보다 fidelity 우선" 원칙 명시. TiDE D-1 채택은 미래 covariate 처리가 Lens 데이터에 불필요하다는 합의에 따른 의도된 갭. CP3.5 지시서 작성 단계 진입.

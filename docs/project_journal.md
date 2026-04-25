@@ -354,4 +354,74 @@ N5 (final dropna)    753
     - **E**: Init·Dropout 보강 적용 여부.
   - 산출물: 신규 `docs/model_architecture.md` (옵션·장단점·비용·결정표).
   - **메타 룰 추가 (D21)**: CP 지시서·검수 양식에 "이 모듈에 명시된 핵심 구성요소가 코드에 실제 존재하는가? 누락 항목 명시" 섹션 필수 포함. RevIN 누락 같은 fidelity gap 재발 방지.
-  - **다음 단계**: 사용자가 A~E 결정 → CP3.5 지시서 작성 (모델 구조 보강 + P1·P2 fix를 한 묶음).
+- **2026-04-25**: CP3.5 결정 확정 (사용자 직접 선택, "비용보다 fidelity 우선" 방침).
+  - **A = A-3**: 출력 헤드 두 방식 (직접 q10/q90 + center/log_half_width 파라미터화) **둘 다 구현, ablation 비교**.
+  - **B = B-2**: PatchTST 풀 구현 — **RevIN + Channel Independence** 둘 다 적용 (논문 fidelity 80%).
+  - **C = C-2**: CNN-LSTM **안정화 (LayerNorm + residual + grad clip) + attention pooling** 적용.
+  - **D = D-1**: TiDE 최소 골격 (논문 fidelity 70%) — encoder/decoder + ResidualBlock + temporal decoder + lookback skip. **TD-2 (풀구현, 미래 covariate 처리 포함) 채택 안 함**: 사용자 명시 합의 — Lens 데이터에 미래 covariate가 사실상 없음 (시점 t에 t+h의 거시·재무·breadth는 미지). 풀 구현 추가 가치 없음.
+  - **E1 = 적용**: BERT 식 truncated normal init (std=0.02) 전 모델 통일. 사유: init은 sweep 대상 아님 → 고정으로 통일해야 모델 비교 노이즈 제거. 비용 0 (apply 한 줄).
+  - **E2 = 적용**: Dropout 위치 표준 보강 (PatchTST 3곳, CNN-LSTM 2곳, TiDE residual block 통합). 사유: 위치는 sweep 대상 아님 (조합 폭발), 비율만 sweep. 위치를 표준화해야 sweep 결과가 재현 가능.
+  - **결정 D22 메타**: 다음 CP들에서 비용보다 fidelity 우선 원칙 명시. 사용자가 시간 투자해서 진도 벌었으니 "제대로 하는" 방향으로 가는 것이 합의.
+  - **다음 단계**: CP3.5 지시서 작성 (P1-1·P1-2·P2-3 fix + 모델 구조 보강 통합 묶음).
+- **2026-04-25**: CP3.5 지시서 발주 (`docs/cp3.5_instruction.md`).
+  - 범위: P1·P2 fix 3건 + A-3·B-2·C-2·D-1·E-1·E-2 결정 6건 한 묶음.
+  - 예상 시간: 11~16시간 (CPU 위주, 풀 학습 미실행).
+  - 권한 번들 사전 승인 + 종료 보고 12섹션 (모델별 핵심 구성요소 체크리스트 필수).
+  - 신규 파일: `ai/models/revin.py`, `ai/models/blocks.py`, `ai/postprocess.py`.
+  - 수정 파일: `ai/models/{patchtst,cnn_lstm,tide,common}.py`, `ai/loss.py`, `ai/train.py`, `ai/inference.py`.
+  - 다음 단계: CP3.5 보고 통과 → CP4 (ticker embedding) 지시서.
+- **2026-04-25**: CP3.5 완료 (`docs/cp3.5_report.md`).
+  - **출력 정합성 fix 3건 모두 코드 통과**.
+    - `apply_band_postprocess` 단일 함수 (line 보존, band sort) — 14줄.
+    - `WidthPenaltyLoss` `F.relu` 적용 — 음수 폭 보상 차단.
+    - `ForecastCompositeLoss`에 `band_mode` 분기 — `param` 모드일 때 cross loss 0 처리.
+  - **PatchTST B-2**: RevIN + Channel Independence 둘 다 `forward` 경로에 반영. CI 분기에서 [B*C, L] reshape → patch_proj → encoder → 채널별 출력 → channel-wise 평균.
+  - **CNN-LSTM C-2**: Conv 2층 + LayerNorm + 1x1 residual + LSTM 2층 + LSTM LayerNorm + AttentionPooling1D 정착.
+  - **TiDE D-1**: feature_proj → enc(ResidualBlock × 4) → dec(ResidualBlock × 2) → temporal_decoder → lookback_skip(baseline_idx=0) 정착. 미래 covariate 의도적 생략.
+  - **E-1**: 전 모델 `apply(init_weights)` 호출. trunc_normal std=0.02.
+  - **E-2**: dropout 위치 표준화 적용.
+  - **테스트 25 → 41 (16건 신규)**, 전부 green.
+  - **검수에서 발견한 후속 검증 항목 (블로킹 아님, CP4·sweep 단계에서 ablation으로 확인)**:
+    - **F-1 (RevIN denormalize 미사용)**: `forward`에서 `revin(norm)`만 호출, 출력 시 `denorm` 호출 없음. 사용자 보고서 메모: "출력 타깃이 수익률이라 forward에서는 normalize 중심". 의미: RevIN의 "reversible" 효과는 **input distribution stabilization**으로만 사용, output denorm은 안 함. 표준 PatchTST 사용법과는 다른 적용 방식. CP4 sweep에서 (a) denorm 추가 vs (b) 현재 방식 비교 ablation 권고.
+    - **F-2 (Channel Independence 출력 channel-wise 평균)**: `[B*C, H]` 채널별 예측을 `view(B, C, H).mean(dim=1)`로 평균. 표준 PatchTST는 채널별로 그 채널 자신의 미래를 예측하는데, Lens는 단일 target(log_return at h)을 모든 채널이 예측 시도 → 평균. 합리적 ensemble 적용이지만 비표준. 대안: target 채널 (log_return idx=0) 하나만 사용, 또는 attention 기반 channel weighting. CP4 sweep에서 비교 가능.
+    - **F-3 (init std 측정 허용 범위 15-25%)**: 보고서에 "15% 이상, 25% 이하 범위 통과". trunc_normal_ 표준은 std≈0.02에 1~2% 편차가 정상. Linear weight tensor가 작아서 발생한 sample noise일 가능성 — 검증할 가치 있지만 학습엔 무관.
+  - **결정 D23**: F-1·F-2·F-3은 CP4 종료 후 sweep(A-1) 직전에 ablation 1회 권고. CP4 자체는 ticker embedding에 집중.
+  - **CP4 준비 상태**: ticker embedding 인터페이스 준비 안 됨(`N`). CP4 지시서에서 처리.
+  - **부수 작업 (보고서 12섹션)**: `backend/collector/jobs/compute_indicators.py` 시작일 규칙 정합성 복구. partial state에서 불필요한 전체 백필 방지.
+  - **다음 단계**: CP4 (ticker embedding) 지시서 발주 가능 상태.
+- **2026-04-25 — 모델별 논문 fidelity 의도적 갭 정리**:
+  본 프로젝트가 어느 부분에서 논문 표준과 다르게 가는지·왜 그런지 명시. 발표·논문화 단계에서 "왜 이 선택?" 질문에 대비.
+
+  ### PatchTST (목표 fidelity 80%)
+  - **포함**: RevIN, Channel Independence, Patching, Transformer encoder, learned positional embedding, flatten head, line+band 분리 head.
+  - **생략**: 논문은 단일 forecast head. Lens는 line head + band head 분리 (제품 철학상 보수적 점예측 + quantile 밴드 별도 학습).
+  - **이유**: 제품 요구가 점 예측 정확도가 아닌 "보수적 진입선 + 밴드"라서 head 구조가 다른 게 맞음. 이 갭은 의도된 차이이지 부족함이 아님.
+
+  ### CNN-LSTM (논문 표준 자체가 자유로운 패턴)
+  - **포함**: Conv1d 2층 + LSTM 2층 + LayerNorm + residual + attention pooling + dropout 표준 위치 + line/band head.
+  - **생략**: 단일 표준 논문이 없으므로 "갭"이라는 개념이 약함.
+  - **이유**: 비교군 (baseline) 역할이라 표준 안정화 장치만 갖추면 충분.
+
+  ### TiDE (목표 fidelity 70% — D-1 선택)
+  - **포함**: Feature projection, Dense Encoder (ResNet-style ResidualBlock), Dense Decoder, Temporal Decoder, Lookback skip.
+  - **생략 (의도)**:
+    1. **미래 covariate 처리**: 논문은 미래 시점의 known covariate (예: 캘린더 변수, 알려진 이벤트)를 디코더에 추가 입력. Lens는 t+h 시점의 거시·재무·breadth가 모두 미지 → 미래 covariate가 사실상 없음. 이 부분 구현해도 입력이 비어 있어서 효과 없음.
+    2. **Dropout schedule (점진적 감소)**: 논문에서 학습 단계별 dropout rate 변경 옵션 있음. Lens는 단일 rate로 단순화 (sweep 비용 절약).
+    3. **Layer count tuning**: 논문은 데이터셋별 enc/dec layer 수 grid search. Lens는 enc=4, dec=2로 고정 후 sweep에서 1~2 step만 시도.
+  - **이유**: TiDE의 핵심은 "MLP에 residual + encoder/decoder 분리". 미래 covariate 처리는 도메인 의존이고 우리 케이스엔 불필요. 골격만 갖추면 이름값 충분.
+
+  ### 출력 헤드 (A-3 결정)
+  - **포함**: 두 방식 다 구현 → ablation으로 비교.
+    - 방식 1 (현재): 직접 q10/q90 출력 + 정렬·relu 후처리.
+    - 방식 2 (신규): center + log_half_width 파라미터화 → 구조적 crossing 방지.
+  - **이유**: 어느 쪽이 우월한지 데이터로 판단할 수 있게. 논문화 시 ablation 기여점.
+
+  ### 후처리 정합성 (P1-1, P1-2 fix)
+  - **단일 함수 `apply_band_postprocess`**로 val·test·inference 통일.
+  - **line head는 sort 대상에서 제외** (line ≠ q50, β=2 비대칭으로 학습된 별도 head).
+  - **이유**: 모델 선택 신호와 calibration 보고 신뢰성 확보. 학습 grad는 raw에 유지 (sort 통과하면 grad 끊김).
+
+  ### Loss (P2-3 fix + 출력 파라미터화 채택 시 단순화)
+  - 출력 방식 2 (center + log_half_width) 채택 시 cross penalty 불필요 → 손실 항 4개 → 3개로 단순화.
+  - 방식 1 유지 시 width loss는 `mean(F.relu(upper - lower))` 로 음수 방지.
+  - A-3 (둘 다 구현)이므로 두 loss 구성 모두 코드에 포함.

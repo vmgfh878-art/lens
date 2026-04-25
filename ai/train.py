@@ -27,6 +27,7 @@ from ai.models.cnn_lstm import CNNLSTM
 from ai.models.patchtst import PatchTST
 from ai.models.tide import TiDE
 from ai.preprocessing import DatasetPlan, SequenceDatasetBundle, build_dataset_plan, default_horizon, fetch_feature_index_frame, prepare_dataset_splits
+from ai.postprocess import apply_band_postprocess
 from ai.storage import save_model_run
 from backend.app.services.feature_svc import FEATURE_COLUMNS
 
@@ -64,6 +65,7 @@ class TrainConfig:
     lambda_width: float
     lambda_cross: float
     dropout: float
+    band_mode: str
     tickers: list[str] | None
     limit_tickers: int | None
     seed: int
@@ -92,6 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-width", type=float, default=0.1)
     parser.add_argument("--lambda-cross", type=float, default=1.0)
     parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--band-mode", choices=["direct", "param"], default="direct")
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--limit-tickers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
@@ -110,6 +113,7 @@ def build_model(config: TrainConfig):
         "seq_len": config.seq_len,
         "horizon": config.horizon,
         "dropout": config.dropout,
+        "band_mode": config.band_mode,
     }
     return model_cls(**common_kwargs)
 
@@ -210,9 +214,11 @@ def evaluate_bundle(model, bundle: SequenceDatasetBundle, device: torch.device) 
         features = bundle.features.to(device, non_blocking=True)
         with autocast_context(device):
             prediction = model(features)
-        line_pred = prediction.line.detach().cpu()
-        lower = prediction.lower_band.detach().cpu()
-        upper = prediction.upper_band.detach().cpu()
+        line_pred, lower, upper = apply_band_postprocess(
+            prediction.line.detach().cpu(),
+            prediction.lower_band.detach().cpu(),
+            prediction.upper_band.detach().cpu(),
+        )
         target = bundle.band_targets.cpu()
 
         coverage = ((target >= lower) & (target <= upper)).float().mean().item()
@@ -294,6 +300,7 @@ def train(config: TrainConfig, *, save_run: bool) -> dict[str, Any]:
         lambda_band=config.lambda_band,
         lambda_width=config.lambda_width,
         lambda_cross=config.lambda_cross,
+        band_mode=config.band_mode,
     )
 
     wandb_run = maybe_init_wandb(config, run_id)
@@ -375,6 +382,7 @@ def train(config: TrainConfig, *, save_run: bool) -> dict[str, Any]:
                 "lambda_band": config.lambda_band,
                 "lambda_width": config.lambda_width,
                 "lambda_cross": config.lambda_cross,
+                "band_mode": config.band_mode,
                 "train_start": metadata["asof_date"].min(),
                 "train_end": metadata["asof_date"].max(),
                 "val_metrics": best_summary,
@@ -449,7 +457,36 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
         seq_len=config.seq_len,
         horizon=config.horizon,
     )
-    return summarize_plan_only(plan)
+    model = build_model(config)
+    criterion = ForecastCompositeLoss(
+        q_low=config.q_low,
+        q_high=config.q_high,
+        alpha=config.alpha,
+        beta=config.beta,
+        delta=config.delta,
+        lambda_line=config.lambda_line,
+        lambda_band=config.lambda_band,
+        lambda_width=config.lambda_width,
+        lambda_cross=config.lambda_cross,
+        band_mode=config.band_mode,
+    )
+    sample_input = torch.randn(4, config.seq_len, len(FEATURE_COLUMNS))
+    sample_line_target = torch.randn(4, config.horizon)
+    sample_band_target = torch.randn(4, config.horizon)
+    with torch.no_grad():
+        output = model(sample_input)
+        loss = criterion(output, sample_line_target, sample_band_target)
+        line_pp, lower_pp, upper_pp = apply_band_postprocess(output.line, output.lower_band, output.upper_band)
+    summary = summarize_plan_only(plan)
+    summary["forward_smoke"] = {
+        "line_shape": list(output.line.shape),
+        "lower_shape": list(output.lower_band.shape),
+        "upper_shape": list(output.upper_band.shape),
+        "postprocess_lower_le_upper": bool(torch.all(lower_pp <= upper_pp).item()),
+        "loss_total": float(loss.total.detach().cpu()),
+        "line_preserved": bool(torch.equal(line_pp, output.line)),
+    }
+    return summary
 
 
 if __name__ == "__main__":
@@ -473,6 +510,7 @@ if __name__ == "__main__":
         lambda_width=args.lambda_width,
         lambda_cross=args.lambda_cross,
         dropout=args.dropout,
+        band_mode=args.band_mode,
         tickers=args.tickers,
         limit_tickers=args.limit_tickers,
         seed=args.seed,

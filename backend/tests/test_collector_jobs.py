@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -155,6 +155,75 @@ class CollectorJobTestCase(unittest.TestCase):
         for kwargs in fundamentals_calls:
             filters = kwargs.get("filters") or []
             self.assertFalse(any(filter_item[0] == "gte" and filter_item[1] == "date" for filter_item in filters))
+
+    def test_compute_indicators_does_not_full_backfill_all_tickers_when_partial_state_missing(self):
+        def fake_fetch_frame(table, **kwargs):
+            filters = kwargs.get("filters") or []
+            if table == "price_data":
+                tickers = next((item[2] for item in filters if item[0] == "in" and item[1] == "ticker"), [])
+                target_tickers = tickers or ["AAPL"]
+                row_count = len(target_tickers)
+                return pd.DataFrame(
+                    {
+                        "ticker": target_tickers,
+                        "date": ["2026-04-24"] * row_count,
+                        "open": [100.0] * row_count,
+                        "high": [101.0] * row_count,
+                        "low": [99.0] * row_count,
+                        "close": [100.0] * row_count,
+                        "adjusted_close": [100.0] * row_count,
+                        "volume": [1000] * row_count,
+                        "amount": [100000.0] * row_count,
+                        "per": [10.0] * row_count,
+                        "pbr": [2.0] * row_count,
+                    }
+                )
+            if table == "company_fundamentals":
+                return pd.DataFrame(
+                    {
+                        "ticker": ["AAPL"],
+                        "date": ["2025-12-31"],
+                        "filing_date": ["2026-01-31"],
+                        "revenue": [100.0],
+                        "net_income": [10.0],
+                        "total_liabilities": [40.0],
+                        "equity": [50.0],
+                        "eps": [1.0],
+                    }
+                )
+            return pd.DataFrame()
+
+        state_map = {"AAPL": {"last_cursor_date": "2026-04-20"}}
+        build_features_mock = Mock(return_value=pd.DataFrame())
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame) as fetch_mock, patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            build_features_mock,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value=state_map,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            run_compute_indicators(lookback_days=14, tickers=["AAPL", "MSFT"])
+
+        price_calls = [
+            call.kwargs
+            for call in fetch_mock.call_args_list
+            if call.args and call.args[0] == "price_data"
+        ]
+
+        self.assertTrue(price_calls)
+        full_group_calls = [
+            kwargs
+            for kwargs in price_calls
+            if ("gte", "date", "2015-01-01") in (kwargs.get("filters") or [])
+            and any(
+                filter_item[0] == "in" and filter_item[1] == "ticker" and filter_item[2] == ["AAPL", "MSFT"]
+                for filter_item in (kwargs.get("filters") or [])
+            )
+        ]
+        self.assertEqual(full_group_calls, [])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ from ai.loss import PinballLoss
 from ai.models.cnn_lstm import CNNLSTM
 from ai.models.patchtst import PatchTST
 from ai.models.tide import TiDE
+from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import SequenceDatasetBundle, apply_feature_stats, normalize_ai_timeframe, prepare_dataset_splits
 from ai.storage import get_model_run, save_prediction_evaluations, save_predictions, utc_now_iso
 from backend.app.services.feature_svc import FEATURE_COLUMNS
@@ -65,6 +66,7 @@ def load_checkpoint(checkpoint_path: str | Path):
         seq_len=config["seq_len"],
         horizon=config["horizon"],
         dropout=config["dropout"],
+        band_mode=config.get("band_mode", "direct"),
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -82,16 +84,6 @@ def decode_return_forecasts(
     lower_prices = (anchor * (1.0 + lower_returns)).tolist()
     upper_prices = (anchor * (1.0 + upper_returns)).tolist()
     return line_prices, lower_prices, upper_prices
-
-
-def sort_prediction_triplet(
-    line_returns: torch.Tensor,
-    lower_returns: torch.Tensor,
-    upper_returns: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    quantiles = torch.stack((lower_returns, line_returns, upper_returns), dim=-1)
-    ordered = torch.sort(quantiles, dim=-1).values
-    return ordered[..., 1], ordered[..., 0], ordered[..., 2]
 
 
 def resolve_bundle(
@@ -141,7 +133,7 @@ def infer_bundle(
     with torch.no_grad():
         with autocast_context(device):
             output = model(normalized)
-    line_returns, lower_returns, upper_returns = sort_prediction_triplet(
+    line_returns, lower_returns, upper_returns = apply_band_postprocess(
         output.line.cpu(),
         output.lower_band.cpu(),
         output.upper_band.cpu(),

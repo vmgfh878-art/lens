@@ -9,7 +9,6 @@ from backend.collector.repositories.base import fetch_frame, upsert_records
 from backend.collector.repositories.sync_state_repo import get_job_state_map, upsert_job_state
 from backend.collector.utils.logging import log
 
-
 TIMEFRAME_CONFIG = {
     "1D": {"source_history_days": 250, "output_overlap_days": 14},
     "1W": {"source_history_days": 550, "output_overlap_days": 56},
@@ -39,10 +38,15 @@ def _resolve_source_start_date(
     if not target_tickers:
         return full_start_date
 
-    if any(ticker not in state_map or not state_map[ticker].get("last_cursor_date") for ticker in target_tickers):
+    known_cursors = [
+        pd.to_datetime(state_map[ticker]["last_cursor_date"]).date()
+        for ticker in target_tickers
+        if ticker in state_map and state_map[ticker].get("last_cursor_date")
+    ]
+    if not known_cursors:
         return full_start_date
 
-    earliest_cursor = min(pd.to_datetime(state_map[ticker]["last_cursor_date"]).date() for ticker in target_tickers)
+    earliest_cursor = min(known_cursors)
     history_days = TIMEFRAME_CONFIG[timeframe]["source_history_days"]
     return (earliest_cursor - timedelta(days=history_days)).isoformat()
 
@@ -54,15 +58,12 @@ def _resolve_upsert_cutoff(timeframe: str, last_cursor_date: date | None, overla
 
 
 def _fetch_context_frame(table: str, columns: str, start_date: str) -> pd.DataFrame:
-    frame = fetch_frame(
+    return fetch_frame(
         table,
         columns=columns,
         filters=[("gte", "date", start_date)],
         order_by="date",
     )
-    if not frame.empty:
-        frame["date"] = pd.to_datetime(frame["date"])
-    return frame
 
 
 def run(
@@ -73,7 +74,7 @@ def run(
     full_start_date: str = "2015-01-01",
 ) -> dict:
     """지표를 증분 또는 전체 백필 기준으로 계산한다."""
-    overlap_days = max(1, lookback_days)
+
     target_tickers = tickers or []
     summary: dict[str, dict] = {}
     total_records = 0
@@ -120,18 +121,24 @@ def run(
             "date,nh_nl_index,ma200_pct",
             source_start_date,
         )
+
         fundamentals_filters: list[tuple[str, str, object]] = []
         if target_tickers:
             fundamentals_filters.append(("in", "ticker", target_tickers))
         fundamentals_frame = fetch_frame(
             "company_fundamentals",
             columns="ticker,date,filing_date,revenue,net_income,total_liabilities,equity,eps",
-            filters=fundamentals_filters or None,
-            order_by="filing_date",
+            filters=fundamentals_filters,
+            order_by="date",
         )
+
+        if not macro_frame.empty:
+            macro_frame["date"] = pd.to_datetime(macro_frame["date"])
+        if not breadth_frame.empty:
+            breadth_frame["date"] = pd.to_datetime(breadth_frame["date"])
         if not fundamentals_frame.empty:
             fundamentals_frame["date"] = pd.to_datetime(fundamentals_frame["date"])
-            fundamentals_frame["filing_date"] = pd.to_datetime(fundamentals_frame["filing_date"], errors="coerce")
+            fundamentals_frame["filing_date"] = pd.to_datetime(fundamentals_frame["filing_date"])
 
         features = build_features(
             price_df=price_frame,
@@ -153,7 +160,7 @@ def run(
                 if ticker_state.get("last_cursor_date") and not force_full_backfill
                 else None
             )
-            upsert_cutoff = _resolve_upsert_cutoff(timeframe, last_cursor_date, overlap_days)
+            upsert_cutoff = _resolve_upsert_cutoff(timeframe, last_cursor_date, lookback_days)
 
             output_frame = ticker_frame.copy()
             output_frame["date"] = pd.to_datetime(output_frame["date"])
@@ -181,7 +188,7 @@ def run(
                 last_cursor_date=latest_cursor,
                 message=f"stored={len(records)}",
                 meta={
-                    "source_start_date": source_start_date,
+                    "timeframe": timeframe,
                     "upsert_cutoff": upsert_cutoff.isoformat() if upsert_cutoff else None,
                     "force_full_backfill": force_full_backfill,
                 },
@@ -200,6 +207,6 @@ def run(
         status="success",
         last_cursor_date=datetime.now().date(),
         message=f"stored={total_records}",
-        meta=summary,
+        meta={"force_full_backfill": force_full_backfill, "timeframes": summary},
     )
     return {"stored": total_records, "timeframes": summary}

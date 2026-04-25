@@ -4,12 +4,13 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ai.models.common import ForecastOutput
 
 
 class AsymmetricHuberLoss(nn.Module):
-    """낙관적 과대예측에 더 큰 패널티를 주는 Huber loss."""
+    """상방 오차에 더 큰 페널티를 주는 Huber loss."""
 
     def __init__(self, alpha: float = 1.0, beta: float = 2.0, delta: float = 1.0) -> None:
         super().__init__()
@@ -28,7 +29,7 @@ class AsymmetricHuberLoss(nn.Module):
 
 
 class AsymmetricBCELoss(nn.Module):
-    """과대확신 쪽 오차에 더 큰 패널티를 주는 BCE."""
+    """오버슈트 쪽 오차에 더 큰 가중을 주는 BCE."""
 
     def __init__(self, alpha: float = 1.0, beta: float = 2.0, eps: float = 1e-6) -> None:
         super().__init__()
@@ -71,14 +72,14 @@ class PinballLoss(nn.Module):
 
 
 class WidthPenaltyLoss(nn.Module):
-    """밴드 폭이 과도하게 커지지 않도록 부드럽게 제어한다."""
+    """밴드 폭이 음수로 뒤집히지 않도록 relu 기반 폭만 벌점으로 쓴다."""
 
     def forward(self, lower_band: torch.Tensor, upper_band: torch.Tensor) -> torch.Tensor:
-        return (upper_band - lower_band).mean()
+        return F.relu(upper_band - lower_band).mean()
 
 
 class BandCrossPenaltyLoss(nn.Module):
-    """하단 밴드가 상단 밴드를 넘는 경우만 패널티를 준다."""
+    """하단 밴드가 상단 밴드를 넘는 경우에만 벌점을 준다."""
 
     def forward(self, lower_band: torch.Tensor, upper_band: torch.Tensor) -> torch.Tensor:
         return torch.relu(lower_band - upper_band).mean()
@@ -103,14 +104,7 @@ class LossBreakdown:
 
 
 class ForecastCompositeLoss(nn.Module):
-    """예측선, 밴드, 폭, 교차 패널티를 함께 계산한다.
-
-    공유 인코더 위에
-    - 예측선 head
-    - quantile/band head
-    - 방향성 head(추후 AsymmetricBCELoss 연결)
-    를 올리는 multi-task 결합의 기본 토대다.
-    """
+    """선 예측과 밴드, 폭, 교차 벌점을 묶어 계산한다."""
 
     def __init__(
         self,
@@ -124,8 +118,10 @@ class ForecastCompositeLoss(nn.Module):
         lambda_band: float = 1.0,
         lambda_width: float = 0.1,
         lambda_cross: float = 1.0,
+        band_mode: str = "direct",
     ) -> None:
         super().__init__()
+        self.band_mode = band_mode
         self.line_loss = AsymmetricHuberLoss(alpha=alpha, beta=beta, delta=delta)
         self.low_quantile_loss = PinballLoss((q_low,))
         self.high_quantile_loss = PinballLoss((q_high,))
@@ -143,11 +139,15 @@ class ForecastCompositeLoss(nn.Module):
         band_target: torch.Tensor,
     ) -> LossBreakdown:
         line_component = self.line_loss(prediction.line, line_target)
-        low_component = self.low_quantile_loss(prediction.lower_band, band_target)
-        high_component = self.high_quantile_loss(prediction.upper_band, band_target)
-        band_component = low_component + high_component
+        band_component = self.low_quantile_loss(prediction.lower_band, band_target) + self.high_quantile_loss(
+            prediction.upper_band,
+            band_target,
+        )
         width_component = self.width_loss(prediction.lower_band, prediction.upper_band)
-        cross_component = self.cross_loss(prediction.lower_band, prediction.upper_band)
+        if self.band_mode == "direct":
+            cross_component = self.cross_loss(prediction.lower_band, prediction.upper_band)
+        else:
+            cross_component = torch.zeros_like(width_component)
         total = (
             (self.lambda_line * line_component)
             + (self.lambda_band * band_component)
