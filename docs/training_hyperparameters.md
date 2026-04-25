@@ -2,8 +2,11 @@
 
 > **목적**: Phase 1 모델 학습에 관한 모든 파라미터·기법·설계 결정을 한 파일로 묶는다. 결정값·근거·고려한 대안·탈락 이유·민감도·Phase 2 재검토 트리거를 모두 명시. 새 결정이 생기면 **이 파일을 Edit로 업데이트** (rewrite 금지, 섹션별 append).
 >
-> 마지막 업데이트: 2026-04-24
-> 관련 문서: `.claude/plans/c-users-user-onedrive-desktop-2026-1-22-quiet-gray.md` (전체 기획안 v3)
+> 마지막 업데이트: 2026-04-25
+> 관련 문서:
+> - `.claude/plans/c-users-user-onedrive-desktop-2026-1-22-quiet-gray.md` (전체 기획안 v3)
+> - [`docs/model_architecture.md`](model_architecture.md) — 모델 구조 갭 분석·개선 옵션 (CP3.5용)
+> - [`docs/project_journal.md`](project_journal.md) — 진행·결정 누적 기록
 
 ---
 

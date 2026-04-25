@@ -16,6 +16,7 @@
 |---|---|---|
 | 기획안 v3 | 프로젝트 전체 범위·방법론·일정 | 큰 방향 바뀔 때만 (v4 등) |
 | `training_hyperparameters.md` | 학습 파라미터 SoT | 새 sweep 결과·결정 추가될 때 |
+| `model_architecture.md` | 모델 구조 갭 분석·개선 옵션 | CP3.5 결정 시 / 구조 변경 시 |
 | **`project_journal.md` (이 파일)** | **연대기 기록 전부** | **매 배치·CP·결정·발견마다** |
 
 ---
@@ -329,3 +330,28 @@ N5 (final dropna)    753
   - 결정 D18(컨텍스트 결측 플래그), D19(1M 분리), D20(재무 5년 허용) 추가.
   - `1M` recompute 미완료는 CP2.7로 분리 관리.
   - CP3 지시서 발주.
+- **2026-04-25**: CP3 (sufficiency gate + 70/15/15 split) 완료 반영.
+  - 학습 대상 ticker: 1D 473 / 1W 421 (입력 477 기준).
+  - Sample 합계: 1D train 759k / val 162k / test 163k. 1W train 116k / val 24k / test 25k.
+  - `min_fold_samples=50`, `gap=h_max` (1D=20, 1W=12) 확정.
+  - 신규 4 테스트 추가, 전체 25개 green.
+  - `ai/splits.py`, `ai/preprocessing.py` (`build_dataset_plan`, `prepare_dataset_splits`), `ai/train.py` 연결 완료. Dry-run으로 split 구성 확인.
+- **2026-04-25**: 리뷰어 라운드 — 모델 아키텍처 갭 5건 도출.
+  - **P1-1**: 추론 정렬이 line head를 q50 자리에 끼워 의미 파괴 (`ai/inference.py:87~94`).
+  - **P1-2**: val·inference 후처리 불일치로 모델 선택·calibration 신뢰성 손상 (`ai/train.py:213~220`).
+  - **P2-1**: PatchTST에 RevIN 없음. 문서 명시(README, hyperparameters)와 코드 불일치. **지시서·검수 양식 빈틈** 인정. 다음 CP부터 "구조 fidelity 체크 항목" 보고 양식에 추가.
+  - **P2-2**: TiDE가 사실상 일반 MLP. 사용자 지시: 리네이밍 옵션 폐기, **TD-1 (논문 fidelity 70%) 골격 구현**.
+  - **P2-3**: WidthPenaltyLoss 음수 가능 (`ai/loss.py:73~84`).
+  - 사용자 결정 (확정):
+    - P1-1: line head 보존 / `torch.sort` 대상에서 line 제외 / sort는 q10·q90만.
+    - P1-2: 단일 후처리 함수 `apply_band_postprocess`로 val·test·inference 통일.
+    - P2-2: TiDE 제대로 구현 (TD-1 이상).
+  - 사용자 결정 (보류 — `docs/model_architecture.md`에서 옵션 비교 후 선택):
+    - **A**: 출력 헤드 구조 (직접 q10/q90 vs center+log_half_width 파라미터화 vs ablation).
+    - **B**: PatchTST 보강 범위 (RevIN만 vs RevIN+channel independence vs 단계 진행).
+    - **C**: CNN-LSTM 안정화 + attention pooling 여부.
+    - **D**: TiDE 골격 범위 (TD-1 권고 / TD-2 풀구현은 비용 대비 이득 작음).
+    - **E**: Init·Dropout 보강 적용 여부.
+  - 산출물: 신규 `docs/model_architecture.md` (옵션·장단점·비용·결정표).
+  - **메타 룰 추가 (D21)**: CP 지시서·검수 양식에 "이 모듈에 명시된 핵심 구성요소가 코드에 실제 존재하는가? 누락 항목 명시" 섹션 필수 포함. RevIN 누락 같은 fidelity gap 재발 방지.
+  - **다음 단계**: 사용자가 A~E 결정 → CP3.5 지시서 작성 (모델 구조 보강 + P1·P2 fix를 한 묶음).
