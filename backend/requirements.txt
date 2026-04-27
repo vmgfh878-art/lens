@@ -6,7 +6,9 @@ pyarrow==16.1.0
 python-dotenv==1.0.1
 numpy==1.26.4
 scikit-learn==1.5.0
-torch==2.3.1
+# torch는 CUDA 빌드라 별도 설치 (https://pytorch.org/get-started/locally/)
+# 5060 Ti (sm_120)는 cu128 빌드 + torch>=2.7 권장
+# torch==2.3.1  # 옛날 핀 — CPU 빌드로 덮어쓰는 문제 → 무력화
 statsmodels==0.14.2
 httpx==0.27.0
 wandb==0.19.11

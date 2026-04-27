@@ -1,7 +1,7 @@
 import unittest
 
-import pandas as pd
 import torch
+import pandas as pd
 
 from ai.backtest import run_rule_based_backtest
 from ai.inference import decode_return_forecasts
@@ -38,6 +38,10 @@ class InferenceBacktestTestCase(unittest.TestCase):
         self.assertEqual(result["num_trades"], 2)
         self.assertGreater(result["return_pct"], 0.0)
         self.assertGreaterEqual(result["win_rate"], 0.0)
+        self.assertIn("fee_adjusted_return_pct", result)
+        self.assertIn("fee_adjusted_sharpe", result)
+        self.assertIn("avg_turnover", result)
+        self.assertIn("gross_return_pct", result["meta"])
 
 
 if __name__ == "__main__":

@@ -6,8 +6,6 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import pandas as pd
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -16,12 +14,15 @@ from ai.preprocessing import normalize_ai_timeframe
 from ai.storage import fetch_run_evaluations, fetch_run_predictions, save_backtest_results
 from backend.collector.repositories.base import fetch_frame
 
+import pandas as pd
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="저장된 예측 결과로 규칙 기반 백테스트를 실행한다")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--timeframe", default=None)
     parser.add_argument("--strategy-name", default="band_breakout_v1")
+    parser.add_argument("--fee-bps", type=float, default=10.0)
     parser.add_argument("--save", action="store_true")
     return parser.parse_args()
 
@@ -75,6 +76,7 @@ def run_rule_based_backtest(
     prediction_frame: pd.DataFrame,
     *,
     strategy_name: str = "band_breakout_v1",
+    fee_bps: float = 10.0,
 ) -> dict[str, Any]:
     """규칙 기반 시그널의 방향성과 손익 특성을 빠르게 비교한다."""
     if prediction_frame.empty:
@@ -83,26 +85,42 @@ def run_rule_based_backtest(
     frame = prediction_frame.sort_values("asof_date").copy()
     signal_to_position = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
     frame["position"] = frame["signal"].map(signal_to_position).fillna(0.0)
-    frame["strategy_return"] = frame["position"] * frame["realized_return"]
+    frame["prev_position"] = frame["position"].shift(1).fillna(0.0)
+    frame["turnover"] = (frame["position"] - frame["prev_position"]).abs()
+    frame["gross_strategy_return"] = frame["position"] * frame["realized_return"]
+    fee_rate = float(fee_bps) / 10000.0
+    frame["strategy_return"] = frame["gross_strategy_return"] - (frame["turnover"] * fee_rate)
     cumulative = (1.0 + frame["strategy_return"]).cumprod()
+    gross_cumulative = (1.0 + frame["gross_strategy_return"]).cumprod()
     drawdown = cumulative / cumulative.cummax() - 1.0
 
     wins = frame.loc[frame["strategy_return"] > 0, "strategy_return"]
     losses = frame.loc[frame["strategy_return"] < 0, "strategy_return"].abs()
     profit_factor = float(wins.sum() / losses.sum()) if losses.sum() > 0 else None
+    strategy_std = frame["strategy_return"].std()
+    gross_std = frame["gross_strategy_return"].std()
+    fee_adjusted_return_pct = float((cumulative.iloc[-1] - 1.0) * 100.0)
+    gross_return_pct = float((gross_cumulative.iloc[-1] - 1.0) * 100.0)
+    fee_adjusted_sharpe = float(frame["strategy_return"].mean() / strategy_std) if strategy_std else 0.0
 
     return {
         "strategy_name": strategy_name,
-        "return_pct": float((cumulative.iloc[-1] - 1.0) * 100.0),
+        "return_pct": fee_adjusted_return_pct,
         "mdd": float(drawdown.min()),
-        "sharpe": float(frame["strategy_return"].mean() / frame["strategy_return"].std()) if frame["strategy_return"].std() else 0.0,
+        "sharpe": fee_adjusted_sharpe,
         "win_rate": float((frame["strategy_return"] > 0).mean()),
         "profit_factor": profit_factor,
         "num_trades": int((frame["position"] != 0).sum()),
+        "fee_adjusted_return_pct": fee_adjusted_return_pct,
+        "fee_adjusted_sharpe": fee_adjusted_sharpe,
+        "avg_turnover": float(frame["turnover"].mean()),
         "meta": {
             "rows": len(frame),
             "avg_realized_return": float(frame["realized_return"].mean()),
             "avg_line_return": float(frame["line_return"].mean()),
+            "fee_bps": float(fee_bps),
+            "gross_return_pct": gross_return_pct,
+            "gross_sharpe": float(frame["gross_strategy_return"].mean() / gross_std) if gross_std else 0.0,
         },
     }
 
@@ -131,12 +149,13 @@ def run_backtest(
     run_id: str,
     timeframe: str | None = None,
     strategy_name: str,
+    fee_bps: float = 10.0,
     save: bool = False,
 ) -> dict[str, Any]:
     if timeframe is not None:
         normalize_ai_timeframe(timeframe)
     frame = build_backtest_frame(run_id, timeframe)
-    result = run_rule_based_backtest(frame, strategy_name=strategy_name)
+    result = run_rule_based_backtest(frame, strategy_name=strategy_name, fee_bps=fee_bps)
     resolved_timeframe = timeframe or str(frame["timeframe"].iloc[0])
     normalize_ai_timeframe(resolved_timeframe)
     if save:
@@ -154,6 +173,7 @@ if __name__ == "__main__":
         run_id=args.run_id,
         timeframe=args.timeframe,
         strategy_name=args.strategy_name,
+        fee_bps=args.fee_bps,
         save=args.save,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

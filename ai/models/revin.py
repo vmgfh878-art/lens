@@ -39,8 +39,21 @@ class RevIN(nn.Module):
 
     def _denormalize(self, x: torch.Tensor) -> torch.Tensor:
         if self._mean is None or self._std is None:
-            raise RuntimeError("denorm 호출 전에 norm이 먼저 실행되어야 합니다.")
+            raise RuntimeError("denorm 호출 전에 norm 모드가 먼저 실행되어야 합니다.")
         denormalized = x
         if self.affine:
             denormalized = (denormalized - self.beta) / (self.gamma + self.eps)
         return denormalized * self._std + self._mean
+
+    def denormalize_target(self, y: torch.Tensor, target_channel_idx: int) -> torch.Tensor:
+        """지정한 타깃 채널의 통계량으로 예측값을 역정규화한다."""
+        if self._mean is None or self._std is None:
+            raise RuntimeError("denormalize_target 호출 전에 norm 모드가 먼저 실행되어야 합니다.")
+        mean_target = self._mean[..., target_channel_idx]
+        std_target = self._std[..., target_channel_idx]
+        output = y
+        if self.affine:
+            beta_target = self.beta[..., target_channel_idx]
+            gamma_target = self.gamma[..., target_channel_idx]
+            output = (output - beta_target) / (gamma_target + self.eps)
+        return output * std_target + mean_target

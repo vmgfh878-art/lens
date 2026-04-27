@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 
 def init_weights(module: nn.Module) -> None:
-    """모델 전체에 BERT 스타일 trunc_normal 초기화를 적용한다."""
+    """모델 전체에 trunc_normal 초기화를 적용한다."""
     if isinstance(module, nn.Linear):
         nn.init.trunc_normal_(module.weight, std=0.02)
         if module.bias is not None:
@@ -42,6 +42,21 @@ class AttentionPooling1D(nn.Module):
         weights = torch.softmax(scores, dim=1)
         self.last_weights = weights.detach()
         return (x * weights).sum(dim=1)
+
+
+class ChannelAttentionPooling(nn.Module):
+    """채널 축을 학습 가능한 가중치로 집계한다."""
+
+    def __init__(self, n_channels: int) -> None:
+        super().__init__()
+        self.attn = nn.Linear(n_channels, n_channels)
+        self.last_weights: torch.Tensor | None = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scores = self.attn(x.mean(dim=-1))
+        weights = torch.softmax(scores, dim=-1)
+        self.last_weights = weights.detach()
+        return (x * weights.unsqueeze(-1)).sum(dim=1)
 
 
 class ResidualBlock(nn.Module):

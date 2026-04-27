@@ -8,14 +8,15 @@ import sys
 from typing import Any
 from uuid import uuid4
 
+import torch
 import numpy as np
 import pandas as pd
-import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai.evaluation import summarize_forecast_metrics
 from ai.loss import PinballLoss
 from ai.preprocessing import default_horizon, normalize_ai_timeframe
 from ai.storage import save_model_run
@@ -104,6 +105,7 @@ def _build_windows(frame: pd.DataFrame, horizon: int) -> list[dict[str, Any]]:
             break
         windows.append(
             {
+                "ticker": str(frame["ticker"].iloc[0]).upper(),
                 "asof_date": dates[index],
                 "forecast_dates": dates[future_slice],
                 "anchor_close": float(anchors[index]),
@@ -126,7 +128,21 @@ def _pinball_metric(prediction_quantiles: np.ndarray, targets: np.ndarray) -> fl
 
 def _evaluate_windows(windows: list[dict[str, Any]], predicted_line: np.ndarray, sigma: float) -> dict[str, float]:
     if not windows:
-        return {"mae": 0.0, "mape": 0.0, "pinball_loss": 0.0}
+        return {
+            "mae": 0.0,
+            "smape": 0.0,
+            "coverage": 0.0,
+            "avg_band_width": 0.0,
+            "direction_accuracy": 0.0,
+            "spearman_ic": None,
+            "top_k_long_spread": None,
+            "top_k_short_spread": None,
+            "long_short_spread": None,
+            "fee_adjusted_return": None,
+            "fee_adjusted_sharpe": None,
+            "fee_adjusted_turnover": None,
+            "pinball_loss": 0.0,
+        }
 
     low_z = -1.2815515655446004
     high_z = 1.2815515655446004
@@ -134,13 +150,25 @@ def _evaluate_windows(windows: list[dict[str, Any]], predicted_line: np.ndarray,
     lower = predicted_line + (low_z * sigma)
     upper = predicted_line + (high_z * sigma)
     quantiles = np.stack((lower, predicted_line, upper), axis=-1)
-    mae = float(np.mean(np.abs(predicted_line - targets)))
-    mape = float(np.mean(np.abs(predicted_line - targets) / np.clip(np.abs(targets), 1e-6, None)))
-    return {
-        "mae": mae,
-        "mape": mape,
-        "pinball_loss": _pinball_metric(quantiles, targets),
-    }
+    metadata = pd.DataFrame(
+        {
+            "ticker": [window["ticker"] for window in windows],
+            "asof_date": [window["asof_date"] for window in windows],
+        }
+    )
+    metrics = summarize_forecast_metrics(
+        metadata=metadata,
+        line_predictions=torch.tensor(predicted_line, dtype=torch.float32),
+        lower_predictions=torch.tensor(lower, dtype=torch.float32),
+        upper_predictions=torch.tensor(upper, dtype=torch.float32),
+        line_targets=torch.tensor(targets, dtype=torch.float32),
+        band_targets=torch.tensor(targets, dtype=torch.float32),
+        raw_future_returns=torch.tensor(targets, dtype=torch.float32),
+        line_target_type="raw_future_return",
+        band_target_type="raw_future_return",
+    )
+    metrics["pinball_loss"] = _pinball_metric(quantiles, targets)
+    return metrics
 
 
 def _naive_predictions(windows: list[dict[str, Any]], horizon: int) -> np.ndarray:

@@ -299,6 +299,8 @@ N5 (final dropna)    753
 - Intraday aggregate features (VWAP·realized vol·volume profile, 일봉 머지)
 - HMM regime state 추론
 - Purged k-fold + embargo CV (Lopez de Prado Ch.7)
+- 본인 계좌 자동매매 (Alpaca 우선, 미국주식 paper → live; 본인 계좌만이라 규제 자유로움)
+- (조건부 Phase 3) Phase 1·2 트랙레코드가 calibration·백테스트로 1년+ 쌓이면 TradingView Pine Script Marketplace 진입안 검토
 
 ---
 
@@ -310,6 +312,76 @@ N5 (final dropna)    753
 3. **종료 보고 포맷** — 숫자 명시 CP 보고 (각 CP별 템플릿)
 
 사용자의 "권한 승인 매번 눌러야 하는 피로" 완화 목적.
+
+---
+
+## 9. PPT 대비 변경 이력 (중간발표 → 기말발표 비교용)
+
+> PPT 초안(2026-04 초)이 중간발표 기준 자료. 그 이후 누적된 변경을 카테고리별로 정리.
+> 새 결정·변경 발생할 때마다 해당 카테고리 표 하단에 한 줄 추가 (Edit append). 기말 발표 자료 정리 시 그대로 인용.
+
+### 9.1 범위 축소 (PPT에 있었으나 제외/축소)
+
+| 항목 | PPT | 현재 | 근거 / 결정 시점 |
+|---|---|---|---|
+| 1M 월봉 AI 학습·예측 | 1D/1W/1M 모두 학습·예측 | **표시 전용** (캔들·기술지표만) | 기획 v2, 데이터·신뢰성 부족 |
+| 점 예측 정확도(MAPE/방향) 핵심 KPI | 메인 평가축 | ★ 보조 메트릭으로 강등 | 기획 v3, Makridakis 경쟁 결과·EMH 근거 |
+| 학습 universe 477 ticker 전부 | S&P 500 ~503 | **1D 473 / 1W 421** (sufficiency gate 통과분만) | CP3, 데이터 부족 ticker 명시 제외 정책 |
+
+### 9.2 범위 추가 (PPT에 없었으나 추가)
+
+| 항목 | 내용 | 결정 시점 |
+|---|---|---|
+| Sufficiency gate 정책 | 1D ≥ 450 거래일 / 1W ≥ 78주 / 재무 ≥ 8분기. 부족 시 학습·추론 제외 (NaN 끌고 가지 말 것) | 기획 v3, CP2 |
+| 출력 정합성 단일 함수 | `apply_band_postprocess` 한 곳으로 val/test/inference 통일 | CP3.5 (P1-2) |
+| 출력 헤드 두 방식 | `band_mode="direct"` (q10/q90 직접) vs `"param"` (center + log_half_width로 cross 구조 차단) | CP3.5 (A-3) |
+| RevIN denormalize_target | norm-only → norm + target-channel denorm 정합 (PatchTST 출력 raw scale 복원) | CP4 (F-1) |
+| Channel Independence aggregate | 29채널 mean 평균화 → `target / mean / attention` 3종 선택 (기본 target) | CP4 (F-2) |
+| Ticker embedding | global model + concat-after-backbone, 1D 473 / 1W 421, OOV id = num_tickers, emb_dim=32 | CP4 |
+| TiDE per-step head | `decoded.mean(dim=1)`로 horizon 표현 소실 → per-step `Linear(_, 1)` / `Linear(_, 2)` head로 복원 | CP5 |
+| CNN-LSTM dilated TCN | kernel=3 단일 dilation RF=5 → `[1,2,4,8]` exponential dilation, RF=31 | CP5 |
+| Calendar future covariate | TiDE 논문 spec 보강. 7개 결정론적 캘린더 채널 (`day_of_week_sin/cos`, `month_sin/cos`, `is_month_end`, `is_quarter_end`, `is_opex_friday`)을 dataloader에서 즉석 파생, 3 모델 모두 입력 (n_features 29→36, target_channel_idx=0 보존), TiDE는 추가로 horizon decoder 단에 future_covariate per-step 주입 (`forward(x, ticker_id, future_covariate)`). DB·collector·cron 무관 | CP6.5 ✅ |
+| Init 정책 통합 | trunc_normal(std=0.02), bias=0, LayerNorm gamma=1 — 3 모델 모두 BERT 스타일 | CP3.5 (E-1) |
+| Dropout 위치 통일 | rate는 sweep / 위치는 고정 (PatchTST input·output·encoder, CNN-LSTM conv·attn·LSTM, TiDE ResBlock) | CP3.5 (E-2) |
+| Early stopping + best 복원 | val_total monitor, patience=10, min_delta=1e-4, best epoch state_dict 복원 후 저장. 메타에 `best_epoch / best_val_total / early_stopped` | CP6 |
+| Regime-conditional band | Phase 2 → **Phase 1 후반(5주차)으로 당김** | 기획 v3 |
+| Conformal 후처리 (Split / CQR) | Phase 2 논문화 → Phase 1 5주차 실험으로 당김 | 기획 v3 |
+| 연구 결과 대시보드 페이지 | 기존 5화면에 calibration·reliability·백테스트 종합 6번 화면 추가 | 기획 v3 |
+| 본인 계좌 자동매매 (Phase 2) | Alpaca 기반, 본인 계좌 한정 (규제 자유) | 2026-04-25 토론 |
+| TradingView Marketplace (Phase 3 조건부) | 1년+ trackrecord 쌓이면 진입 검토 | 2026-04-25 토론 |
+
+### 9.3 우선순위·메서드 변경 (PPT에 있던 것을 다르게)
+
+| 항목 | PPT | 현재 | 근거 |
+|---|---|---|---|
+| Phase 1 목표 | 제품 완성·수익화 대비 | **연구 완성 + 시연 가능 수준** | 기획 v3 |
+| 타깃 우선순위 | 점 예측선 본체 | **밴드(quantile) 본체**, 점 예측 보조 | Makridakis·EMH·Gneiting 근거 |
+| 평가 메트릭 순위 | MAPE·방향정확도 중심 | pinball·CRPS·empirical coverage ★★★ | 기획 v3 |
+| Loss α/β | 미정 | α=1, β=2 (overprediction 페널티 큰 보수적 예측, 철학 결정) | 기획 v2 |
+| 데이터 소스 | "EODHD" 단순 명기 | **Phase 1~2 EODHD 유지**, 공개 배포 결정 시점에만 FMP Pro 검토 (소스 swap 난이도 낮음 근거) | 기획 v3 |
+| Cross-validation | 70/15/15 time-ordered | 70/15/15 + **Phase 1 후반 walk-forward 추가** (백테스트와 split 일치) | 기획 v3 |
+| 방향 정확도 목표 | 55% | **52% (완화)** | 기획 v3, validation 성적 보며 재조정 |
+
+### 9.4 명시적 반려 (검토 후 채택 안 함)
+
+| 제안 | 반려 사유 | 결정 시점 |
+|---|---|---|
+| 분봉·10분봉 raw 학습 | (a) Signal-to-noise 악화 (b) EODHD Personal 미포함 (c) 저장 비용 폭발 (d) horizon 미스매치 | 기획 v3 §2.2.2 |
+| 단타 방향 제품 전환 | Barber·Chague·Odean 실증: 개인 데이트레이더 0.5%만 순이익. HFT 인프라 격차 | 기획 v3 §2.2.3 |
+| 데이터 무작정 늘리기 (분봉·과거 2015 이전) | 효과 작음 + 구조적 break/생존편향 + leakage 위험 | 2026-04 토론 |
+| 토스/카카오페이 등 슈퍼앱 "등록" | 한국 핀테크 마켓플레이스 시스템 부재. BD 계약만 가능 | 2026-04-25 토론 |
+| 거시 release **값** future covariate | 누수 위험. release **date**만 합법 | 2026-04 토론 |
+| TiDE에만 future covariate (다른 모델 미주입) | 비교 평가 오염. 캘린더 7종은 3 모델 모두 입력으로 받기 | CP6.5 |
+
+### 9.5 메타 운영 룰 추가 (PPT에 없던 프로세스 원칙)
+
+| 룰 | 내용 | 결정 시점 |
+|---|---|---|
+| 리뷰어 / 구현 분담 | 사용자 = 의사결정 + 리뷰. 오케스트레이터 = 지시 + 검증. 구현 에이전트 = 코드 + 테스트 + 보고서 | D1 |
+| CP 단위 분할 | 큰 배치를 CP1·CP2·CP3.5 등으로 쪼개 단위 검증 | 배치 4부터 |
+| 핵심 컴포넌트 존재 체크리스트 (D21) | 모든 CP 보고서에 "RevIN denorm 호출", "ticker emb concat" 등 핵심 컴포넌트 존재 검증 헤딩 필수 | CP3.5 후속 |
+| 비용보다 fidelity 우선 (D22) | 시간 들어도 논문대로 정확하게 (TiDE rename 거부, RevIN 반쪽 구현 거부 등) | 2026-04-24 |
+| 토큰 효율 룰 (D24) | 별도 `cpN_instruction.md` 금지. 지시는 직접 프롬프트. 반복 컨텍스트는 `CLAUDE.md`에 박기. 보고서만 `.md` | 2026-04-25 |
 
 ---
 
@@ -425,3 +497,4 @@ N5 (final dropna)    753
   - 출력 방식 2 (center + log_half_width) 채택 시 cross penalty 불필요 → 손실 항 4개 → 3개로 단순화.
   - 방식 1 유지 시 width loss는 `mean(F.relu(upper - lower))` 로 음수 방지.
   - A-3 (둘 다 구현)이므로 두 loss 구성 모두 코드에 포함.
+- **2026-04-25**: §9 PPT 대비 변경 이력 섹션 신설 (중간발표 → 기말발표 비교용). 5개 카테고리 표 (축소·추가·우선순위 변경·반려·메타 룰)로 누적 정리. 신규 결정 시 해당 표에 한 줄 append.

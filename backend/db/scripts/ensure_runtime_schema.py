@@ -119,7 +119,8 @@ RUNTIME_SCHEMA_STATEMENTS = [
         avg_band_width          DOUBLE PRECISION,
         normalized_band_width   DOUBLE PRECISION,
         direction_accuracy      DOUBLE PRECISION,
-        mape                    DOUBLE PRECISION,
+        mae                     DOUBLE PRECISION,
+        smape                   DOUBLE PRECISION,
         created_at              TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE (run_id, ticker, timeframe, asof_date)
     );
@@ -131,6 +132,14 @@ RUNTIME_SCHEMA_STATEMENTS = [
     """
     ALTER TABLE public.prediction_evaluations
     ADD COLUMN IF NOT EXISTS pinball_loss DOUBLE PRECISION;
+    """,
+    """
+    ALTER TABLE public.prediction_evaluations
+    ADD COLUMN IF NOT EXISTS mae DOUBLE PRECISION;
+    """,
+    """
+    ALTER TABLE public.prediction_evaluations
+    ADD COLUMN IF NOT EXISTS smape DOUBLE PRECISION;
     """,
     """
     CREATE TABLE IF NOT EXISTS public.backtest_results (

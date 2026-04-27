@@ -20,6 +20,14 @@ backend/data/parquet/
 tmp/
 .claude/
 backend/logs/
+lens_optuna.db
+lens_optuna.db-journal
+wandb/
+optuna_artifacts/
+docs/cp8_sweep_plots/
+docs/cp8_gpu_benchmark.json
 
 .vscode/
 .idea/
+
+remember.md

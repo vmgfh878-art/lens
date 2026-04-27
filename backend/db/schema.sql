@@ -244,7 +244,8 @@ CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
     avg_band_width          DOUBLE PRECISION,
     normalized_band_width   DOUBLE PRECISION,
     direction_accuracy      DOUBLE PRECISION,
-    mape                    DOUBLE PRECISION,
+    mae                     DOUBLE PRECISION,
+    smape                   DOUBLE PRECISION,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (run_id, ticker, timeframe, asof_date)
 );

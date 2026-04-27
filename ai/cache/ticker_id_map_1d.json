@@ -1,0 +1,11 @@
+{
+  "mapping": {
+    "A": 0,
+    "AAPL": 1,
+    "ABBV": 2,
+    "ABNB": 3,
+    "ABT": 4
+  },
+  "num_tickers": 5,
+  "timeframe": "1D"
+}
