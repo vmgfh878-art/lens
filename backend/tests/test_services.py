@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.core.exceptions import TimeframeDisabledError
+from app.core.exceptions import InvalidRunStatusError, TimeframeDisabledError
 from app.services.api_service import aggregate_prices, get_latest_prediction_data, resolve_price_window
 
 
@@ -54,6 +54,58 @@ class ServiceTestCase(unittest.TestCase):
         self.assertEqual(payload["upper_band_series"], [])
         self.assertEqual(payload["lower_band_series"], [])
         self.assertEqual(payload["conservative_series"], [])
+
+    def test_prediction_latest_with_run_id_uses_run_prediction(self):
+        completed_run = {
+            "run_id": "run-2",
+            "status": "completed",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+        }
+        prediction = {
+            "ticker": "AAPL",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-04-18",
+            "decision_time": "2026-04-18T00:00:00Z",
+            "run_id": "run-2",
+            "model_ver": "v1",
+            "signal": "BUY",
+            "forecast_dates": ["2026-04-19"],
+            "line_series": [104.0],
+            "upper_band_series": [110.0],
+            "lower_band_series": [100.0],
+            "conservative_series": [104.0],
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=completed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run",
+            return_value=prediction,
+        ) as fetch_by_run, patch("app.services.api_service.fetch_latest_prediction") as fetch_latest:
+            payload = get_latest_prediction_data("AAPL", run_id="run-2")
+
+        self.assertEqual(payload["run_id"], "run-2")
+        fetch_by_run.assert_called_once_with("AAPL", run_id="run-2")
+        fetch_latest.assert_not_called()
+
+    def test_prediction_latest_rejects_failed_nan_run_id(self):
+        failed_run = {
+            "run_id": "run-failed",
+            "status": "failed_nan",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=failed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run"
+        ) as fetch_by_run:
+            with self.assertRaises(InvalidRunStatusError):
+                get_latest_prediction_data("AAPL", run_id="run-failed")
+
+        fetch_by_run.assert_not_called()
 
     def test_prediction_timeframe_disabled_for_monthly(self):
         with self.assertRaises(TimeframeDisabledError):

@@ -4,9 +4,10 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from app.core.exceptions import ResourceNotFoundError
+from app.core.exceptions import InvalidRunStatusError, ResourceNotFoundError
+from app.repositories.ai_repo import fetch_model_run
 from app.repositories.market_repo import fetch_price_rows, fetch_stocks
-from app.repositories.prediction_repo import fetch_latest_prediction
+from app.repositories.prediction_repo import fetch_latest_prediction, fetch_prediction_by_run
 from app.services.model_svc import (
     normalize_display_timeframe,
     normalize_model_name,
@@ -89,17 +90,33 @@ def get_latest_prediction_data(
     model: str = "patchtst",
     timeframe: str = "1D",
     horizon: int | None = None,
+    run_id: str | None = None,
 ) -> dict:
-    model_name = normalize_model_name(model)
-    normalized_timeframe = normalize_prediction_timeframe(timeframe)
-    resolved_horizon = resolve_horizon(normalized_timeframe, horizon)
+    if run_id:
+        model_run = fetch_model_run(run_id)
+        if model_run is None:
+            raise ResourceNotFoundError(f"run_id={run_id} AI run을 찾을 수 없습니다.")
+        run_status = str(model_run.get("status") or "completed")
+        if run_status != "completed":
+            raise InvalidRunStatusError(
+                f"run_id={run_id} status={run_status}: completed 상태의 run 예측만 조회할 수 있습니다.",
+                details={"run_id": run_id, "status": run_status},
+            )
+        prediction = fetch_prediction_by_run(ticker, run_id=run_id)
+        model_name = normalize_model_name(str(model_run.get("model_name") or model))
+        normalized_timeframe = normalize_prediction_timeframe(str(model_run.get("timeframe") or timeframe))
+        resolved_horizon = int(model_run.get("horizon") or resolve_horizon(normalized_timeframe, horizon))
+    else:
+        model_name = normalize_model_name(model)
+        normalized_timeframe = normalize_prediction_timeframe(timeframe)
+        resolved_horizon = resolve_horizon(normalized_timeframe, horizon)
 
-    prediction = fetch_latest_prediction(
-        ticker,
-        model_name=model_name,
-        timeframe=normalized_timeframe,
-        horizon=resolved_horizon,
-    )
+        prediction = fetch_latest_prediction(
+            ticker,
+            model_name=model_name,
+            timeframe=normalized_timeframe,
+            horizon=resolved_horizon,
+        )
     if prediction is None:
         raise ResourceNotFoundError(
             (

@@ -48,6 +48,15 @@ FUTURE_COVARIATE_DIM = len(FUTURE_CALENDAR_COLUMNS)
 _PREPARED_SPLITS_CACHE: dict[str, Any] = {}
 _ENGINE_CACHE: dict[str, Any] = {}
 _STALE_CACHE_WARNED: set[str] = set()
+_FEATURE_CONTRACT_VERSION = "v2_finite"
+_FUNDAMENTAL_IMPUTE_COLUMNS = [
+    "revenue",
+    "net_income",
+    "equity",
+    "eps",
+    "roe",
+    "debt_ratio",
+]
 
 
 @dataclass
@@ -203,6 +212,96 @@ class DatasetPlan:
     split_specs: dict[str, Any]
     ticker_registry_path: str
     num_tickers: int
+
+
+def _collect_nonfinite_feature_samples(
+    frame: pd.DataFrame,
+    *,
+    columns: list[str],
+    max_samples: int = 10,
+) -> tuple[dict[str, int], list[dict[str, object]]]:
+    counts: dict[str, int] = {}
+    samples: list[dict[str, object]] = []
+    if frame.empty:
+        return counts, samples
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        mask = ~np.isfinite(frame[column].to_numpy(dtype="float64", copy=False))
+        count = int(mask.sum())
+        if count <= 0:
+            continue
+        counts[column] = count
+        if len(samples) >= max_samples:
+            continue
+        failing_rows = frame.loc[mask, ["ticker", "date", column]].head(max_samples - len(samples))
+        for row in failing_rows.itertuples(index=False):
+            samples.append(
+                {
+                    "ticker": str(row.ticker),
+                    "date": pd.Timestamp(row.date).strftime("%Y-%m-%d"),
+                    "column": column,
+                    "value": None if pd.isna(getattr(row, column)) else float(getattr(row, column)),
+                }
+            )
+    return counts, samples
+
+
+def _enforce_feature_finite_contract(
+    frame: pd.DataFrame,
+    *,
+    context_label: str,
+    validate_columns: list[str] | None = None,
+) -> pd.DataFrame:
+    features = frame.copy()
+    if "has_fundamentals" not in features.columns:
+        features["has_fundamentals"] = False
+
+    for column in _FUNDAMENTAL_IMPUTE_COLUMNS:
+        if column not in features.columns:
+            features[column] = np.nan
+
+    nan_counts, samples = _collect_nonfinite_feature_samples(
+        features,
+        columns=_FUNDAMENTAL_IMPUTE_COLUMNS,
+        max_samples=12,
+    )
+    if nan_counts:
+        print(
+            json.dumps(
+                {
+                    "feature_contract": context_label,
+                    "stage": "before_impute",
+                    "nan_counts": nan_counts,
+                    "samples": samples,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    features[_FUNDAMENTAL_IMPUTE_COLUMNS] = features[_FUNDAMENTAL_IMPUTE_COLUMNS].fillna(0.0)
+    if "has_fundamentals" in features.columns:
+        features["has_fundamentals"] = features["has_fundamentals"].fillna(False).astype(bool)
+
+    if validate_columns is not None:
+        remaining_counts, remaining_samples = _collect_nonfinite_feature_samples(
+            features,
+            columns=validate_columns,
+            max_samples=12,
+        )
+        if remaining_counts:
+            raise ValueError(
+                json.dumps(
+                    {
+                        "feature_contract": context_label,
+                        "stage": "after_impute",
+                        "nonfinite_counts": remaining_counts,
+                        "samples": remaining_samples,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+    return features
 
 
 def _postgres_dsn() -> str | None:
@@ -568,6 +667,7 @@ def resolve_feature_cache_path(
         "timeframe": timeframe,
         "source_feature_columns": SOURCE_FEATURE_COLUMNS,
         "calendar_feature_columns": CALENDAR_FEATURE_COLUMNS,
+        "feature_contract_version": _FEATURE_CONTRACT_VERSION,
         "tickers": [ticker.upper() for ticker in tickers] if tickers else None,
         "limit_tickers": limit_tickers,
     }
@@ -587,6 +687,7 @@ def resolve_feature_index_cache_path(
         "tickers": [ticker.upper() for ticker in tickers] if tickers else None,
         "limit_tickers": limit_tickers,
         "kind": "feature_index_v1",
+        "feature_contract_version": _FEATURE_CONTRACT_VERSION,
     }
     digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
     return CACHE_DIR / f"feature_index_{timeframe}_{digest}_{data_hash}.pt"
@@ -618,6 +719,7 @@ def resolve_prepared_splits_cache_key(
         "band_target_type": normalize_target_type(band_target_type),
         "source_feature_columns": SOURCE_FEATURE_COLUMNS,
         "calendar_feature_columns": CALENDAR_FEATURE_COLUMNS,
+        "feature_contract_version": _FEATURE_CONTRACT_VERSION,
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -656,8 +758,19 @@ def build_sequence_dataset(
 
     features = feature_df.copy()
     features["date"] = pd.to_datetime(features["date"])
-    features = features.sort_values(["ticker", "date"]).dropna(subset=REQUIRED_FEATURE_COLUMNS)
+    features = features.sort_values(["ticker", "date"])
+    features = _enforce_feature_finite_contract(
+        features,
+        context_label=f"build_sequence_dataset:{normalized_timeframe}",
+        validate_columns=None,
+    )
+    features = features.dropna(subset=REQUIRED_FEATURE_COLUMNS)
     features = append_calendar_features(features)
+    features = _enforce_feature_finite_contract(
+        features,
+        context_label=f"build_sequence_dataset:{normalized_timeframe}:calendar",
+        validate_columns=MODEL_FEATURE_COLUMNS,
+    )
 
     targets = _build_target_frame(price_df, normalized_timeframe)
     merged = features.merge(targets, on=["ticker", "date"], how="inner")
@@ -790,8 +903,19 @@ def build_lazy_sequence_dataset(
 
     features = feature_df.copy()
     features["date"] = pd.to_datetime(features["date"])
-    features = features.sort_values(["ticker", "date"]).dropna(subset=REQUIRED_FEATURE_COLUMNS)
+    features = features.sort_values(["ticker", "date"])
+    features = _enforce_feature_finite_contract(
+        features,
+        context_label=f"build_lazy_sequence_dataset:{normalized_timeframe}",
+        validate_columns=None,
+    )
+    features = features.dropna(subset=REQUIRED_FEATURE_COLUMNS)
     features = append_calendar_features(features)
+    features = _enforce_feature_finite_contract(
+        features,
+        context_label=f"build_lazy_sequence_dataset:{normalized_timeframe}:calendar",
+        validate_columns=MODEL_FEATURE_COLUMNS,
+    )
 
     targets = _build_target_frame(price_df, normalized_timeframe)
     merged = features.merge(targets, on=["ticker", "date"], how="inner")

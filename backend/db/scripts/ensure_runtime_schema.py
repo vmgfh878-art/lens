@@ -142,6 +142,10 @@ RUNTIME_SCHEMA_STATEMENTS = [
     ADD COLUMN IF NOT EXISTS smape DOUBLE PRECISION;
     """,
     """
+    ALTER TABLE public.model_runs
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
+    """,
+    """
     CREATE TABLE IF NOT EXISTS public.backtest_results (
         id              BIGSERIAL PRIMARY KEY,
         run_id          VARCHAR(100) NOT NULL REFERENCES public.model_runs(run_id),

@@ -39,3 +39,29 @@ def fetch_latest_prediction(
         raise
     except Exception as exc:
         raise UpstreamUnavailableError("예측 결과를 조회할 수 없습니다.") from exc
+
+
+def fetch_prediction_by_run(
+    ticker: str,
+    *,
+    run_id: str,
+) -> dict | None:
+    try:
+        client = get_supabase()
+        rows = (
+            client.table("predictions")
+            .select(PREDICTION_COLUMNS)
+            .eq("ticker", ticker.upper())
+            .eq("run_id", run_id)
+            .order("asof_date", desc=True)
+            .order("decision_time", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    except ConfigError:
+        raise
+    except Exception as exc:
+        raise UpstreamUnavailableError("run 기준 예측 결과를 조회할 수 없습니다.") from exc

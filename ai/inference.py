@@ -323,6 +323,12 @@ def run_inference(
     model_run = get_model_run(run_id)
     if model_run is None:
         raise ValueError(f"run_id={run_id}에 해당하는 model_runs 기록이 없습니다.")
+    # CP12: NaN으로 실패한 run에 대해서는 inference·결과 저장을 거부한다.
+    run_status = str(model_run.get("status") or "completed")
+    if run_status != "completed":
+        raise ValueError(
+            f"run_id={run_id} status={run_status}: completed 상태의 run에서만 inference를 실행할 수 있습니다."
+        )
 
     normalize_ai_timeframe(str(model_run["timeframe"]))
 

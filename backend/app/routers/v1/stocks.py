@@ -71,7 +71,8 @@ def get_latest_prediction(
     model: str = Query(default="patchtst", description="모델 이름"),
     timeframe: str = Query(default="1D", description="예측 타임프레임"),
     horizon: int | None = Query(default=None, description="예측 horizon"),
+    run_id: str | None = Query(default=None, description="AI run ID"),
 ):
-    data = get_latest_prediction_data(ticker, model=model, timeframe=timeframe, horizon=horizon)
+    data = get_latest_prediction_data(ticker, model=model, timeframe=timeframe, horizon=horizon, run_id=run_id)
     response.headers["Cache-Control"] = "public, max-age=3600"
     return success_response(request, data)

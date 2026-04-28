@@ -229,8 +229,12 @@ CREATE TABLE IF NOT EXISTS public.model_runs (
     test_metrics        JSONB NOT NULL DEFAULT '{}'::jsonb,
     config              JSONB NOT NULL DEFAULT '{}'::jsonb,
     checkpoint_path     TEXT,
+    status              VARCHAR(20) NOT NULL DEFAULT 'completed'
+                        CHECK (status IN ('completed', 'failed_nan')),
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE public.model_runs
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
 
 CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
     id                      BIGSERIAL PRIMARY KEY,

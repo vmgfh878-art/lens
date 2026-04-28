@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from ai.preprocessing import normalize_ai_timeframe
-from ai.storage import fetch_run_evaluations, fetch_run_predictions, save_backtest_results
+from ai.storage import fetch_run_evaluations, fetch_run_predictions, get_model_run, save_backtest_results
 from backend.collector.repositories.base import fetch_frame
 
 import pandas as pd
@@ -154,6 +154,15 @@ def run_backtest(
 ) -> dict[str, Any]:
     if timeframe is not None:
         normalize_ai_timeframe(timeframe)
+    # CP12: NaN으로 실패한 run의 backtest 결과 저장을 차단한다.
+    model_run = get_model_run(run_id)
+    if model_run is None:
+        raise ValueError(f"run_id={run_id}에 해당하는 model_runs 기록이 없습니다.")
+    run_status = str(model_run.get("status") or "completed")
+    if run_status != "completed":
+        raise ValueError(
+            f"run_id={run_id} status={run_status}: completed 상태의 run에서만 backtest를 실행할 수 있습니다."
+        )
     frame = build_backtest_frame(run_id, timeframe)
     result = run_rule_based_backtest(frame, strategy_name=strategy_name, fee_bps=fee_bps)
     resolved_timeframe = timeframe or str(frame["timeframe"].iloc[0])

@@ -3,7 +3,7 @@
 > 기획 변천·의사결정·배치 진행·발견 이슈를 **연대기 순으로 누적**하는 단일 로그.
 > 업데이트 규칙: Edit 전용 append. Rewrite 금지. 섹션별 하단에 신규 항목 추가.
 >
-> 마지막 업데이트: 2026-04-25
+> 마지막 업데이트: 2026-04-27
 > 관련 문서:
 > - 기획안: `.claude/plans/c-users-user-onedrive-desktop-2026-1-22-quiet-gray.md` (v3 확정)
 > - 학습 하이퍼파라미터: `docs/training_hyperparameters.md`
@@ -498,3 +498,486 @@ N5 (final dropna)    753
   - 방식 1 유지 시 width loss는 `mean(F.relu(upper - lower))` 로 음수 방지.
   - A-3 (둘 다 구현)이므로 두 loss 구성 모두 코드에 포함.
 - **2026-04-25**: §9 PPT 대비 변경 이력 섹션 신설 (중간발표 → 기말발표 비교용). 5개 카테고리 표 (축소·추가·우선순위 변경·반려·메타 룰)로 누적 정리. 신규 결정 시 해당 표에 한 줄 append.
+
+---
+
+## 10. 2026-04-27 CP4~CP12 통합관리 업데이트
+
+이 섹션은 CP3.5 이후 누락된 진행분을 기획자 관점에서 다시 묶은 기록이다. 세부 구현 보고서는 각 CP 보고서를 원본으로 두고, 본 문서는 다음 발주와 발표 대비를 위한 상위 판단을 남긴다.
+
+### 10.1 CP 진행 요약
+
+| CP | 핵심 내용 | 판단 |
+|---|---|---|
+| CP4 | PatchTST RevIN denorm, Channel Independence aggregate, ticker embedding, CI aggregate 비교 기반 | PatchTST fidelity 보강 완료 |
+| CP5 | TiDE per-step head, CNN-LSTM 4-layer dilated `[1,2,4,8]`, RF=31 | horizon별 표현 손실과 CNN-LSTM receptive field 한계 보강 |
+| CP6/CP6.5 | calendar future covariate 7채널, TiDE horizon decoder 추가 | CP3.5의 미래 covariate 생략 판단을 캘린더 변수 기준으로 정정 |
+| CP7 | 학습 최적화 A~F, Optuna/W&B 도입 | sweep 기반 운영 준비 |
+| CP8 | 첫 sweep에서 매 trial 데이터셋 재빌드와 Trial 0 장시간 hang 발견 | 긴 sweep 전에 데이터 경로 최적화 필요 확인 |
+| CP9 | precomputed bundles, lazy SequenceDataset, batch evaluate/infer, Windows num_workers fallback, cache fingerprint, sweep `enable_compile=False` | sweep 병목 대부분 제거 |
+| CP9.5 | WidthPenaltyLoss 부호 버그 제거, NaN/Inf check, MAPE에서 MAE/SMAPE로 전환 | coverage를 누르던 손실 버그 제거 |
+| CP10 | 공통 평가판과 target plumbing 추가. raw, volatility-normalized, direction_label 지원. market_excess/rank는 자리만 확보 | 모델보다 평가 목적을 먼저 고정 |
+| CP10.1 | 투자 지표는 항상 raw_future_returns 기준으로 고정. 비 raw target inference는 score_only로 제한 | target 변경이 투자 평가를 오염시키지 않도록 분리 |
+| CP11 | CNN-LSTM direction auxiliary head 추가. forecast loss 유지, direction loss는 보조로만 추가 | 5티커는 개선, 50티커는 불확실. 채택 보류 |
+| CP12 | finite gate, failed_nan status, amp dtype 분기, NaN diagnostics, inference/backtest status guard | CUDA/bf16 NaN이 결과 테이블과 체크포인트를 오염시키지 못하게 차단 |
+
+### 10.2 새 결정 이력
+
+| # | 결정 | 채택값 | 근거 |
+|---|---|---|---|
+| D25 | Lens 정체성 잠금 | 하방 보수적 line + AI band는 불변 | 프로젝트 차별점. 성능 개선보다 우선하는 제품 철학 |
+| D26 | 투자 지표 기준 | 어떤 target으로 학습해도 투자 지표는 raw realized return 기준 | direction_label, volatility_normalized_return 실험 시 평가 의미 보존 |
+| D27 | direction head 지위 | 본체가 아닌 보조 head. `lambda_direction=0.1` 기본 | direction_accuracy 단독 최적화 금지. band/line guardrail 유지 |
+| D28 | NaN run 저장 정책 | `model_runs.status="failed_nan"` 메타만 저장, 결과 테이블과 checkpoint 차단 | 디버그 재현성과 결과 신뢰성 동시 확보 |
+| D29 | mixed precision 정책 | 기본 bf16 유지, `--amp-dtype off/fp16` 분기 제공 | 정상 경로 속도 유지, NaN 원인 분리 가능 |
+| D30 | CP13 진입 조건 | CP12 50티커 bf16 baseline PASS 전 direction 확대 금지 | precision 문제가 남은 상태에서 모델 성능 판단 금지 |
+
+### 10.3 현재 블로커와 보류 항목
+
+| 상태 | 항목 | 처리 |
+|---|---|---|
+| PENDING | CP12 매트릭스 6개 실행 | 사용자 GPU에서 실행 후 `docs/cp12_report.md` 10번 표에 PASS/NAN 기록 |
+| PENDING | DB 마이그레이션 | `C:\Users\user\lens\.venv\Scripts\python.exe -m backend.db.scripts.ensure_runtime_schema` 1회 실행 |
+| OPEN | CNN-LSTM + CUDA + bf16 NaN 원인 | CP12 매트릭스 결과로 amp, device, direction head, ticker 규모 분리 |
+| OPEN | `market_excess_return` 계산 경로 | 다음 target CP에서 SPY/시장 수익률 조인 경로 추가 |
+| OPEN | `rank_target` 계산 경로 | 날짜 단면별 랭킹 라벨 생성 필요 |
+| LEGACY | `lambda_width` | CLI 호환 인자로만 유지. 현재 손실 계산에는 사용하지 않음 |
+| RESOLVED | W&B mape 키 잔여 | CP12 grep 기준 코드 경로 0건. 과거 sweep artifact의 `test/mape`는 레거시 |
+
+### 10.4 다음 발주 분기
+
+CP12 매트릭스 결과를 받은 뒤 아래 중 하나로 발주한다.
+
+| 조건 | 다음 CP |
+|---|---|
+| `[3]` PASS, `[5]` 또는 `[6]` NaN | CP12.5: LSTM/head 부분 fp32 강제 옵션 도입 |
+| 5티커와 50티커 bf16 모두 PASS | CP13: `lambda_direction` sweep + PatchTST/TiDE direction head 미러 |
+| direction head만 NaN | CP11 direction loss/logit 경로 분리 CP |
+| baseline도 NaN | direction/rank 실험 중단. 데이터, precision, CNN-LSTM forward 경로부터 분리 |
+
+### 10.5 PPT 대비 변경 이력 추가
+
+| 구분 | 변경 | 발표 시 메시지 |
+|---|---|---|
+| 범위 추가 | 공통 투자 평가판 추가: IC, top-k spread, fee-adjusted return/sharpe/turnover | 단순 예측 오차가 아니라 투자 목적 지표로 모델을 검증 |
+| 우선순위 변경 | 긴 LR sweep보다 target/loss/evaluation 재설계 우선 | 성능 정체 원인을 모델 크기보다 목적 함수 불일치로 판단 |
+| 정체성 고정 | line은 하방 보수적, band는 AI 리스크 지표 | Lens의 차별점은 방향 맞히기가 아니라 보수적 판단선과 calibrated band |
+| 안전성 보강 | NaN run을 failed_nan으로 추적하고 결과 저장 차단 | 잘못된 실험 결과가 DB, W&B, checkpoint에 섞이지 않도록 통제 |
+
+### 10.6 CHANGELOG 추가
+
+- **2026-04-27**: CP4~CP12 누락분 통합관리 업데이트. 결정 D25~D30 추가. CP12 매트릭스 전까지 direction head 확장 보류를 명시. 세 문서(`model_architecture.md`, `project_journal.md`, `training_hyperparameters.md`)를 이후 CP 발주 전후로 함께 갱신하는 운영 원칙 확정.
+
+### 10.7 CP12 매트릭스 실행 결과와 CP12.5 확정
+
+사용자가 DB 마이그레이션을 1회 실행했고 `ensure_runtime_schema` 성공을 확인했다. 이후 CP12 보고서 8번 섹션의 6개 매트릭스를 순서대로 실행했다.
+
+| # | 조건 | 결과 | first NaN |
+|---|---|---|---|
+| 1 | 5티커 CPU fp32 baseline | PASS | - |
+| 2 | 5티커 CUDA amp off baseline | PASS | - |
+| 3 | 5티커 CUDA bf16 baseline | NAN | val / `avg_band_width` |
+| 4 | 5티커 CUDA amp off direction_head | PASS | - |
+| 5 | 5티커 CUDA bf16 direction_head | NAN | val / `avg_band_width` |
+| 6 | 50티커 CUDA bf16 baseline | NAN | val / `avg_band_width` |
+
+결론:
+
+- direction head만 NaN이 아니다.
+- CNN-LSTM baseline도 CUDA bf16에서 NaN이 난다.
+- CPU fp32와 CUDA amp off는 통과하므로 데이터 자체보다는 bf16 autocast 경로가 유력하다.
+- `[2]`, `[4]`는 결과 JSON은 정상 출력됐지만 종료코드가 1이었다. PASS로 보되, CP12.5에서 별도 확인이 필요하다.
+
+확정 발주:
+
+- **CP12.5**: CNN-LSTM CUDA bf16 안정화.
+- CP13 direction/rank 성능 실험은 보류.
+- 목표는 `--fp32-modules` 같은 부분 fp32 강제 옵션과 val metric NaN 진단 강화다.
+
+### 10.8 CHANGELOG 추가
+
+- **2026-04-27**: CP12 매트릭스 결과 반영. `[3]`, `[5]`, `[6]`이 val `avg_band_width` NaN으로 실패해 CP13 진입을 차단하고 CP12.5 발주로 확정. `[2]`, `[4]` 종료코드 1 현상을 별도 리스크로 기록.
+
+### 10.9 CP12.5 결과와 CP12.6 확정
+
+CP12.5에서 `--fp32-modules` 옵션과 aggregate tensor finite diagnostics를 적용한 뒤 사용자 GPU에서 매트릭스를 실행했다.
+
+| 케이스 | 조건 | 결과 | 메모 |
+|---|---|---|---|
+| A | bf16 + `fp32_modules=none` | NAN | val aggregate `tensor:raw.line`; raw/post 예측 94.0% finite, target 100% finite |
+| B | bf16 + `fp32_modules=lstm` | PASS | 지표 정상, 종료코드 `-1073740791` |
+| C | bf16 + `fp32_modules=heads` | NAN | heads만 fp32로는 해결 불가 |
+| D | bf16 + `fp32_modules=lstm,heads` | PASS | baseline 지표 정상, 종료코드 `-1073740791` |
+| E | bf16 direction head + `fp32_modules=lstm,heads` | PASS | direction 경로 지표 정상, 종료코드 `-1073740791` |
+| F | 50티커 bf16 baseline + `fp32_modules=lstm,heads` | PASS | 지표 정상, 종료코드 `-1073740791` |
+| G | 5티커 CUDA amp off baseline 종료코드 재확인 | 실패 | 출력 정상, 종료코드 `-1073740791` |
+
+판단:
+
+- NaN 원인은 LSTM bf16 autocast 경로로 보는 것이 맞다.
+- `lstm,heads` fp32 강제는 지표상 D/E/F를 살렸다.
+- 그러나 성공 run의 CUDA 프로세스 종료코드가 계속 비정상이므로 CP12.5 closure는 불가하다.
+- 이 상태에서 sweep을 돌리면 출력은 좋아 보여도 orchestrator가 실패 trial로 처리하거나 결과 수집이 흔들릴 수 있다.
+
+확정 발주:
+
+- **CP12.6**: 성공 run 종료 시점의 Windows/CUDA 비정상 종료 `-1073740791` 분리.
+- NaN 안정화 후보값은 임시로 `--fp32-modules lstm,heads`.
+- CP13은 CP12.6에서 CUDA 성공 run 종료코드 0을 확인한 뒤 발주한다.
+
+### 10.10 CHANGELOG 추가
+
+- **2026-04-27**: CP12.5 결과 반영. `lstm` fp32 강제로 CNN-LSTM bf16 NaN 원인을 LSTM 구간으로 좁혔지만, CUDA 성공 run 종료코드 `-1073740791` 때문에 closure를 보류하고 CP12.6으로 분리.
+
+### 10.11 CP12.6 closure와 범위 재정의
+
+CP12.6 처리 결과, Windows CUDA 환경에서 cuDNN LSTM 출력이 Linear head로 이어진 뒤 프로세스 종료 시 네이티브 크래시가 나는 문제로 분리됐다. `ai/models/cnn_lstm.py`의 LSTM 실행 구간에서 CUDA일 때 cuDNN을 비활성화했고, hard exit 없이도 CUDA 성공 run이 exit code 0으로 종료됐다.
+
+검증 결과:
+
+| 케이스 | 결과 |
+|---|---|
+| 5티커 CPU amp off baseline | PASS, exit code 0 |
+| 5티커 CUDA amp off baseline | PASS, exit code 0 |
+| 5티커 CUDA amp off + explicit cleanup | PASS, exit code 0 |
+| 5티커 CUDA bf16 + `--fp32-modules lstm,heads` | PASS, exit code 0 |
+| 50티커 CUDA bf16 + `--fp32-modules lstm,heads` | PASS, exit code 0 |
+
+CP12.6은 closure한다. 다만 프로젝트 운영 판단은 바뀐다.
+
+새 범위:
+
+- **Phase 1**: PatchTST 단일 주력 모델로 제품 루프와 데모 완성.
+- **Phase 1.5**: TiDE, CNN-LSTM 재도입. 현재 수정은 이때를 위한 안정성 확보로 보관.
+- **Phase 2**: ranker, ensemble, 확장 universe, 고급 research.
+
+새 결정:
+
+| # | 결정 | 채택값 | 근거 |
+|---|---|---|---|
+| D31 | Phase 1 모델 범위 | PatchTST 단일 주력 | 세 모델 동시 개선이 checkpoint-수정-버그 루프를 만들었음 |
+| D32 | TiDE/CNN-LSTM 지위 | Phase 1.5 backlog | 구조 폐기 아님. 제품 루프 완성 뒤 재도입 |
+| D33 | CP 유형 분리 | Product CP와 Research CP 분리 | 연구 버그와 제품 연결 버그가 한 CP에서 섞이는 문제 차단 |
+| D34 | PatchTST 개선 순서 | target/eval/loss 먼저, architecture sweep 나중 | 지금 성능 정체는 모델 크기보다 목적 함수 불일치 가능성이 큼 |
+
+### 10.12 PatchTST Solo Track 로드맵
+
+| CP | 성격 | 목표 |
+|---|---|---|
+| CP13 | Scope reset | 문서와 CLI 기본값을 PatchTST Solo Track에 맞춤. TiDE/CNN-LSTM은 freeze |
+| CP14 | Research | PatchTST supervised baseline 재확정. 현재 best checkpoint와 평가 리포트 고정 |
+| CP15 | Research | `raw_future_return`, `volatility_normalized_return`, `market_excess_return` 비교 |
+| CP16 | Product | 예측/평가/백테스트 조회 API 정리 |
+| CP17 | Product | 프론트 데모 화면 구축: 예측선, 밴드, coverage, backtest, run status |
+| CP18 | Research | PatchTST patch_len/stride/seq_len/ci_aggregate ablation |
+| CP19 | Product | 밴드 calibration/백테스트 리포트 화면 |
+| CP20 | Release freeze | 발표용 end-to-end demo 고정 |
+
+### 10.13 CHANGELOG 추가
+
+- **2026-04-27**: CP12.6 closure. cuDNN LSTM 종료 크래시를 CUDA LSTM 구간 cuDNN off로 해결. 동시에 Phase 1을 PatchTST 단일 주력 모델로 재정의하고 TiDE/CNN-LSTM은 Phase 1.5로 이동.
+
+### 10.14 CP13 closure
+
+CP13 산출물 `docs/cp13_patchtst_solo_plan.md` 작성 완료. 이 문서를 PatchTST Solo Track의 시작점으로 승인한다.
+
+핵심 정리:
+
+- TiDE/CNN-LSTM은 Phase 1에서 freeze.
+- Phase 1.5 backlog: CNN-LSTM direction head 재개, TiDE 미래 공변량 실험, rank/direction target 확장, multi-model 비교표 확대.
+- PatchTST 감사 결과:
+  - RevIN, Channel Independence, learned positional embedding, dropout, line/band head는 현재 구현에 존재.
+  - `ci_aggregate=target/mean/attention`, `ci_target_fast`, ticker embedding, line+band head는 Lens 목적에 따른 의도적 차이.
+  - `ci_aggregate=target` 기본값은 full channel 정보 활용보다 target 채널 편향이 강할 수 있으므로 추후 ablation 필요.
+- 바로잡은 점:
+  - `patch_len`, `stride`, `d_model`, `n_layers`, `n_heads`는 PatchTST 모델 init에는 있으나 `ai.train` CLI와 `ai.sweep` 축에는 아직 직접 노출되어 있지 않다.
+  - 따라서 CP14 Stage B/E 전에 CLI 또는 전용 sweep entry 정리가 필요하다.
+
+CP14 진입 조건:
+
+- 긴 LR sweep 금지.
+- direction/rank head 금지.
+- raw target baseline과 volatility-normalized target baseline을 먼저 비교.
+- `market_excess_return`은 아직 계산 경로가 없으므로 CP14 실행 대상에서 제외.
+
+### 10.15 CHANGELOG 추가
+
+- **2026-04-27**: CP13 closure. PatchTST Solo Track 계획 승인. CP14는 target baseline 2종 비교와 PatchTST 전용 실험 인자 노출 결정으로 발주 예정.
+
+### 10.16 Product Demo Track 분리
+
+모델 연구 난이도가 높아지고 checkpoint-수정-버그 루프가 길어진 문제를 줄이기 위해 Product CP를 Research CP와 분리한다.
+
+신규 문서:
+
+- `docs/cp_product_demo_plan.md`
+
+결정:
+
+| # | 결정 | 채택값 | 근거 |
+|---|---|---|---|
+| D35 | CP 트랙 분리 | Research CP / Product CP 분리 | 모델 실험과 화면/API 버그를 한 CP에서 섞지 않기 위함 |
+| D36 | Phase 1 프론트 모델 범위 | PatchTST만 노출 | TiDE/CNN-LSTM은 Phase 1.5 backlog |
+| D37 | 프론트 성격 | 운영형 리서치 콘솔 | 현재 hero 중심 화면은 데모에는 가능하지만 모델 검수 효율이 낮음 |
+| D38 | 학습 실행 UI | Phase 1에서는 만들지 않음 | read-only 조회와 해석 화면부터 완성 |
+
+Product Track 목표:
+
+- 첫 화면은 주식 보기 완성형 화면으로 구성.
+- 가격 + 보수적 예측선 + AI band overlay.
+- 1M은 AI 밴드가 없어도 가격 화면으로 자연스럽게 표시.
+- 캔들/라인 차트 전환과 보조지표 layer toggle 제공.
+- coverage, avg_band_width, IC, top-k, fee-adjusted 지표 표시.
+- backtest return/sharpe/turnover는 별도 백테스트 화면에서 표시.
+- run status와 config는 별도 모델 학습 화면에서 표시.
+- failed_nan run은 결과에 섞지 않고 상태로만 표시.
+
+CP 분리:
+
+| CP | 트랙 | 목표 |
+|---|---|---|
+| CP14-R | Research | PatchTST target baseline 2종 비교 |
+| CP14-P | Product | AI run/evaluation/backtest 조회 API 최소 구현 |
+| CP15-R | Research | PatchTST patch geometry 실험 |
+| CP15-P | Product | 주식 보기 화면 레이아웃 전환 |
+| CP16-P | Product | line/band chart overlay |
+| CP17-P | Product | 백테스트/평가 지표 패널 연결 |
+
+### 10.17 CHANGELOG 추가
+
+- **2026-04-27**: Product Demo Track 분리. 모델 연구와 백/프론트 완성 CP를 별도로 발주하기로 결정. 현재 프론트는 hero 중심 대시보드에서 PatchTST 리서치 콘솔로 전환 예정.
+- **2026-04-27**: Product Demo Track 방향 수정. 첫 화면은 리서치 콘솔이 아니라 TradingView식 차트 조작력과 토스증권식 간결함을 섞은 주식 보기 화면으로 정의. 백테스트와 모델 학습은 왼쪽 내비게이션의 별도 화면으로 분리.
+
+### 10.18 CP14-P 검수
+
+CP14-P는 read-only API 범위를 지켰다. 모델, 학습 코드, DB schema 변경 없이 AI run/evaluation/backtest 조회 API를 추가했고 backend unittest가 통과했다.
+
+추가 API:
+
+- `GET /api/v1/ai/runs`
+- `GET /api/v1/ai/runs/{run_id}`
+- `GET /api/v1/ai/runs/{run_id}/evaluations`
+- `GET /api/v1/ai/runs/{run_id}/backtests`
+- `GET /api/v1/stocks/{ticker}/predictions/latest?run_id=...`
+
+검수 결과:
+
+- `/api/v1/ai` 라우터 등록 확인.
+- `failed_nan` run은 기본 목록에서 제외되고, 명시 요청 시 조회 가능.
+- `predictions/latest?run_id=...`는 `status != completed` run을 409로 거부.
+- `include_config=true`를 제외하면 원본 config를 직접 노출하지 않음.
+- `NaN`/무한대 값은 JSON 응답에서 `null`로 변환.
+
+주의할 제한:
+
+1. `prediction_evaluations` 테이블에는 `spearman_ic`, `top_k_*`, `fee_adjusted_*` 컬럼이 없다. 해당 aggregate 지표는 현재 run detail의 `val_metrics`/`test_metrics`에서 보는 것이 맞다. `/evaluations`는 ticker/asof 단위 지표 중심으로 해석한다.
+2. `predictions` 테이블의 unique key가 `(ticker, model_name, timeframe, horizon, asof_date)`라서 과거 run별 prediction 전체 이력을 보장하지 않는다. `run_id` 조회는 해당 run의 prediction row가 아직 남아 있는 경우에만 안정적이다. 향후 run별 prediction 비교 화면이 필요하면 DB schema 재설계를 별도 CP로 분리한다.
+
+판정:
+
+- CP14-P 최소 read-only API는 조건부 closure 가능.
+- 위 2개 제한은 CP15-P/CP16-P 프론트 연결 전에 사용자에게 보이는 의미를 정리해야 한다.
+
+### 10.19 학습 실행 ETA 운영 원칙
+
+모델 학습은 사용자가 직접 GPU에서 실행하므로, 이후 Research CP 지시서에는 반드시 예상 소요 시간을 함께 적는다. 하염없이 기다리는 상태를 줄이기 위해 다음 항목을 기본 포함한다.
+
+| 항목 | 원칙 |
+|---|---|
+| 사전 ETA | 실행 전 `예상 1 epoch 시간`, `총 예상 시간`, `중간 확인 시점`을 적는다 |
+| 1 epoch 재추정 | 첫 epoch가 끝나면 실제 시간을 기준으로 남은 시간을 다시 계산한다 |
+| 중단 기준 | NaN, OOM, GPU 사용률 저하, 지표 악화가 보이면 몇 epoch에서 멈출지 명시한다 |
+| 자원 기록 | batch size, VRAM 사용량, GPU util, epoch time을 보고서에 남긴다 |
+| batch 증량 | 입력 NaN 정합을 먼저 닫은 뒤 `64 → 128 → 256` 순서로 처리량을 확인한다 |
+
+초기 ETA는 보수적으로 잡는다. 실제 epoch 시간이 나오면 그 값이 더 중요하다.
+
+### 10.20 CHANGELOG 추가
+
+- **2026-04-27**: Research CP 실행 지시서에 학습 시간 ETA, 1 epoch 재추정, 중단 기준, VRAM/batch 기록을 포함하기로 결정.
+
+### 10.21 CP15-P closure와 CP16-P 진입 기준
+
+CP15-P에서 첫 화면을 hero 소개가 아니라 주식 보기 화면으로 전환했고, 왼쪽 내비게이션으로 `주식 보기 / 백테스트 / 모델 학습` 3화면을 분리했다.
+
+CP15-P 검수 기준:
+
+- 1M은 가격 조회만 수행하고 AI layer를 비활성 처리한다.
+- 모델 선택과 target type은 주식 보기 화면에서 숨긴다.
+- 백테스트와 모델 학습 화면은 read-only 구조를 유지한다.
+- 차트 overlay는 props 자리만 열렸고 실제 렌더링은 CP16-P로 넘긴다.
+
+CP16-P 진입 기준:
+
+- 주식 보기와 백테스트 화면의 사용자 노출 문구는 한국어로 정리한다.
+- 모델 학습 화면은 리서치 콘솔이므로 `completed`, `failed_nan`, `run_id` 같은 원문 상태값은 괄호 병기까지 허용한다.
+- AI 밴드와 보수적 예측선 overlay를 실제 차트에 렌더링한다.
+- overlay 데이터가 없거나 1M인 경우 차트가 깨지지 않아야 한다.
+
+### 10.22 학습 진행 확인 대안
+
+Codex 내부 터미널에서 긴 학습을 실행하면 사용자가 진행 상황을 바로 보기 어렵다. 큰 학습은 W&B를 켜면 되지만, 짧은 검증 run에도 최소 진행률 확인 수단이 필요하다.
+
+다음 Research CP 후보에 `run progress sidecar`를 추가한다.
+
+| 방식 | 용도 |
+|---|---|
+| stdout | 지금처럼 즉시 확인 가능한 환경용 |
+| W&B | 긴 sweep과 큰 학습용 |
+| `ai/runs/progress/{run_id}.jsonl` | W&B를 끈 짧은 학습에서도 epoch 진행률 확인 |
+| DB status | `completed`/`failed_nan`/향후 `running` 상태 추적 |
+
+1차 구현은 파일 기반 jsonl을 우선한다. DB에 `running` 상태를 추가하는 것은 schema 변경이므로 별도 CP로 판단한다.
+
+### 10.23 CP16-P 검수
+
+CP16-P에서 주식 보기 차트에 실제 AI overlay를 연결했다. 프론트는 최신 완료 PatchTST run을 먼저 고른 뒤 `run_id` 기준으로 prediction을 조회한다.
+
+확인 결과:
+
+- `forecast_dates`, `line_series`, `conservative_series`, `upper_band_series`, `lower_band_series`, `band_quantile_low`, `band_quantile_high`는 백엔드 응답 스키마와 일치한다.
+- 1D/1W는 completed PatchTST run 기준으로 prediction을 조회한다.
+- 1M은 가격 전용으로 유지하고 prediction/evaluation API를 호출하지 않는다.
+- AI 밴드는 상단/하단 점선으로 표시하고, 보수적 예측선은 실선으로 표시한다.
+- band fill은 안정 구현 부담 때문에 보류했다. 현재 단계에서는 가격 스케일 안정성을 우선한다.
+- 주식 보기와 백테스트 주요 라벨은 한국어로 정리됐다.
+- 승인된 환경에서 `frontend`의 `npm run build`가 통과했다.
+
+남은 제품 cleanup:
+
+- 백테스트 화면은 latest completed run을 고를 때 현재 선택한 timeframe을 함께 넘겨야 한다. 지금은 전체 latest run을 고른 뒤 backtest timeframe만 필터링하므로, 최신 run과 선택 timeframe이 다르면 빈 결과가 나올 수 있다.
+- 모델 학습 화면의 일부 리서치 라벨은 원문 병기 정책에 맞춰 천천히 정리한다.
+
+판정:
+
+- CP16-P는 조건부 closure 가능.
+- 다음 제품 CP는 백테스트 timeframe run 선택 cleanup과 평가/백테스트 지표 패널 고도화를 우선한다.
+
+### 10.24 CP17-P 검수
+
+CP17-P에서 백테스트와 모델 학습 화면의 평가 지표 표시가 강화됐다. 핵심 cleanup이었던 latest completed run 조회의 timeframe 불일치 문제도 수정됐다.
+
+확인 결과:
+
+- `BacktestView`의 `fetchAiRuns` 호출에 `timeframe: nextTimeframe`이 추가됐다.
+- 백테스트 조회도 같은 `nextTimeframe`으로 이어진다.
+- 수수료 반영 지표와 수수료 전 gross 지표가 분리 표시된다.
+- 백테스트 화면에 latest completed PatchTST run의 `val_metrics`/`test_metrics` 품질 패널이 추가됐다.
+- 모델 학습 화면의 상태 라벨은 `완료(completed)`, `NaN 실패(failed_nan)`로 정리됐다.
+- 모델 학습 화면에도 `val_metrics`/`test_metrics` 품질 패널이 추가됐다.
+- 주식 보기 화면에는 target type 관련 용어를 새로 노출하지 않았다.
+- 승인된 환경에서 `frontend`의 `npm run build`가 통과했다.
+
+남은 제품 TODO:
+
+- 백테스트 `equity curve`와 `drawdown` series가 저장되면 placeholder를 실제 차트로 교체한다.
+- metric별 단위가 더 명확해지면 퍼센트/소수 표시 규칙을 지표별로 세분화한다.
+- 모델 학습 화면의 연구 라벨은 제품 polish 단계에서 원문 병기/한글명을 더 정리한다.
+
+판정:
+
+- CP17-P는 closure 가능.
+- 제품 트랙은 이제 `주식 보기 overlay → 백테스트 지표 → 모델 학습 run 품질`의 기본 조회 루프를 갖췄다.
+
+### 10.25 CP18-P 검수
+
+CP18-P에서 데모 실행 절차와 발표 동선을 고정했다. `scripts/start_demo.ps1`이 추가됐고, 수동 실행 절차도 `docs/cp18_product_demo_report.md`에 정리됐다.
+
+확인 결과:
+
+- `scripts/start_demo.ps1`은 별도 PowerShell 창 2개로 backend/frontend dev server를 실행한다.
+- 수동 실행 절차가 백엔드/프론트 각각 문서화됐다.
+- `GET http://127.0.0.1:8000/api/v1/health/live` 응답 200을 확인했다.
+- `GET http://127.0.0.1:3000` 응답 200을 확인했다.
+- 보고서에 `주식 보기 → 1M 전환 → 백테스트 → 모델 학습` 발표 동선이 정리됐다.
+- 백엔드 연결 실패 문구, metric card 줄바꿈, chart legend 간격, 모바일 padding polish가 반영됐다.
+- 주식 보기 화면에는 target type 관련 용어를 새로 노출하지 않았다.
+
+현재 데모 리스크:
+
+- 로컬 DB 기준으로 AAPL prediction/backtest/evaluation이 비어 있어 실제 AI overlay는 보이지 않을 수 있다.
+- 1W/1M completed PatchTST run이 없어 백테스트/평가 화면은 empty state 중심이다.
+- 인앱 브라우저 자동 navigation은 타임아웃이 발생했으나, 셸 HTTP 응답은 3000/8000 모두 200이다. 최종 시각 QA는 사용자의 일반 브라우저에서 수행한다.
+
+판정:
+
+- CP18-P는 closure 가능.
+- 다음 제품 단계는 fake data 없이 실제 inference/backtest 산출물을 생성해 AI overlay가 보이는 데모 run을 확보하는 것이다.
+
+#### CP18-P 추가 안정화
+
+CP18 추가 지시로 데모 산출물 부족 상태를 숨기지 않고 화면이 깨지지 않게 보강했다.
+
+- `scripts/check_demo_readiness.ps1`이 추가됐다.
+- `/api/v1/stocks?search=AAPL` 503은 전체 화면 오류가 아니라 작은 안내 문구로 처리한다.
+- prediction 404와 일반 AI prediction API 오류를 구분한다.
+- prediction row가 없어도 가격 차트는 유지한다.
+- readiness 결과는 `health`, `1D prices`, `1M prices`, `stock search`, `completed run`, `prediction`, `backtest`, `evaluation`을 확인한다.
+- 현재 결과는 health/price/completed run은 OK, stock search는 FAIL, prediction/backtest/evaluation은 WARN이다.
+
+이로써 CP18은 데모 실행 안정화와 산출물 부족의 명시적 표시까지 포함해 closure 처리한다.
+
+### 10.26 PatchTST 입력 정합 복구와 학습 운영 재설계
+
+CP14-R 이후 막혔던 PatchTST 입력 feature NaN 문제는 복구됐다.
+
+확인 결과:
+
+- 재무 6개 컬럼 `revenue`, `net_income`, `equity`, `eps`, `roe`, `debt_ratio`의 NaN은 학습 tensor 진입 전 0.0으로 impute된다.
+- `has_fundamentals`는 원본 재무 데이터 존재 여부 기준으로 0.0/1.0이 들어간다.
+- `raw_future_return` PatchTST 1D 전체 학습은 NaN 없이 완료됐다.
+- 다만 실행 조건이 사실상 `473 ticker × seq_len 252 × batch 64 × 5 epoch` 전체 학습이어서 epoch당 약 800~930초, 전체 약 80분이 걸렸다.
+- `volatility_normalized_return` 전체 학습은 시간 문제로 중단됐고 비교 판단은 아직 불가하다.
+
+운영 판단:
+
+- 이제 병목은 입력 정합이 아니라 학습 운영이다.
+- 다음 target/geometry 실험은 전체 473 ticker 5 epoch로 바로 들어가지 않는다.
+- 모든 새 조건은 `--limit-tickers 50`, `--epochs 1` smoke를 먼저 통과해야 한다.
+- smoke 통과 후 batch size ladder `64 → 128 → 256`으로 처리량과 VRAM을 확인한다.
+- 그 다음에만 473 ticker 또는 5 epoch 확대를 허용한다.
+
+다음 즉시 실행 후보:
+
+```powershell
+C:\Users\user\lens\.venv\Scripts\python.exe -m ai.train --model patchtst --timeframe 1D --seq-len 252 --epochs 1 --batch-size 64 --device cuda --no-wandb --no-compile --ci-aggregate target --line-target-type volatility_normalized_return --band-target-type volatility_normalized_return --limit-tickers 50
+```
+
+이 명령의 목적은 성능 판단이 아니라 volatility target 경로가 finite하게 도는지 확인하는 것이다.
+
+### 10.27 CP19 데모용 실제 AI 산출물 확보
+
+CP19에서 fake data 없이 실제 저장 산출물이 있는 데모 후보를 확보했다.
+
+확보 산출물:
+
+| 항목 | 값 |
+|---|---|
+| demo run | `patchtst-1D-fc096a026a1e` |
+| demo ticker | `AAPL` |
+| checkpoint | `ai\artifacts\checkpoints\patchtst_1D_patchtst-1D-fc096a026a1e.pt` |
+| prediction row | 존재 |
+| `forecast_dates` | 길이 5 |
+| `line_series` | 길이 5 |
+| `upper_band_series` | 길이 5 |
+| `lower_band_series` | 길이 5 |
+| evaluation row | 존재 |
+| backtest row | `ai.backtest --save`로 실제 생성 완료 |
+
+프론트 동작 변경:
+
+- 주식 보기 화면은 최신 completed run만 고집하지 않는다.
+- 최근 completed PatchTST run들을 순서대로 확인해, 실제 prediction row가 있는 run을 사용한다.
+- 현재 로컬 DB에서는 최신 run `patchtst-1D-94d61c4e84d3`에 AAPL prediction이 없으므로, 다음 후보 `patchtst-1D-fc096a026a1e`를 데모 run으로 사용한다.
+- 이 변경으로 주식 보기 화면에서 실제 AI 밴드와 보수적 예측선 overlay 표시가 가능해졌다.
+
+남은 리스크:
+
+- `patchtst-1D-94d61c4e84d3` checkpoint는 현재 PatchTST 코드와 state_dict shape가 맞지 않아 inference 저장에 실패했다.
+- 모델 구조 변경 금지 원칙에 따라 호환 로더를 만들지 않았다.
+- `stock_info` 기반 티커 검색 503은 여전히 남아 있으나, 직접 티커 입력과 가격/AI overlay 데모에는 영향을 주지 않도록 fallback 처리되어 있다.
+
+판정:
+
+- CP19는 closure 가능.
+- 제품 트랙은 이제 empty state 데모가 아니라 실제 AI overlay가 보이는 데모 run을 갖췄다.

@@ -59,6 +59,16 @@ class TimeframeDisabledError(AppError):
         )
 
 
+class InvalidRunStatusError(AppError):
+    def __init__(self, message: str, *, details: object | None = None) -> None:
+        super().__init__(
+            message,
+            code="RUN_NOT_COMPLETED",
+            status_code=409,
+            details=details,
+        )
+
+
 class InsufficientHistoryError(AppError):
     def __init__(self, message: str, *, details: object | None = None) -> None:
         super().__init__(

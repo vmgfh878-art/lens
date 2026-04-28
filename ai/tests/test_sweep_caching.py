@@ -99,6 +99,7 @@ def _dummy_config() -> TrainConfig:
         compile_model=False,
         ci_target_fast=False,
         use_direction_head=False,
+        fp32_modules="none",
         use_wandb=False,
         wandb_project="lens-ai",
         model_ver="v2-multihead",

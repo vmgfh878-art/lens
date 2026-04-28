@@ -11,13 +11,13 @@ from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.middleware.request_id import request_id_middleware
 from app.routers import predict, prices
-from app.routers.v1 import health, stocks
+from app.routers.v1 import ai, health, stocks
 
 logger = logging.getLogger("lens.api")
 
 
 def _parse_cors_origins() -> list[str]:
-    raw = os.environ.get("BACKEND_CORS_ORIGINS", "http://localhost:3000")
+    raw = os.environ.get("BACKEND_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
@@ -34,6 +34,7 @@ app.middleware("http")(request_id_middleware)
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(stocks.router, prefix="/api/v1")
+app.include_router(ai.router, prefix="/api/v1")
 app.include_router(prices.router, prefix="/prices", tags=["prices"])
 app.include_router(predict.router, prefix="/predict", tags=["predict"])
 

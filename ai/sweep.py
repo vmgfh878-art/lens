@@ -117,6 +117,7 @@ def namespace_to_config(base_args: argparse.Namespace, *, lr: float, weight_deca
         compile_model=base_args.compile_model,
         ci_target_fast=base_args.ci_target_fast,
         use_direction_head=False,
+        fp32_modules="none",
         use_wandb=bool(base_args.use_wandb and os.environ.get("WANDB_MODE") != "disabled"),
         wandb_project=base_args.wandb_project,
         model_ver="v2-multihead",
