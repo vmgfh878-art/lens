@@ -79,6 +79,12 @@ RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED_NAN = "failed_nan"
 NAN_STREAK_LIMIT = 3
 CLI_CUDA_CLEANUP_STATE: dict[str, Any] | None = None
+CHECKPOINT_SELECTION_CHOICES = ("val_total", "coverage_gate")
+
+COVERAGE_GATE_MIN = 0.75
+COVERAGE_GATE_MAX = 0.95
+COVERAGE_GATE_MAX_UPPER_BREACH = 0.15
+COVERAGE_GATE_MAX_LOWER_BREACH = 0.20
 
 
 @dataclass
@@ -129,6 +135,7 @@ class TrainConfig:
     model_ver: str
     early_stop_patience: int
     early_stop_min_delta: float
+    checkpoint_selection: str = "val_total"
     amp_dtype: str = "bf16"
     detect_anomaly: bool = False
     explicit_cuda_cleanup: bool = False
@@ -219,6 +226,135 @@ class EarlyStopping:
         )
 
 
+@dataclass
+class CheckpointCandidate:
+    epoch: int
+    metrics: dict[str, float]
+    state_dict: dict[str, torch.Tensor]
+
+
+@dataclass
+class CheckpointSelectionResult:
+    candidate: CheckpointCandidate
+    checkpoint_selection: str
+    selected_reason: str
+    coverage_gate_failed: bool
+    best_val_total_epoch: int | None
+
+
+def clone_state_dict(model) -> dict[str, torch.Tensor]:
+    return {
+        key: value.detach().cpu().clone()
+        for key, value in model.state_dict().items()
+    }
+
+
+def coverage_gate_eligible(metrics: dict[str, float]) -> bool:
+    coverage = float(metrics.get("coverage", float("nan")))
+    upper_breach = float(metrics.get("upper_breach_rate", float("nan")))
+    lower_breach = float(metrics.get("lower_breach_rate", float("nan")))
+    spearman_ic = metrics.get("spearman_ic")
+    long_short_spread = metrics.get("long_short_spread")
+    return (
+        math.isfinite(coverage)
+        and COVERAGE_GATE_MIN <= coverage <= COVERAGE_GATE_MAX
+        and math.isfinite(upper_breach)
+        and upper_breach <= COVERAGE_GATE_MAX_UPPER_BREACH
+        and math.isfinite(lower_breach)
+        and lower_breach <= COVERAGE_GATE_MAX_LOWER_BREACH
+        and spearman_ic is not None
+        and math.isfinite(float(spearman_ic))
+        and float(spearman_ic) > 0.0
+        and long_short_spread is not None
+        and math.isfinite(float(long_short_spread))
+        and float(long_short_spread) > 0.0
+    )
+
+
+def coverage_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float]:
+    metrics = candidate.metrics
+    return (
+        float(metrics.get("upper_breach_rate", float("inf"))),
+        -float(metrics.get("spearman_ic", float("-inf"))),
+        -float(metrics.get("long_short_spread", float("-inf"))),
+        float(metrics.get("forecast_loss", metrics.get("total_loss", float("inf")))),
+    )
+
+
+class CheckpointSelector:
+    """validation 목적에 맞는 checkpoint 후보를 epoch별로 보관하고 선택한다."""
+
+    def __init__(self, mode: str = "val_total") -> None:
+        if mode not in CHECKPOINT_SELECTION_CHOICES:
+            raise ValueError(f"지원하지 않는 checkpoint_selection 값입니다: {mode}")
+        self.mode = mode
+        self.best_val_total_candidate: CheckpointCandidate | None = None
+        self.best_coverage_gate_candidate: CheckpointCandidate | None = None
+
+    def update(self, *, epoch: int, metrics: dict[str, float], model) -> None:
+        current_value = float(metrics.get("forecast_loss", metrics.get("total_loss", float("inf"))))
+        is_best_val_total = False
+        if self.best_val_total_candidate is None:
+            is_best_val_total = True
+        else:
+            best_metrics = self.best_val_total_candidate.metrics
+            best_value = float(best_metrics.get("forecast_loss", best_metrics.get("total_loss", float("inf"))))
+            is_best_val_total = current_value < best_value
+
+        is_best_coverage_gate = False
+        if self.mode == "coverage_gate" and coverage_gate_eligible(metrics):
+            candidate_key = coverage_gate_sort_key(
+                CheckpointCandidate(epoch=epoch, metrics=metrics, state_dict={})
+            )
+            if self.best_coverage_gate_candidate is None:
+                is_best_coverage_gate = True
+            else:
+                is_best_coverage_gate = candidate_key < coverage_gate_sort_key(self.best_coverage_gate_candidate)
+
+        if not (is_best_val_total or is_best_coverage_gate):
+            return
+
+        candidate = CheckpointCandidate(
+            epoch=epoch,
+            metrics=dict(metrics),
+            state_dict=clone_state_dict(model),
+        )
+        if is_best_val_total:
+            self.best_val_total_candidate = candidate
+        if is_best_coverage_gate:
+            self.best_coverage_gate_candidate = candidate
+
+    def select(self) -> CheckpointSelectionResult:
+        if self.best_val_total_candidate is None:
+            raise RuntimeError("선택할 checkpoint 후보가 없습니다.")
+
+        if self.mode == "val_total":
+            return CheckpointSelectionResult(
+                candidate=self.best_val_total_candidate,
+                checkpoint_selection=self.mode,
+                selected_reason="val_total_best",
+                coverage_gate_failed=False,
+                best_val_total_epoch=self.best_val_total_candidate.epoch,
+            )
+
+        if self.best_coverage_gate_candidate is None:
+            return CheckpointSelectionResult(
+                candidate=self.best_val_total_candidate,
+                checkpoint_selection=self.mode,
+                selected_reason="coverage_gate_failed_fallback_val_total",
+                coverage_gate_failed=True,
+                best_val_total_epoch=self.best_val_total_candidate.epoch,
+            )
+
+        return CheckpointSelectionResult(
+            candidate=self.best_coverage_gate_candidate,
+            checkpoint_selection=self.mode,
+            selected_reason="coverage_gate_eligible",
+            coverage_gate_failed=False,
+            best_val_total_epoch=self.best_val_total_candidate.epoch,
+        )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Lens 멀티헤드 시계열 모델 학습")
     parser.add_argument("--model", choices=MODEL_REGISTRY.keys(), default="patchtst")
@@ -274,6 +410,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-ver", default="v2-multihead")
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4)
+    parser.add_argument("--checkpoint-selection", choices=CHECKPOINT_SELECTION_CHOICES, default="val_total")
     parser.add_argument("--use-future-covariate", dest="use_future_covariate", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--amp-dtype", choices=AMP_DTYPE_CHOICES, default="bf16",
                         help="CUDA autocast dtype. 'off'는 autocast 자체를 끈다 (NaN 디버그용).")
@@ -815,6 +952,8 @@ def evaluate_bundle(
         "band_loss": metrics["band_loss"],
         "cross_loss": metrics["cross_loss"],
         "coverage": metrics["coverage"],
+        "lower_breach_rate": metrics["lower_breach_rate"],
+        "upper_breach_rate": metrics["upper_breach_rate"],
         "avg_band_width": metrics["avg_band_width"],
         "direction_accuracy": metrics["direction_accuracy"],
         "mae": metrics["mae"],
@@ -1044,6 +1183,7 @@ def run_training(
         min_delta=config.early_stop_min_delta,
         mode="min",
     )
+    checkpoint_selector = CheckpointSelector(config.checkpoint_selection)
 
     wandb_run = maybe_init_wandb(
         config,
@@ -1052,7 +1192,6 @@ def run_training(
         name=wandb_name,
         config_override=wandb_config_override,
     )
-    best_summary: dict[str, float] = {}
     grad_norm_history: list[float] = []
     failure_state: FiniteCheckResult | None = None
     started_at = time.perf_counter()
@@ -1168,11 +1307,15 @@ def run_training(
         stop_triggered = early_stopping.step(val_forecast, epoch, unwrap_model(model))
         early_state = early_stopping.snapshot()
 
-        if early_state.best_epoch == epoch:
-            best_summary = {
-                **train_metrics,
-                **val_summary,
-            }
+        combined_summary = {
+            **train_metrics,
+            **val_summary,
+        }
+        checkpoint_selector.update(
+            epoch=epoch,
+            metrics=combined_summary,
+            model=unwrap_model(model),
+        )
 
         elapsed_total = time.perf_counter() - started_at
         epoch_seconds = time.perf_counter() - epoch_started_at
@@ -1229,17 +1372,49 @@ def run_training(
             )
             break
 
-    early_stopping.restore_best(unwrap_model(model))
+    selection_result = checkpoint_selector.select()
+    unwrap_model(model).load_state_dict(selection_result.candidate.state_dict)
+    selected_summary = selection_result.candidate.metrics
     checkpoint_metrics = {
-        **best_summary,
-        "best_epoch": early_stopping.best_epoch,
-        "best_val_total": early_stopping.best_value,
-        "best_val_forecast_loss": early_stopping.best_value,
-        "best_val_total_including_direction": best_summary.get("total_loss"),
+        **selected_summary,
+        "best_epoch": selection_result.candidate.epoch,
+        "best_val_total": selected_summary.get("forecast_loss"),
+        "best_val_forecast_loss": selected_summary.get("forecast_loss"),
+        "best_val_total_including_direction": selected_summary.get("total_loss"),
         "early_stopped": bool(early_stopping.should_stop),
         "grad_norm_history": grad_norm_history,
-        "best_grad_norm_mean": best_summary.get("grad_norm_mean", 0.0),
+        "best_grad_norm_mean": selected_summary.get("grad_norm_mean", 0.0),
+        "checkpoint_selection": selection_result.checkpoint_selection,
+        "selected_epoch": selection_result.candidate.epoch,
+        "selected_reason": selection_result.selected_reason,
+        "coverage_gate_failed": selection_result.coverage_gate_failed,
+        "selected_coverage": selected_summary.get("coverage"),
+        "selected_upper_breach_rate": selected_summary.get("upper_breach_rate"),
+        "selected_lower_breach_rate": selected_summary.get("lower_breach_rate"),
+        "selected_spearman_ic": selected_summary.get("spearman_ic"),
+        "selected_long_short_spread": selected_summary.get("long_short_spread"),
+        "selected_fee_adjusted_return": selected_summary.get("fee_adjusted_return"),
+        "best_val_total_epoch": selection_result.best_val_total_epoch,
+        "legacy_best_val_total": early_stopping.best_value,
     }
+    print(
+        json.dumps(
+            {
+                "checkpoint_selection": checkpoint_metrics["checkpoint_selection"],
+                "selected_epoch": checkpoint_metrics["selected_epoch"],
+                "selected_reason": checkpoint_metrics["selected_reason"],
+                "coverage_gate_failed": checkpoint_metrics["coverage_gate_failed"],
+                "selected_coverage": checkpoint_metrics["selected_coverage"],
+                "selected_upper_breach_rate": checkpoint_metrics["selected_upper_breach_rate"],
+                "selected_lower_breach_rate": checkpoint_metrics["selected_lower_breach_rate"],
+                "selected_spearman_ic": checkpoint_metrics["selected_spearman_ic"],
+                "selected_long_short_spread": checkpoint_metrics["selected_long_short_spread"],
+                "selected_fee_adjusted_return": checkpoint_metrics["selected_fee_adjusted_return"],
+                "best_val_total_epoch": checkpoint_metrics["best_val_total_epoch"],
+            },
+            ensure_ascii=False,
+        )
+    )
 
     # CP12 finite gate (checkpoint metrics 저장 직전)
     cp_check = check_metrics_finite(checkpoint_metrics, phase="checkpoint", run_id=run_id)
@@ -1512,6 +1687,7 @@ if __name__ == "__main__":
         model_ver=args.model_ver,
         early_stop_patience=args.early_stop_patience,
         early_stop_min_delta=args.early_stop_min_delta,
+        checkpoint_selection=args.checkpoint_selection,
         amp_dtype=args.amp_dtype,
         detect_anomaly=args.detect_anomaly,
         explicit_cuda_cleanup=args.explicit_cuda_cleanup,

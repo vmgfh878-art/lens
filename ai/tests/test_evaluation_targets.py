@@ -96,6 +96,23 @@ class EvaluationTargetsTestCase(unittest.TestCase):
         self.assertLess(float(metrics["top_k_short_spread"]), 0.0)
         self.assertGreater(float(metrics["long_short_spread"]), 0.0)
         self.assertIsNotNone(metrics["fee_adjusted_return"])
+        self.assertAlmostEqual(float(metrics["lower_breach_rate"]), 0.0, places=6)
+        self.assertAlmostEqual(float(metrics["upper_breach_rate"]), 0.0, places=6)
+
+    def test_summarize_forecast_metrics_reports_band_breach_rates(self):
+        metrics = summarize_forecast_metrics(
+            metadata=None,
+            line_predictions=torch.tensor([[0.0], [0.0], [0.0]], dtype=torch.float32),
+            lower_predictions=torch.tensor([[-0.1], [-0.1], [-0.1]], dtype=torch.float32),
+            upper_predictions=torch.tensor([[0.1], [0.1], [0.1]], dtype=torch.float32),
+            line_targets=torch.tensor([[0.0], [0.0], [0.0]], dtype=torch.float32),
+            band_targets=torch.tensor([[-0.2], [0.0], [0.2]], dtype=torch.float32),
+            raw_future_returns=torch.tensor([[-0.2], [0.0], [0.2]], dtype=torch.float32),
+        )
+
+        self.assertAlmostEqual(float(metrics["coverage"]), 1.0 / 3.0, places=6)
+        self.assertAlmostEqual(float(metrics["lower_breach_rate"]), 1.0 / 3.0, places=6)
+        self.assertAlmostEqual(float(metrics["upper_breach_rate"]), 1.0 / 3.0, places=6)
 
     def test_build_target_array_supports_direction_and_vol_normalized(self):
         future = build_target_array([0.1, -0.2], history_returns=[0.01, 0.02], target_type="raw_future_return")

@@ -44,6 +44,8 @@ def summarize_forecast_metrics(
 
     summary: dict[str, float | None] = {
         "coverage": float(((band_actual >= lower) & (band_actual <= upper)).float().mean().item()),
+        "lower_breach_rate": float((band_actual < lower).float().mean().item()),
+        "upper_breach_rate": float((band_actual > upper).float().mean().item()),
         "avg_band_width": float((upper - lower).mean().item()),
         "mae": float(absolute_error.mean().item()),
         "smape": float(smape.mean().item()),
@@ -172,6 +174,8 @@ def build_single_sample_evaluation(
         direction_threshold = 0.0
     return {
         "coverage": float(((actual_tensor >= lower_tensor) & (actual_tensor <= upper_tensor)).float().mean().item()),
+        "lower_breach_rate": float((actual_tensor < lower_tensor).float().mean().item()),
+        "upper_breach_rate": float((actual_tensor > upper_tensor).float().mean().item()),
         "avg_band_width": float((upper_tensor - lower_tensor).mean().item()),
         "direction_accuracy": float(((line_tensor >= direction_threshold) == (actual_tensor >= direction_threshold)).float().mean().item()),
         "mae": float(absolute_error.mean().item()),

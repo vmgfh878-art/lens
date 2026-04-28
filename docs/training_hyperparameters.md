@@ -863,3 +863,157 @@ ETA 기준:
 - demo run의 지표는 발표용 작동 확인용이지 최종 성능 주장 근거가 아니다.
 - 성능 주장은 이후 smoke-first 실험과 full confirm run을 통해 다시 정리한다.
 - fake data는 사용하지 않는다.
+### CP21-R PatchTST geometry smoke 기준
+
+PatchTST 실험은 full run 전에 50티커 smoke로 먼저 확인한다.
+
+공통 smoke 조건:
+
+| 항목 | 값 |
+|---|---|
+| model | `patchtst` |
+| timeframe | `1D` |
+| seq_len | `252` |
+| epochs | `3` |
+| batch_size | `256` |
+| target | `raw_future_return` |
+| ci_aggregate | `target` |
+| compile | off |
+| W&B | off |
+| limit_tickers | `50` |
+
+geometry 비교 결과:
+
+| 조건 | patch_len | stride | n_patches | 평균 epoch_seconds | VRAM peak |
+|---|---:|---:|---:|---:|---:|
+| baseline | 16 | 8 | 30 | 75.9685 | 7781 MB |
+| short | 8 | 4 | 62 | 136.2211 | 13464 MB |
+| dense | 16 | 4 | 60 | 132.1239 | 13039 MB |
+| long | 32 | 16 | 14 | 45.6483 | 4976 MB |
+| overlap | 32 | 8 | 28 | 71.5938 | 7472 MB |
+
+현재 기본 후보:
+
+- 주력: `patch_len=16`, `stride=8`
+- 보조 calibration 후보: `patch_len=32`, `stride=16`
+
+주의:
+
+- coverage가 0.98 이상이면 경고 구간으로 본다.
+- coverage 1.0은 좋은 결과로 단정하지 않는다.
+- geometry 변경만으로 밴드 폭과 투자 지표를 동시에 개선하지 못했으므로, 다음 단계는 band calibration을 우선한다.
+### CP22-R band calibration smoke 기준
+
+PatchTST geometry는 `patch_len=16`, `stride=8`로 유지한다. CP22-R에서는 q 범위, `lambda_band`, `band_mode`만 비교했다.
+
+현재 calibration 기준점:
+
+| 항목 | 값 |
+|---|---|
+| patch_len | 16 |
+| patch_stride | 8 |
+| band_mode | `direct` |
+| q_low | 0.20 |
+| q_high | 0.80 |
+| lambda_band | 2.0 |
+
+이 설정은 50티커 3epoch에서 `coverage=0.972607`, `avg_band_width=0.303344`, `spearman_ic=0.069890`, `long_short_spread=0.005254`, `fee_adjusted_return=6.956047`을 기록했다.
+
+주의:
+
+- coverage가 아직 0.98에 가깝기 때문에 최종 후보는 아니다.
+- 다음 smoke에서는 `q_low=0.25~0.30`, `q_high=0.70~0.75` 범위를 우선 본다.
+- `band_mode=param`은 이번 smoke에서 투자 지표가 크게 약해졌으므로 우선순위를 낮춘다.
+### CP23-R narrow band 후보
+
+CP23-R 결과 기준으로 PatchTST band calibration 후보를 갱신한다.
+
+1차 후보:
+
+| 항목 | 값 |
+|---|---|
+| q_low | 0.30 |
+| q_high | 0.70 |
+| lambda_band | 2.0 |
+| band_mode | `direct` |
+| patch_len | 16 |
+| patch_stride | 8 |
+
+50티커 3epoch 결과:
+
+| metric | 값 |
+|---|---:|
+| coverage | 0.890662 |
+| lower_breach_rate | 0.030712 |
+| upper_breach_rate | 0.078626 |
+| avg_band_width | 0.214104 |
+| band_loss | 0.067403 |
+| spearman_ic | 0.069014 |
+| long_short_spread | 0.004678 |
+| fee_adjusted_return | 4.653222 |
+
+보수 후보:
+
+| 항목 | 값 |
+|---|---|
+| q_low | 0.25 |
+| q_high | 0.75 |
+| lambda_band | 2.0 |
+
+보수 후보는 coverage가 0.936846으로 높지만 투자 지표 보존이 가장 좋다. CP24-R의 Bollinger 비교 전까지는 `q30-b2`와 `q25-b2`를 100티커 또는 1W smoke 후보로 두었다.
+
+### CP24-R Bollinger 비교 후 calibration 후보
+
+CP24-R에서 Bollinger 기준선을 같은 `raw_future_return` validation/test split에 맞춰 계산했다. Bollinger는 가격 밴드가 아니라 horizon별 완료 수익률의 rolling 평균과 표준편차를 사용한다.
+
+현재 PatchTST 후보:
+
+| 역할 | q_low | q_high | lambda_band | band_mode | 판단 |
+|---|---:|---:|---:|---|---|
+| 보수형 | 0.25 | 0.75 | 2.0 | `direct` | coverage 0.936846. BB60-2.0s와 비슷하지만 폭은 넓다. |
+| 기본형 | 0.30 | 0.70 | 2.0 | `direct` | coverage 0.890662. BB20-2.0s와 BB20-1.5s 사이에 있어 1차 후보로 둔다. |
+| 공격형 | 0.35 | 0.65 | 2.0 | `direct` | upper breach 0.112994. BB20-1.5s와 비슷하므로 과도하게 좁다고 단정하지 않는다. |
+
+다음 100티커 안정성 확인 후보는 `q30-b2`와 `q35-b2`다. `q25-b2`는 conservative reserve로 남긴다.
+
+### CP25-R 100티커 안정성 결과
+
+100티커 확장 smoke에서 `q30-b2`, `q35-b2`는 모두 validation band guardrail을 통과하지 못했다.
+
+| 후보 | q_low | q_high | lambda_band | coverage | upper_breach_rate | avg_band_width | 판단 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| q30-b2 | 0.30 | 0.70 | 2.0 | 0.463702 | 0.283601 | 0.069402 | 기본 후보 탈락 |
+| q35-b2 | 0.35 | 0.65 | 2.0 | 0.384560 | 0.323423 | 0.056351 | 공격 후보 탈락 |
+
+현재 full run 후보는 없다.
+
+다음 검증 순서:
+
+1. `q25-b2`: `q_low=0.25`, `q_high=0.75`, `lambda_band=2.0`
+2. q25도 실패하면 `q20-b2`: `q_low=0.20`, `q_high=0.80`, `lambda_band=2.0`
+3. 이후에도 validation/test 격차가 크면 walk-forward 또는 ticker group split을 먼저 적용한다.
+
+### CP26-R 100티커 recalibration 결과
+
+100티커 기준에서 q25/q20/q15 계열을 다시 확인했다.
+
+최종 checkpoint 기준:
+
+| 후보 | q_low | q_high | lambda_band | coverage | upper_breach_rate | avg_band_width | 판정 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| q25-b2 | 0.25 | 0.75 | 2.0 | 0.544565 | 0.242948 | 0.083824 | 탈락 |
+| q20-b2 | 0.20 | 0.80 | 2.0 | 0.650025 | 0.188960 | 0.104741 | 탈락 |
+| q15-b2 | 0.15 | 0.85 | 2.0 | 0.749335 | 0.137470 | 0.128752 | 공격 후보 |
+| q20-b1 | 0.20 | 0.80 | 1.0 | 0.652703 | 0.186760 | 0.105156 | 탈락 |
+
+현재 상태:
+
+- 기본형 preset은 아직 없다.
+- 공격형 preset은 `q15-b2`만 남긴다.
+- full run은 금지한다.
+
+중요한 학습 정책 이슈:
+
+- 현재 checkpoint selection은 validation total loss 기준이다.
+- 이번 CP에서는 total loss가 내려갈수록 밴드가 좁아져 coverage가 나빠졌다.
+- 다음에는 coverage-aware checkpoint selection 또는 `q15-b2` 2epoch 재현 smoke를 먼저 수행한다.
