@@ -54,15 +54,6 @@ function formatPercent(value: number | null | undefined) {
   return `${value >= 0 ? "+" : ""}${formatNumber(value, 2)}%`;
 }
 
-function formatCompactNumber(value: number | null | undefined) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("ko-KR", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
 
 function formatRatio(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) {
@@ -159,6 +150,9 @@ export default function StockView() {
   const [chartType, setChartType] = useState<ChartType>("candles");
   const [layers, setLayers] = useState({
     indicators: false,
+    indicatorMA: true,
+    indicatorBB: false,
+    indicatorRSI: false,
     aiBand: true,
     conservativeLine: true,
   });
@@ -387,9 +381,9 @@ export default function StockView() {
               <span>등락률</span>
               <strong>{formatPercent(changePercent)}</strong>
             </div>
-            <div className="quote-item">
-              <span>거래량</span>
-              <strong>{formatCompactNumber(latestPrice?.volume)}</strong>
+            <div className="quote-item quote-item--asof">
+              <span>기준일</span>
+              <strong>{latestPrice?.date ?? "-"}</strong>
             </div>
           </div>
 
@@ -455,46 +449,110 @@ export default function StockView() {
             <div className="eyebrow">예측 범위</div>
             <h2>{predictionStatus}</h2>
           </div>
-          <div className="forecast-summary">
-            <div>
-              <span>커버리지</span>
-              <strong>{formatRatio(evaluation?.coverage)}</strong>
-            </div>
-            <div>
-              <span>평균 밴드 폭</span>
-              <strong>{formatNumber(evaluation?.avg_band_width)}</strong>
-            </div>
-            <div>
-              <span>보수적 예측선</span>
-              <strong>{formatNumber(conservativeValue)}</strong>
-            </div>
-            <div>
-              <span>기준일</span>
-              <strong>{prediction?.asof_date ?? "-"}</strong>
-            </div>
-          </div>
-          <div className="toggle-list">
-            <LayerToggle
-              label="보조지표"
-              checked={layers.indicators}
-              onChange={(checked) => setLayers((previous) => ({ ...previous, indicators: checked }))}
-            />
+
+          {/* 예측 밴드 */}
+          <div className="layer-group">
             <LayerToggle
               label="예측 밴드"
               checked={!aiDisabled && layers.aiBand}
               disabled={aiDisabled}
               onChange={(checked) => setLayers((previous) => ({ ...previous, aiBand: checked }))}
             />
+            {!aiDisabled && layers.aiBand ? (
+              <div className="layer-metrics">
+                <div>
+                  <span>커버리지</span>
+                  <strong>{formatRatio(evaluation?.coverage)}</strong>
+                </div>
+                <div>
+                  <span>평균 밴드 폭</span>
+                  <strong>{formatNumber(evaluation?.avg_band_width)}</strong>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* 보수적 예측선 */}
+          <div className="layer-group">
             <LayerToggle
               label="보수적 예측선"
               checked={!aiDisabled && layers.conservativeLine}
               disabled={aiDisabled}
               onChange={(checked) => setLayers((previous) => ({ ...previous, conservativeLine: checked }))}
             />
+            {!aiDisabled && layers.conservativeLine ? (
+              <div className="layer-metrics">
+                <div>
+                  <span>예측가</span>
+                  <strong>{formatNumber(conservativeValue)}</strong>
+                </div>
+                <div>
+                  <span>기준일</span>
+                  <strong>{prediction?.asof_date ?? "-"}</strong>
+                </div>
+              </div>
+            ) : null}
           </div>
+
+          {/* 보조지표 — 확장 가능 */}
+          <div className="layer-group">
+            <LayerToggle
+              label="보조지표"
+              checked={layers.indicators}
+              onChange={(checked) => setLayers((previous) => ({ ...previous, indicators: checked }))}
+            />
+            {layers.indicators ? (
+              <div className="indicator-list">
+                <IndicatorRow
+                  label="이동평균선"
+                  meta="MA 20·60·120"
+                  checked={layers.indicatorMA}
+                  onChange={(v) => setLayers((p) => ({ ...p, indicatorMA: v }))}
+                />
+                <IndicatorRow
+                  label="볼린저 밴드"
+                  meta="BB 20, 2σ"
+                  checked={layers.indicatorBB}
+                  onChange={(v) => setLayers((p) => ({ ...p, indicatorBB: v }))}
+                />
+                <IndicatorRow
+                  label="RSI"
+                  meta="14"
+                  checked={layers.indicatorRSI}
+                  onChange={(v) => setLayers((p) => ({ ...p, indicatorRSI: v }))}
+                />
+                <button type="button" className="indicator-add">
+                  + 지표 추가
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           <div className="notice">{aiState.message}</div>
         </aside>
       </section>
     </div>
+  );
+}
+
+interface IndicatorRowProps {
+  label: string;
+  meta: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}
+
+function IndicatorRow({ label, meta, checked, onChange }: IndicatorRowProps) {
+  return (
+    <label className={`indicator-row${checked ? " is-on" : ""}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="indicator-row__dot" aria-hidden="true" />
+      <span className="indicator-row__label">{label}</span>
+      <span className="indicator-row__meta">{meta}</span>
+    </label>
   );
 }
