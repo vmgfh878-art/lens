@@ -30,6 +30,7 @@ from ai.preprocessing import (
     prepare_dataset_splits,
 )
 from ai.storage import get_model_run, save_prediction_evaluations, save_predictions, utc_now_iso
+from ai.ticker_registry import load_registry
 from ai.train import make_loader, resolve_device
 
 MODEL_REGISTRY = {
@@ -93,6 +94,37 @@ def load_checkpoint(checkpoint_path: str | Path):
     return model, checkpoint
 
 
+def load_checkpoint_config(checkpoint_path: str | Path) -> dict[str, Any]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    return dict(checkpoint.get("config") or {})
+
+
+def resolve_checkpoint_ticker_registry(checkpoint_config: dict[str, Any], timeframe: str) -> dict[str, Any] | None:
+    num_tickers = int(checkpoint_config.get("num_tickers") or 0)
+    if num_tickers <= 0:
+        return None
+    registry_path = checkpoint_config.get("ticker_registry_path")
+    if not registry_path:
+        raise ValueError("ticker embedding checkpoint는 ticker_registry_path가 필요합니다.")
+
+    normalized_timeframe = normalize_ai_timeframe(timeframe)
+    registry = load_registry(normalized_timeframe, Path(str(registry_path)))
+    registry_timeframe = str(registry.get("timeframe", "")).upper()
+    if registry_timeframe != normalized_timeframe:
+        raise ValueError(
+            f"checkpoint ticker registry timeframe 불일치: checkpoint={normalized_timeframe}, registry={registry_timeframe}"
+        )
+
+    mapping = registry.get("mapping") or {}
+    registry_num_tickers = int(registry.get("num_tickers") or -1)
+    if registry_num_tickers != num_tickers or len(mapping) != num_tickers:
+        raise ValueError(
+            "checkpoint ticker registry mismatch: "
+            f"config.num_tickers={num_tickers}, registry.num_tickers={registry_num_tickers}, mapping={len(mapping)}"
+        )
+    return registry
+
+
 def decode_return_forecasts(
     line_returns: torch.Tensor,
     lower_returns: torch.Tensor,
@@ -117,6 +149,8 @@ def resolve_bundle(
     include_future_covariate: bool = True,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    ticker_registry: dict[str, Any] | None = None,
+    ticker_registry_path: str | None = None,
 ) -> SequenceDatasetBundle | SequenceDataset:
     train_bundle, val_bundle, test_bundle, _, _, _ = prepare_dataset_splits(
         timeframe=timeframe,
@@ -127,6 +161,8 @@ def resolve_bundle(
         include_future_covariate=include_future_covariate,
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        ticker_registry=ticker_registry,
+        ticker_registry_path=ticker_registry_path,
     )
     bundle_map = {
         "train": train_bundle,
@@ -340,6 +376,13 @@ def run_inference(
     if not checkpoint_path:
         raise ValueError("checkpoint_path가 model_runs에 저장되어 있지 않습니다.")
 
+    checkpoint_config = load_checkpoint_config(checkpoint_path)
+    checkpoint_ticker_registry = resolve_checkpoint_ticker_registry(
+        checkpoint_config,
+        str(model_run["timeframe"]),
+    )
+    checkpoint_registry_path = checkpoint_config.get("ticker_registry_path")
+
     bundle = resolve_bundle(
         split_name=split_name,
         timeframe=model_run["timeframe"],
@@ -350,6 +393,8 @@ def run_inference(
         include_future_covariate=bool(config.get("use_future_covariate", model_run["model_name"] == "tide")),
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        ticker_registry=checkpoint_ticker_registry,
+        ticker_registry_path=str(checkpoint_registry_path) if checkpoint_registry_path else None,
     )
     prediction_records, evaluation_records, summary_metrics = infer_bundle(
         bundle,

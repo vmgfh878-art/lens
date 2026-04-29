@@ -29,6 +29,25 @@ RUNTIME_SCHEMA_STATEMENTS = [
     ADD COLUMN IF NOT EXISTS band_quantile_high DOUBLE PRECISION;
     """,
     """
+    ALTER TABLE public.predictions
+    DROP CONSTRAINT IF EXISTS predictions_ticker_model_name_timeframe_horizon_asof_date_key;
+    """,
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'predictions_run_unique'
+              AND conrelid = 'public.predictions'::regclass
+        ) THEN
+            ALTER TABLE public.predictions
+                ADD CONSTRAINT predictions_run_unique
+                UNIQUE (run_id, ticker, model_name, timeframe, horizon, asof_date);
+        END IF;
+    END $$;
+    """,
+    """
     ALTER TABLE public.indicators
     ADD COLUMN IF NOT EXISTS regime_label VARCHAR(20);
     """,
@@ -87,9 +106,10 @@ RUNTIME_SCHEMA_STATEMENTS = [
         model_name          VARCHAR(50) NOT NULL,
         timeframe           VARCHAR(4) NOT NULL CHECK (timeframe IN ('1D', '1W', '1M')),
         horizon             INT NOT NULL CHECK (horizon > 0),
-        feature_version     VARCHAR(50) NOT NULL DEFAULT 'indicators_v1',
+        feature_version     VARCHAR(50) NOT NULL DEFAULT 'v3_adjusted_ohlc',
         band_quantile_low   DOUBLE PRECISION,
         band_quantile_high  DOUBLE PRECISION,
+        band_mode           VARCHAR(20) NOT NULL DEFAULT 'direct',
         alpha               DOUBLE PRECISION,
         beta                DOUBLE PRECISION,
         huber_delta         DOUBLE PRECISION,
@@ -103,6 +123,8 @@ RUNTIME_SCHEMA_STATEMENTS = [
         test_metrics        JSONB NOT NULL DEFAULT '{}'::jsonb,
         config              JSONB NOT NULL DEFAULT '{}'::jsonb,
         checkpoint_path     TEXT,
+        status              VARCHAR(20) NOT NULL DEFAULT 'completed'
+                            CHECK (status IN ('completed', 'failed_nan', 'failed_quality_gate')),
         created_at          TIMESTAMPTZ DEFAULT NOW()
     );
     """,
@@ -116,6 +138,8 @@ RUNTIME_SCHEMA_STATEMENTS = [
         actual_series           JSONB NOT NULL DEFAULT '[]'::jsonb,
         pinball_loss            DOUBLE PRECISION,
         coverage                DOUBLE PRECISION,
+        lower_breach_rate       DOUBLE PRECISION,
+        upper_breach_rate       DOUBLE PRECISION,
         avg_band_width          DOUBLE PRECISION,
         normalized_band_width   DOUBLE PRECISION,
         direction_accuracy      DOUBLE PRECISION,
@@ -135,6 +159,14 @@ RUNTIME_SCHEMA_STATEMENTS = [
     """,
     """
     ALTER TABLE public.prediction_evaluations
+    ADD COLUMN IF NOT EXISTS lower_breach_rate DOUBLE PRECISION;
+    """,
+    """
+    ALTER TABLE public.prediction_evaluations
+    ADD COLUMN IF NOT EXISTS upper_breach_rate DOUBLE PRECISION;
+    """,
+    """
+    ALTER TABLE public.prediction_evaluations
     ADD COLUMN IF NOT EXISTS mae DOUBLE PRECISION;
     """,
     """
@@ -144,6 +176,23 @@ RUNTIME_SCHEMA_STATEMENTS = [
     """
     ALTER TABLE public.model_runs
     ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
+    """,
+    """
+    ALTER TABLE public.model_runs
+    ADD COLUMN IF NOT EXISTS band_mode VARCHAR(20) NOT NULL DEFAULT 'direct';
+    """,
+    """
+    ALTER TABLE public.model_runs
+    ALTER COLUMN feature_version SET DEFAULT 'v3_adjusted_ohlc';
+    """,
+    """
+    ALTER TABLE public.model_runs
+    DROP CONSTRAINT IF EXISTS model_runs_status_check;
+    """,
+    """
+    ALTER TABLE public.model_runs
+    ADD CONSTRAINT model_runs_status_check
+    CHECK (status IN ('completed', 'failed_nan', 'failed_quality_gate'));
     """,
     """
     CREATE TABLE IF NOT EXISTS public.backtest_results (
@@ -231,15 +280,41 @@ def main() -> None:
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'predictions'
-                  AND column_name IN ('line_series', 'band_quantile_low', 'band_quantile_high')
+                  AND column_name IN ('line_series', 'band_quantile_low', 'band_quantile_high', 'run_id')
                 ORDER BY column_name
                 """
             )
             prediction_columns = [row[0] for row in cursor.fetchall()]
 
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'model_runs'
+                  AND column_name IN ('band_mode', 'feature_version', 'status')
+                ORDER BY column_name
+                """
+            )
+            model_run_columns = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'prediction_evaluations'
+                  AND column_name IN ('lower_breach_rate', 'upper_breach_rate')
+                ORDER BY column_name
+                """
+            )
+            evaluation_columns = [row[0] for row in cursor.fetchall()]
+
         print(f"[OK] ai_tables={tables}")
         print(f"[OK] indicator_regime_columns={columns}")
         print(f"[OK] prediction_writer_columns={prediction_columns}")
+        print(f"[OK] model_run_contract_columns={model_run_columns}")
+        print(f"[OK] prediction_evaluation_contract_columns={evaluation_columns}")
     finally:
         conn.close()
 

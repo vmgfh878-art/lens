@@ -41,6 +41,7 @@ from ai.postprocess import apply_band_postprocess
 from ai.evaluation import summarize_forecast_metrics
 from ai.preprocessing import (
     DatasetPlan,
+    FEATURE_CONTRACT_VERSION,
     FUTURE_COVARIATE_DIM,
     MODEL_N_FEATURES,
     SequenceDataset,
@@ -77,6 +78,7 @@ AMP_DTYPE_MAP = {
 }
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED_NAN = "failed_nan"
+RUN_STATUS_FAILED_QUALITY_GATE = "failed_quality_gate"
 NAN_STREAK_LIMIT = 3
 CLI_CUDA_CLEANUP_STATE: dict[str, Any] | None = None
 CHECKPOINT_SELECTION_CHOICES = ("val_total", "coverage_gate")
@@ -85,6 +87,10 @@ COVERAGE_GATE_MIN = 0.75
 COVERAGE_GATE_MAX = 0.95
 COVERAGE_GATE_MAX_UPPER_BREACH = 0.15
 COVERAGE_GATE_MAX_LOWER_BREACH = 0.20
+
+
+def resolve_persisted_run_status(*, coverage_gate_failed: bool) -> str:
+    return RUN_STATUS_FAILED_QUALITY_GATE if coverage_gate_failed else RUN_STATUS_COMPLETED
 
 
 @dataclass
@@ -1085,10 +1091,14 @@ def save_checkpoint(
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{config.model}_{config.timeframe}_{run_id}.pt"
     state_model = unwrap_model(model)
+    checkpoint_config = {
+        **asdict(config),
+        "feature_version": FEATURE_CONTRACT_VERSION,
+    }
     torch.save(
         {
             "model_state_dict": state_model.state_dict(),
-            "config": asdict(config),
+            "config": checkpoint_config,
             "metrics": metrics,
             "feature_mean": feature_mean.cpu(),
             "feature_std": feature_std.cpu(),
@@ -1221,7 +1231,7 @@ def run_training(
                 "model_name": config.model,
                 "timeframe": config.timeframe,
                 "horizon": config.horizon,
-                "feature_version": "indicators_v1",
+                "feature_version": FEATURE_CONTRACT_VERSION,
                 "band_quantile_low": config.q_low,
                 "band_quantile_high": config.q_high,
                 "alpha": config.alpha,
@@ -1239,6 +1249,7 @@ def run_training(
                 "config": {
                     **asdict(config),
                     "config_hash": config_hash,
+                    "feature_version": FEATURE_CONTRACT_VERSION,
                     "failure": result.to_meta(),
                 },
                 "checkpoint_path": None,
@@ -1475,7 +1486,7 @@ def run_training(
                 "model_name": config.model,
                 "timeframe": config.timeframe,
                 "horizon": config.horizon,
-                "feature_version": "indicators_v1",
+                "feature_version": FEATURE_CONTRACT_VERSION,
                 "band_quantile_low": config.q_low,
                 "band_quantile_high": config.q_high,
                 "alpha": config.alpha,
@@ -1493,6 +1504,7 @@ def run_training(
                 "config": {
                     **asdict(config),
                     "config_hash": config_hash,
+                    "feature_version": FEATURE_CONTRACT_VERSION,
                     "feature_mean": mean.tolist(),
                     "feature_std": std.tolist(),
                     "grad_norm_history": grad_norm_history,
@@ -1502,7 +1514,9 @@ def run_training(
                     "early_stopped": checkpoint_metrics.get("early_stopped"),
                 },
                 "checkpoint_path": str(checkpoint_path),
-                "status": RUN_STATUS_COMPLETED,
+                "status": resolve_persisted_run_status(
+                    coverage_gate_failed=selection_result.coverage_gate_failed,
+                ),
             }
         )
 

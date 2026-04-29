@@ -1017,3 +1017,68 @@ CP24-R에서 Bollinger 기준선을 같은 `raw_future_return` validation/test s
 - 현재 checkpoint selection은 validation total loss 기준이다.
 - 이번 CP에서는 total loss가 내려갈수록 밴드가 좁아져 coverage가 나빠졌다.
 - 다음에는 coverage-aware checkpoint selection 또는 `q15-b2` 2epoch 재현 smoke를 먼저 수행한다.
+
+### CP28-R 200티커 coverage-gate 결과
+
+CP27-R에서 추가한 `--checkpoint-selection coverage_gate`는 유지한다. 다만 200티커 확장 결과 q20/q25/q15 후보 모두 eligible checkpoint가 없어 `coverage_gate_failed_fallback_val_total`로 떨어졌다.
+
+| preset | q_low | q_high | lambda_band | selected_epoch | coverage | upper_breach_rate | avg_band_width | 판정 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| q20-b2 | 0.20 | 0.80 | 2.0 | 3 | 0.598411 | 0.224333 | 0.093772 | 탈락 |
+| q25-b2 | 0.25 | 0.75 | 2.0 | 3 | 0.499277 | 0.276971 | 0.074906 | 탈락 |
+| q15-b2 | 0.15 | 0.85 | 2.0 | 3 | 0.702103 | 0.166290 | 0.116981 | 탈락 |
+
+현재 학습 정책:
+
+- `checkpoint_selection=coverage_gate`는 유지한다.
+- 위 세 preset은 200티커 기준 full run 후보로 올리지 않는다.
+- full 473티커는 금지한다.
+- 다음 실험은 PatchTST preset 미세조정보다 DLinear/NLinear baseline 또는 calibration 재설계가 우선이다.
+### CP29-D 이후 학습 데이터 계약
+
+CP29-D부터 학습 입력 feature contract version은 `v3_adjusted_ohlc`다. 이 버전은 가격 파생 피처를 adjusted OHLC 기준으로 다시 계산한다.
+
+고정된 계약:
+
+- `open_ratio/high_ratio/low_ratio`는 raw OHLC가 아니라 adjusted OHLC 기준이다.
+- DB `indicators`에 오래된 가격 ratio가 남아 있어도 `fetch_training_frames`에서 `price_data`를 사용해 가격 파생 피처를 덮어쓴다.
+- `vol_change`의 `Inf`는 제거하고 finite contract를 통과한 샘플만 학습에 사용한다.
+- 50/100/200 v3 feature cache 모두 feature contract 이후 non-finite count 0을 확인했다.
+
+CP29-D에서 허용한 학습은 50티커 1epoch smoke뿐이다. `--save-run`은 사용하지 않았고 full 473티커 학습은 실행하지 않았다. smoke 명령은 `patchtst`, `1D`, `seq_len=252`, `horizon=5`, `epochs=1`, `batch_size=256`, `limit_tickers=50`, `patch_len=16`, `patch_stride=8`, `q_low=0.20`, `q_high=0.80`, `lambda_band=2.0`, `band_mode=direct`, `checkpoint_selection=coverage_gate` 조합이다.
+
+### CP30-G 이후 저장/재현 게이트
+
+CP30-G에서는 학습 성능 비교를 재개하지 않았다. full 473티커, W&B sweep, 대형 비교 실험은 계속 금지한다.
+
+학습 저장 계약:
+
+| 항목 | 값 |
+|---|---|
+| feature version | `v3_adjusted_ohlc` |
+| band mode 저장 | `model_runs.band_mode` 정식 컬럼 |
+| coverage gate 통과 | `status=completed` |
+| coverage gate 실패 fallback | `status=failed_quality_gate` |
+| NaN/Inf 실패 | `status=failed_nan` |
+
+`failed_quality_gate`는 학습 프로세스가 끝났고 checkpoint와 metric은 남길 수 있지만, 제품 inference/backtest 대상은 아니다. 따라서 completed run 목록에는 섞지 않는다.
+
+prediction 저장 계약:
+
+- `predictions` upsert key는 `run_id,ticker,model_name,timeframe,horizon,asof_date`다.
+- 같은 ticker/date라도 run이 다르면 서로 덮어쓰지 않는다.
+- `prediction_evaluations`는 `lower_breach_rate`, `upper_breach_rate`를 정식 컬럼으로 저장한다.
+
+inference 계약:
+
+- ticker embedding checkpoint는 checkpoint의 `ticker_registry_path`를 사용한다.
+- registry mismatch는 실패 처리한다.
+- subset inference가 ticker id를 다시 매기지 않는다.
+
+backtest 계약:
+
+- anchor는 `adjusted_close` 기준이다.
+- position과 turnover는 날짜별 포트폴리오 단위다.
+- active `BUY/SELL` 포지션은 절대 노출 합 1로 정규화한다.
+
+RevIN은 이번 CP에서 변경하지 않는다. 다음 ablation은 같은 split, 같은 seed, 같은 CP29/CP30 데이터/저장 계약에서 `use_revin=True`와 `use_revin=False`만 비교한다.

@@ -199,13 +199,28 @@ CREATE TABLE IF NOT EXISTS public.predictions (
     band_quantile_low   DOUBLE PRECISION,
     band_quantile_high  DOUBLE PRECISION,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (ticker, model_name, timeframe, horizon, asof_date)
+    UNIQUE (run_id, ticker, model_name, timeframe, horizon, asof_date)
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_ticker_timeframe_asof
     ON public.predictions (ticker, timeframe, asof_date DESC, decision_time DESC);
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS line_series JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_low DOUBLE PRECISION;
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_high DOUBLE PRECISION;
+ALTER TABLE public.predictions
+    DROP CONSTRAINT IF EXISTS predictions_ticker_model_name_timeframe_horizon_asof_date_key;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'predictions_run_unique'
+          AND conrelid = 'public.predictions'::regclass
+    ) THEN
+        ALTER TABLE public.predictions
+            ADD CONSTRAINT predictions_run_unique
+            UNIQUE (run_id, ticker, model_name, timeframe, horizon, asof_date);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.model_runs (
     run_id              VARCHAR(100) PRIMARY KEY,
@@ -213,9 +228,10 @@ CREATE TABLE IF NOT EXISTS public.model_runs (
     model_name          VARCHAR(50) NOT NULL,
     timeframe           VARCHAR(4) NOT NULL CHECK (timeframe IN ('1D', '1W', '1M')),
     horizon             INT NOT NULL CHECK (horizon > 0),
-    feature_version     VARCHAR(50) NOT NULL DEFAULT 'indicators_v1',
+    feature_version     VARCHAR(50) NOT NULL DEFAULT 'v3_adjusted_ohlc',
     band_quantile_low   DOUBLE PRECISION,
     band_quantile_high  DOUBLE PRECISION,
+    band_mode           VARCHAR(20) NOT NULL DEFAULT 'direct',
     alpha               DOUBLE PRECISION,
     beta                DOUBLE PRECISION,
     huber_delta         DOUBLE PRECISION,
@@ -230,11 +246,20 @@ CREATE TABLE IF NOT EXISTS public.model_runs (
     config              JSONB NOT NULL DEFAULT '{}'::jsonb,
     checkpoint_path     TEXT,
     status              VARCHAR(20) NOT NULL DEFAULT 'completed'
-                        CHECK (status IN ('completed', 'failed_nan')),
+                        CHECK (status IN ('completed', 'failed_nan', 'failed_quality_gate')),
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE public.model_runs
     ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
+ALTER TABLE public.model_runs
+    ADD COLUMN IF NOT EXISTS band_mode VARCHAR(20) NOT NULL DEFAULT 'direct';
+ALTER TABLE public.model_runs
+    ALTER COLUMN feature_version SET DEFAULT 'v3_adjusted_ohlc';
+ALTER TABLE public.model_runs
+    DROP CONSTRAINT IF EXISTS model_runs_status_check;
+ALTER TABLE public.model_runs
+    ADD CONSTRAINT model_runs_status_check
+    CHECK (status IN ('completed', 'failed_nan', 'failed_quality_gate'));
 
 CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
     id                      BIGSERIAL PRIMARY KEY,
@@ -245,6 +270,8 @@ CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
     actual_series           JSONB NOT NULL DEFAULT '[]'::jsonb,
     pinball_loss            DOUBLE PRECISION,
     coverage                DOUBLE PRECISION,
+    lower_breach_rate       DOUBLE PRECISION,
+    upper_breach_rate       DOUBLE PRECISION,
     avg_band_width          DOUBLE PRECISION,
     normalized_band_width   DOUBLE PRECISION,
     direction_accuracy      DOUBLE PRECISION,
@@ -255,6 +282,8 @@ CREATE TABLE IF NOT EXISTS public.prediction_evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_prediction_evaluations_lookup
     ON public.prediction_evaluations (ticker, timeframe, asof_date DESC);
+ALTER TABLE public.prediction_evaluations ADD COLUMN IF NOT EXISTS lower_breach_rate DOUBLE PRECISION;
+ALTER TABLE public.prediction_evaluations ADD COLUMN IF NOT EXISTS upper_breach_rate DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS public.backtest_results (
     id              BIGSERIAL PRIMARY KEY,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,18 @@ def registry_path_for_timeframe(timeframe: str) -> Path:
     if normalized not in DEFAULT_PATHS:
         raise ValueError(f"지원하지 않는 ticker registry timeframe 입니다: {timeframe}")
     return DEFAULT_PATHS[normalized]
+
+
+def registry_path_for_tickers(timeframe: str, eligible_tickers: list[str]) -> Path:
+    normalized = timeframe.upper()
+    if normalized not in DEFAULT_PATHS:
+        raise ValueError(f"지원하지 않는 ticker registry timeframe 입니다: {timeframe}")
+    payload = {
+        "timeframe": normalized,
+        "tickers": sorted({str(ticker).upper() for ticker in eligible_tickers}),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    return CACHE_DIR / f"ticker_id_map_{normalized.lower()}_{digest}.json"
 
 
 def build_registry(eligible_tickers: list[str], timeframe: str) -> dict[str, Any]:

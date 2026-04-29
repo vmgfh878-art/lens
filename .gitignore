@@ -2,6 +2,7 @@
 .env.local
 *.env
 docs/cp*
+CLAUDE.md
 
 
 __pycache__/
@@ -16,6 +17,7 @@ node_modules/
 *.pt
 *.pth
 *.onnx
+ai/cache/ticker_id_map_*.json
 
 backend/data/parquet/
 *.parquet

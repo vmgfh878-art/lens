@@ -22,11 +22,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-from backend.app.services.feature_svc import FEATURE_COLUMNS as SOURCE_FEATURE_COLUMNS, REQUIRED_FEATURE_COLUMNS, normalize_timeframe, resample_price_frame  # noqa: E402
+from backend.app.services.feature_svc import FEATURE_COLUMNS as SOURCE_FEATURE_COLUMNS, PRICE_DERIVED_FEATURE_COLUMNS, REQUIRED_FEATURE_COLUMNS, build_price_features, normalize_timeframe, resample_price_frame  # noqa: E402
 from backend.collector.repositories.base import fetch_frame  # noqa: E402
 from ai.targets import build_target_array, normalize_target_type  # noqa: E402
 from ai.splits import MAX_HORIZON_BY_TIMEFRAME, build_split_specs  # noqa: E402
-from ai.ticker_registry import build_registry, lookup_id, save_registry  # noqa: E402
+from ai.ticker_registry import build_registry, lookup_id, registry_path_for_tickers, save_registry  # noqa: E402
 
 SPLIT_RATIO = (0.7, 0.15, 0.15)
 SUPPORTED_AI_TIMEFRAMES = ("1D", "1W")
@@ -48,7 +48,8 @@ FUTURE_COVARIATE_DIM = len(FUTURE_CALENDAR_COLUMNS)
 _PREPARED_SPLITS_CACHE: dict[str, Any] = {}
 _ENGINE_CACHE: dict[str, Any] = {}
 _STALE_CACHE_WARNED: set[str] = set()
-_FEATURE_CONTRACT_VERSION = "v2_finite"
+_FEATURE_CONTRACT_VERSION = "v3_adjusted_ohlc"
+FEATURE_CONTRACT_VERSION = _FEATURE_CONTRACT_VERSION
 _FUNDAMENTAL_IMPUTE_COLUMNS = [
     "revenue",
     "net_income",
@@ -528,6 +529,24 @@ def fetch_feature_index_frame(
     return index_frame.copy()
 
 
+def _repair_price_feature_contract(feature_df: pd.DataFrame, price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    if feature_df.empty or price_df.empty:
+        return feature_df
+    repaired_price_features = build_price_features(price_df=price_df, timeframe=timeframe)
+    if repaired_price_features.empty:
+        return feature_df
+
+    join_columns = ["ticker", "timeframe", "date"]
+    repaired = feature_df.copy()
+    repaired["date"] = pd.to_datetime(repaired["date"])
+    repaired_price_features = repaired_price_features.copy()
+    repaired_price_features["date"] = pd.to_datetime(repaired_price_features["date"])
+    repaired = repaired.drop(columns=[column for column in PRICE_DERIVED_FEATURE_COLUMNS if column in repaired.columns])
+    repaired = repaired.merge(repaired_price_features[join_columns + PRICE_DERIVED_FEATURE_COLUMNS], on=join_columns, how="left")
+    repaired = repaired.dropna(subset=PRICE_DERIVED_FEATURE_COLUMNS).reset_index(drop=True)
+    return repaired
+
+
 def fetch_training_frames(
     *,
     timeframe: str = "1D",
@@ -584,6 +603,8 @@ def fetch_training_frames(
             filters=price_filters,
             order_by="date",
         )
+
+    feature_df = _repair_price_feature_contract(feature_df, price_df, normalized_timeframe)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"feature_df": feature_df, "price_df": price_df}, cache_path)
@@ -704,8 +725,19 @@ def resolve_prepared_splits_cache_key(
     include_future_covariate: bool = True,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    ticker_registry: dict[str, Any] | None = None,
 ) -> str:
     data_hash = resolve_data_fingerprint(timeframe)
+    registry_payload = None
+    if ticker_registry is not None:
+        registry_payload = {
+            "timeframe": str(ticker_registry.get("timeframe", "")).upper(),
+            "num_tickers": int(ticker_registry.get("num_tickers", 0)),
+            "mapping": {
+                str(ticker).upper(): int(value)
+                for ticker, value in sorted((ticker_registry.get("mapping") or {}).items())
+            },
+        }
     payload = {
         "timeframe": timeframe,
         "data_hash": data_hash,
@@ -720,6 +752,7 @@ def resolve_prepared_splits_cache_key(
         "source_feature_columns": SOURCE_FEATURE_COLUMNS,
         "calendar_feature_columns": CALENDAR_FEATURE_COLUMNS,
         "feature_contract_version": _FEATURE_CONTRACT_VERSION,
+        "ticker_registry": registry_payload,
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -988,6 +1021,8 @@ def build_dataset_plan(
     seq_len: int,
     horizon: int,
     min_fold_samples: int = 50,
+    ticker_registry: dict[str, Any] | None = None,
+    ticker_registry_path: str | None = None,
 ) -> DatasetPlan:
     normalized_timeframe = normalize_ai_timeframe(timeframe)
     filtered = feature_df.copy()
@@ -1001,8 +1036,18 @@ def build_dataset_plan(
         h_max=h_max,
         min_fold_samples=min_fold_samples,
     )
-    registry = build_registry(sorted(split_specs.keys()), normalized_timeframe)
-    registry_path = save_registry(registry, normalized_timeframe)
+    if ticker_registry is None:
+        registry = build_registry(sorted(split_specs.keys()), normalized_timeframe)
+        resolved_registry_path = str(
+            save_registry(
+                registry,
+                normalized_timeframe,
+                registry_path_for_tickers(normalized_timeframe, sorted(split_specs.keys())),
+            )
+        )
+    else:
+        registry = ticker_registry
+        resolved_registry_path = str(ticker_registry_path or "")
     return DatasetPlan(
         timeframe=normalized_timeframe,
         seq_len=seq_len,
@@ -1013,7 +1058,7 @@ def build_dataset_plan(
         eligible_tickers=sorted(split_specs.keys()),
         excluded_reasons=excluded_reasons,
         split_specs=split_specs,
-        ticker_registry_path=str(registry_path),
+        ticker_registry_path=resolved_registry_path,
         num_tickers=registry["num_tickers"],
     )
 
@@ -1157,6 +1202,8 @@ def prepare_dataset_splits(
     include_future_covariate: bool = True,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    ticker_registry: dict[str, Any] | None = None,
+    ticker_registry_path: str | None = None,
 ) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, torch.Tensor, torch.Tensor, DatasetPlan]:
     """현재 DB 기준으로 학습용 시퀀스와 분할 계획을 한 번에 준비한다."""
     normalized_timeframe = normalize_ai_timeframe(timeframe)
@@ -1170,6 +1217,7 @@ def prepare_dataset_splits(
         include_future_covariate=include_future_covariate,
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        ticker_registry=ticker_registry,
     )
     if cache_key in _PREPARED_SPLITS_CACHE:
         return _PREPARED_SPLITS_CACHE[cache_key]
@@ -1185,6 +1233,8 @@ def prepare_dataset_splits(
         seq_len=seq_len,
         horizon=horizon,
         min_fold_samples=min_fold_samples,
+        ticker_registry=ticker_registry,
+        ticker_registry_path=ticker_registry_path,
     )
     feature_df, price_df = fetch_training_frames(
         timeframe=normalized_timeframe,
@@ -1193,14 +1243,14 @@ def prepare_dataset_splits(
     )
     feature_df = feature_df[feature_df["ticker"].isin(plan.eligible_tickers)].copy()
     price_df = price_df[price_df["ticker"].isin(plan.eligible_tickers)].copy()
-    ticker_registry = build_registry(plan.eligible_tickers, plan.timeframe)
+    active_ticker_registry = ticker_registry or build_registry(plan.eligible_tickers, plan.timeframe)
     dataset = build_lazy_sequence_dataset(
         feature_df=feature_df,
         price_df=price_df,
         timeframe=normalized_timeframe,
         seq_len=seq_len,
         horizon=horizon,
-        ticker_registry=ticker_registry,
+        ticker_registry=active_ticker_registry,
         include_future_covariate=include_future_covariate,
         line_target_type=line_target_type,
         band_target_type=band_target_type,

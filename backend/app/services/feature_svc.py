@@ -93,6 +93,23 @@ _FUNDAMENTAL_SOURCE_COLUMNS = (
     "total_liabilities",
 )
 _OUTPUT_COLUMNS = ["ticker", "date", "timeframe", "regime_label", *FEATURE_COLUMNS]
+PRICE_DERIVED_FEATURE_COLUMNS = [
+    "log_return",
+    "open_ratio",
+    "high_ratio",
+    "low_ratio",
+    "vol_change",
+    "ma_5_ratio",
+    "ma_20_ratio",
+    "ma_60_ratio",
+    "rsi",
+    "macd_ratio",
+    "bb_position",
+]
+_ADJUSTED_OHLC_COLUMNS = ("open", "high", "low", "close")
+_RATIO_SANITY_COLUMNS = ("open_ratio", "high_ratio", "low_ratio")
+_MAX_RATIO_ABS_LIMIT = 5.0
+_P99_RATIO_ABS_LIMIT = 1.0
 
 
 def normalize_timeframe(timeframe: str) -> str:
@@ -118,9 +135,79 @@ def _ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
     return frame.sort_values(sort_columns).reset_index(drop=True)
 
 
+def _validate_adjusted_ohlc_contract(frame: pd.DataFrame, *, context: str) -> None:
+    missing = [column for column in _ADJUSTED_OHLC_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(f"{context}: adjusted OHLC 계약에 필요한 컬럼이 없습니다: {missing}")
+
+    ohlc = frame[list(_ADJUSTED_OHLC_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    if not np.isfinite(ohlc.to_numpy(dtype=float)).all():
+        invalid_counts = (~np.isfinite(ohlc.to_numpy(dtype=float))).sum(axis=0).tolist()
+        raise ValueError(f"{context}: adjusted OHLC에 non-finite 값이 있습니다: {dict(zip(_ADJUSTED_OHLC_COLUMNS, invalid_counts, strict=False))}")
+
+    high = ohlc["high"]
+    low = ohlc["low"]
+    open_ = ohlc["open"]
+    close = ohlc["close"]
+    if bool((high + _EPSILON < low).any()):
+        raise ValueError(f"{context}: adjusted high가 adjusted low보다 작은 행이 있습니다.")
+    if bool((high + _EPSILON < pd.concat([open_, close], axis=1).max(axis=1)).any()):
+        raise ValueError(f"{context}: adjusted high가 open/close보다 작은 행이 있습니다.")
+    if bool((low - _EPSILON > pd.concat([open_, close], axis=1).min(axis=1)).any()):
+        raise ValueError(f"{context}: adjusted low가 open/close보다 큰 행이 있습니다.")
+
+
+def _apply_adjusted_ohlc_contract(df: pd.DataFrame, *, context: str) -> pd.DataFrame:
+    frame = df.copy()
+    if frame.empty:
+        return frame
+    if "adjusted_close" not in frame.columns:
+        frame["adjusted_close"] = frame["close"]
+
+    raw_close = pd.to_numeric(frame["close"], errors="coerce")
+    adjusted_close = pd.to_numeric(frame["adjusted_close"], errors="coerce").fillna(raw_close)
+    adjusted_factor = adjusted_close / raw_close.where(raw_close.abs() > _EPSILON)
+    adjusted_factor = adjusted_factor.replace([np.inf, -np.inf], np.nan).fillna(1.0)
+
+    for column in ("open", "high", "low"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce") * adjusted_factor
+    frame["close"] = adjusted_close
+    frame["adjusted_close"] = adjusted_close
+    _validate_adjusted_ohlc_contract(frame, context=context)
+    return frame
+
+
+def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str) -> None:
+    if frame.empty:
+        return
+    ratio_frame = frame[list(_RATIO_SANITY_COLUMNS)].dropna()
+    if ratio_frame.empty:
+        return
+    ratio_values = ratio_frame.to_numpy(dtype=float)
+    if not np.isfinite(ratio_values).all():
+        raise ValueError(f"{context}: OHLC ratio 피처에 non-finite 값이 있습니다.")
+
+    abs_ratios = ratio_frame.abs()
+    p99_abs = abs_ratios.quantile(0.99)
+    max_abs = abs_ratios.max()
+    failures = {
+        column: {
+            "p99_abs": float(p99_abs[column]),
+            "max_abs": float(max_abs[column]),
+        }
+        for column in _RATIO_SANITY_COLUMNS
+        if float(p99_abs[column]) > _P99_RATIO_ABS_LIMIT or float(max_abs[column]) > _MAX_RATIO_ABS_LIMIT
+    }
+    if failures:
+        raise ValueError(f"{context}: OHLC ratio sanity check 실패: {failures}")
+
+
 def _resample_single_ticker(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     timeframe = normalize_timeframe(timeframe)
-    frame = _ensure_datetime(df)
+    frame = _apply_adjusted_ohlc_contract(
+        _ensure_datetime(df),
+        context=f"resample_price_frame:{timeframe}",
+    )
     if timeframe == "1D":
         return frame
 
@@ -141,6 +228,8 @@ def _resample_single_ticker(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     aggregated = aggregated.dropna(subset=["open", "high", "low", "close"]).reset_index()
     if "ticker" in df.columns and not aggregated.empty:
         aggregated["ticker"] = df["ticker"].iloc[0]
+    if not aggregated.empty:
+        _validate_adjusted_ohlc_contract(aggregated, context=f"resample_price_frame:{timeframe}:aggregated")
     return aggregated
 
 
@@ -151,7 +240,7 @@ def resample_price_frame(price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame
     frame = frame.dropna(subset=[col for col in required_price_cols if col in frame.columns])
 
     if timeframe == "1D" or frame.empty:
-        return frame.reset_index(drop=True)
+        return _apply_adjusted_ohlc_contract(frame, context=f"resample_price_frame:{timeframe}").reset_index(drop=True)
 
     if "ticker" not in frame.columns:
         return _resample_single_ticker(frame, timeframe)
@@ -192,7 +281,10 @@ def _compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 
 def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
-    frame = df.copy().sort_values("date").reset_index(drop=True)
+    frame = _apply_adjusted_ohlc_contract(
+        df.copy().sort_values("date").reset_index(drop=True),
+        context="compute_features",
+    )
     close_base = frame["adjusted_close"].fillna(frame["close"]) if "adjusted_close" in frame.columns else frame["close"]
     frame["close"] = close_base
 
@@ -201,7 +293,7 @@ def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
     frame["open_ratio"] = (frame["open"] - previous_close) / (previous_close + _EPSILON)
     frame["high_ratio"] = (frame["high"] - previous_close) / (previous_close + _EPSILON)
     frame["low_ratio"] = (frame["low"] - previous_close) / (previous_close + _EPSILON)
-    frame["vol_change"] = frame["volume"].pct_change()
+    frame["vol_change"] = frame["volume"].pct_change().replace([np.inf, -np.inf], np.nan)
 
     for window in (5, 20, 60):
         moving_average = frame["close"].rolling(window=window).mean()
@@ -230,8 +322,31 @@ def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
     upper = ma20 + (2 * std20)
     lower = ma20 - (2 * std20)
     frame["bb_position"] = (frame["close"] - lower) / ((upper - lower).replace(0, _EPSILON))
+    _validate_ratio_feature_sanity(frame, context="compute_features")
 
     return frame
+
+
+def build_price_features(price_df: pd.DataFrame, timeframe: str = "1D") -> pd.DataFrame:
+    """adjusted OHLC 계약으로 가격 파생 피처만 다시 계산한다."""
+    timeframe = normalize_timeframe(timeframe)
+    price_frame = resample_price_frame(price_df, timeframe)
+    if price_frame.empty:
+        return pd.DataFrame(columns=["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS])
+
+    built_frames: list[pd.DataFrame] = []
+    grouped_frames = price_frame.groupby("ticker", sort=True) if "ticker" in price_frame.columns else [(None, price_frame)]
+    for ticker_name, ticker_frame in grouped_frames:
+        feature_frame = _compute_features_for_single_ticker(ticker_frame)
+        if "ticker" not in feature_frame.columns:
+            feature_frame["ticker"] = ticker_name or "UNKNOWN"
+        feature_frame["timeframe"] = timeframe
+        feature_frame = feature_frame.dropna(subset=PRICE_DERIVED_FEATURE_COLUMNS)
+        built_frames.append(feature_frame[["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS]].copy())
+
+    if not built_frames:
+        return pd.DataFrame(columns=["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS])
+    return pd.concat(built_frames, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
 def _apply_regime_columns(frame: pd.DataFrame) -> pd.DataFrame:

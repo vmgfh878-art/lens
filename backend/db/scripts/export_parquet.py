@@ -24,7 +24,7 @@ TABLE_CONFIG = {
     "sector_returns": ["date", "sector", "id"],
     "company_fundamentals": ["ticker", "date", "id"],
     "indicators": ["ticker", "timeframe", "date", "id"],
-    "predictions": ["ticker", "model_name", "timeframe", "asof_date", "id"],
+    "predictions": ["run_id", "ticker", "model_name", "timeframe", "asof_date", "id"],
     "model_runs": ["run_id"],
     "prediction_evaluations": ["run_id", "ticker", "timeframe", "asof_date"],
     "backtest_results": ["run_id", "strategy_name", "timeframe", "id"],

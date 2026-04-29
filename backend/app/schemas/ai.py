@@ -13,6 +13,8 @@ class RunSummary(BaseModel):
     horizon: int | None = None
     created_at: str | None = None
     model_ver: str | None = None
+    feature_version: str | None = None
+    band_mode: str | None = None
     checkpoint_path: str | None = None
     best_epoch: int | None = None
     best_val_total: float | None = None
@@ -36,6 +38,8 @@ class EvaluationSummary(BaseModel):
     timeframe: str | None = None
     asof_date: str | None = None
     coverage: float | None = None
+    lower_breach_rate: float | None = None
+    upper_breach_rate: float | None = None
     avg_band_width: float | None = None
     direction_accuracy: float | None = None
     mae: float | None = None

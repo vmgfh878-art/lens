@@ -4,7 +4,10 @@ import torch
 
 from ai.train import (
     CheckpointSelector,
+    RUN_STATUS_COMPLETED,
+    RUN_STATUS_FAILED_QUALITY_GATE,
     coverage_gate_eligible,
+    resolve_persisted_run_status,
 )
 
 
@@ -87,6 +90,16 @@ class CheckpointSelectionTest(unittest.TestCase):
         self.assertEqual(selected.candidate.epoch, 2)
         self.assertEqual(selected.selected_reason, "val_total_best")
         self.assertFalse(selected.coverage_gate_failed)
+
+    def test_coverage_gate_failed_status_policy(self):
+        self.assertEqual(
+            resolve_persisted_run_status(coverage_gate_failed=True),
+            RUN_STATUS_FAILED_QUALITY_GATE,
+        )
+        self.assertEqual(
+            resolve_persisted_run_status(coverage_gate_failed=False),
+            RUN_STATUS_COMPLETED,
+        )
 
 
 if __name__ == "__main__":

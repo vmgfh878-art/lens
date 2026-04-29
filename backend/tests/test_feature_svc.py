@@ -8,10 +8,84 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.app.services.feature_svc import build_features
+from backend.app.services.feature_svc import build_features, resample_price_frame
 
 
 class FeatureServiceTestCase(unittest.TestCase):
+    def test_build_features_uses_adjusted_ohlc_for_ratios(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 90,
+                "date": pd.date_range("2026-01-01", periods=90, freq="D"),
+                "open": [100.0] * 90,
+                "high": [102.0] * 90,
+                "low": [98.0] * 90,
+                "close": [100.0] * 90,
+                "adjusted_close": [50.0] * 90,
+                "volume": [1000 + idx for idx in range(90)],
+            }
+        )
+        macro_df = pd.DataFrame(
+            {
+                "date": pd.date_range("2026-01-01", periods=90, freq="D"),
+                "us10y": [4.0] * 90,
+                "yield_spread": [1.0] * 90,
+                "vix_close": [20.0] * 90,
+                "credit_spread_hy": [3.0] * 90,
+            }
+        )
+
+        features = build_features(price_df=price_df, macro_df=macro_df, timeframe="1D")
+
+        self.assertFalse(features.empty)
+        self.assertAlmostEqual(float(features["open_ratio"].abs().max()), 0.0)
+        self.assertLess(float(features["high_ratio"].abs().quantile(0.99)), 0.05)
+        self.assertLess(float(features["low_ratio"].abs().quantile(0.99)), 0.05)
+
+    def test_resample_price_frame_keeps_adjusted_ohlc_contract(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 10,
+                "date": pd.date_range("2026-01-05", periods=10, freq="D"),
+                "open": [100.0] * 10,
+                "high": [102.0] * 10,
+                "low": [98.0] * 10,
+                "close": [100.0] * 10,
+                "adjusted_close": [50.0] * 10,
+                "volume": [1000] * 10,
+            }
+        )
+
+        weekly = resample_price_frame(price_df, "1W")
+
+        self.assertFalse(weekly.empty)
+        self.assertTrue((weekly["high"] >= weekly["low"]).all())
+        self.assertTrue((weekly["high"] >= weekly["open"]).all())
+        self.assertTrue((weekly["high"] >= weekly["close"]).all())
+        self.assertTrue((weekly["low"] <= weekly["open"]).all())
+        self.assertTrue((weekly["low"] <= weekly["close"]).all())
+        self.assertAlmostEqual(float(weekly.iloc[0]["open"]), 50.0)
+        self.assertAlmostEqual(float(weekly.iloc[0]["high"]), 51.0)
+        self.assertAlmostEqual(float(weekly.iloc[0]["low"]), 49.0)
+        self.assertAlmostEqual(float(weekly.iloc[0]["close"]), 50.0)
+
+    def test_resample_price_frame_rejects_invalid_adjusted_high_low(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "date": [pd.Timestamp("2026-01-05")],
+                "open": [100.0],
+                "high": [95.0],
+                "low": [105.0],
+                "close": [100.0],
+                "adjusted_close": [100.0],
+                "volume": [1000],
+            }
+        )
+
+        with self.assertRaises(ValueError):
+            resample_price_frame(price_df, "1D")
+
     def test_build_features_expands_regime_one_hot(self):
         price_df = pd.DataFrame(
             {

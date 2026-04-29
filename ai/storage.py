@@ -21,7 +21,7 @@ def save_predictions(records: list[dict[str, Any]]) -> None:
     upsert_records(
         "predictions",
         records,
-        on_conflict="ticker,model_name,timeframe,horizon,asof_date",
+        on_conflict="run_id,ticker,model_name,timeframe,horizon,asof_date",
     )
 
 

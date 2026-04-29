@@ -751,3 +751,50 @@ CP26-R에서도 PatchTST 구조는 변경하지 않았다. 변경 없이 q25/q20
 결과적으로 기본형 preset은 아직 확정하지 못했다. 최종 checkpoint 기준으로는 `q15-b2`만 공격 후보로 남았다.
 
 다음 병목은 모델 구조가 아니라 checkpoint selection 정책이다. validation total loss 기준으로 best를 고르면 band coverage가 과도하게 희생될 수 있으므로, 다음 단계에서는 coverage-aware selection을 추가하거나 별도 selector로 checkpoint 후보를 골라야 한다.
+
+### CP28-R 이후 PatchTST 생존 판정
+
+CP27-R에서 coverage-aware checkpoint selection을 추가해 100티커 기준 q20/q25/q15가 후보권으로 복구됐지만, CP28-R의 200티커 안정성 확인에서는 세 preset 모두 실패했다. 모델 구조는 계속 고정했다.
+
+구조 고정:
+
+- `patch_len=16`, `stride=8`
+- channel independence 유지
+- `ci_aggregate=target`
+- `band_mode=direct`
+- direction/rank head 없음
+- loss 구조 변경 없음
+
+200티커 결과는 구조 개선보다 baseline 비교가 먼저 필요하다는 쪽으로 기운다. q20/q25는 coverage가 0.50~0.60대로 무너졌고, q15도 upper breach가 0.15를 넘었다. 따라서 현재 PatchTST preset은 full 473티커 후보가 아니며, 다음 단계에서는 DLinear/NLinear 같은 단순 시계열 baseline을 같은 evaluation contract로 붙여 비교해야 한다.
+### CP29-D 이후 가격 피처 계약
+
+PatchTST 구조는 CP29-D에서 바꾸지 않았다. 변경점은 모델이 먹는 가격 파생 피처의 입력 계약이다. 기존에는 raw EODHD `open/high/low`와 `adjusted_close` 기반 previous close가 섞일 수 있어 `open_ratio/high_ratio/low_ratio`가 비정상적으로 폭주했다.
+
+이제 모델 입력 가격 피처는 adjusted OHLC 기준으로 고정한다. `adj_factor = adjusted_close / close`를 만든 뒤 `adj_open`, `adj_high`, `adj_low`, `adj_close`로 가격 파생 피처를 계산한다. PatchTST의 `n_features=36`, patch geometry, channel independence, `ci_aggregate=target`, `band_mode=direct`는 그대로 유지한다.
+
+CP29-D smoke는 구조 성능 판정이 아니라 입력 계약 검증이다. 50티커 1epoch에서 feature finite gate는 통과했고, full 473티커 학습은 계속 금지한다.
+
+### CP30-G 이후 실험 게이트 계약
+
+CP30-G는 모델 구조를 바꾸지 않았다. PatchTST, RevIN, channel independence, patch geometry, head 구조는 그대로 두고, 저장/추론/백테스트 재현성 계약만 수리했다.
+
+모델 run 저장 계약:
+
+- `model_runs.band_mode`는 config JSON이 아니라 정식 컬럼에도 저장한다.
+- `model_runs.feature_version`은 `FEATURE_CONTRACT_VERSION=v3_adjusted_ohlc`를 따른다.
+- coverage gate가 eligible checkpoint를 찾지 못하고 fallback한 run은 `failed_quality_gate`로 저장한다.
+- inference와 backtest는 기존 CP12 정책대로 `status="completed"` run만 허용하므로, quality gate 실패 run은 제품 산출물로 승격되지 않는다.
+
+추론 재현성 계약:
+
+- ticker embedding이 활성화된 checkpoint는 checkpoint config의 `ticker_registry_path`를 필수로 사용한다.
+- inference subset이 새 ticker registry를 만들지 않는다.
+- registry `timeframe`, `num_tickers`, mapping 크기가 checkpoint config와 다르면 실패한다.
+
+백테스트 계약:
+
+- price decode와 realized return anchor는 adjusted 기준이다.
+- signal backtest는 row 단위 position shift가 아니라 날짜별 포트폴리오 단위로 계산한다.
+- 같은 날짜의 `BUY/SELL` 활성 포지션은 절대 노출 합 1로 정규화하고, turnover는 이전 날짜 weight와 현재 날짜 weight의 L1 변화량으로 계산한다.
+
+RevIN은 이번 CP에서 수정하지 않는다. 다음 ablation에서는 CP29/CP30 계약을 고정한 뒤 `use_revin=True/False`만 분리해 비교한다.

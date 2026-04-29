@@ -6,11 +6,11 @@ from app.db import get_supabase
 
 RUN_COLUMNS = (
     "run_id, wandb_run_id, model_name, timeframe, horizon, val_metrics, "
-    "test_metrics, config, checkpoint_path, status, created_at"
+    "test_metrics, config, checkpoint_path, status, feature_version, band_mode, created_at"
 )
 EVALUATION_COLUMNS = (
     "run_id, ticker, timeframe, asof_date, coverage, avg_band_width, "
-    "direction_accuracy, mae, smape"
+    "lower_breach_rate, upper_breach_rate, direction_accuracy, mae, smape"
 )
 BACKTEST_COLUMNS = (
     "run_id, strategy_name, timeframe, return_pct, mdd, sharpe, win_rate, "
