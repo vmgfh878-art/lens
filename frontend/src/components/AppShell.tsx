@@ -41,7 +41,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: "분석",
     items: [
       { id: "stocks", label: "주식 보기", icon: "chart" },
-      { id: "watchlist", label: "관심 종목", icon: "star", badge: "12", disabled: true },
     ],
   },
   {
@@ -49,13 +48,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: "backtests", label: "백테스트", icon: "beaker" },
       { id: "training", label: "모델 학습", icon: "cpu" },
-    ],
-  },
-  {
-    label: "라이브러리",
-    items: [
-      { id: "datasets", label: "데이터셋", icon: "database", disabled: true },
-      { id: "reports", label: "리포트", icon: "doc", disabled: true },
     ],
   },
 ];
@@ -162,14 +154,6 @@ function Icon({ name }: { name: IconName }) {
 
 export default function AppShell({ activeView, onViewChange, children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [search, setSearch] = useState("");
-
-  const filteredSections = NAV_SECTIONS.map((section) => ({
-    ...section,
-    items: section.items.filter((item) =>
-      item.label.toLowerCase().includes(search.toLowerCase()),
-    ),
-  })).filter((s) => s.items.length > 0);
 
   const activeLabel =
     NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.id === activeView)?.label ?? "Lens";
@@ -185,21 +169,8 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
           </div>
         </div>
 
-        <div className="side-search">
-          <span className="side-search__icon" aria-hidden="true">
-            <Icon name="search" />
-          </span>
-          <input
-            placeholder="검색..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="메뉴 검색"
-          />
-          <span className="side-search__kbd">⌘K</span>
-        </div>
-
         <nav className="nav-scroll" aria-label="주요 화면">
-          {filteredSections.map((section) => (
+          {NAV_SECTIONS.map((section) => (
             <div className="nav-section" key={section.label}>
               <div className="nav-section__label">{section.label}</div>
               <div className="nav-list">
@@ -231,13 +202,6 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
         </nav>
 
         <div className="nav-footer">
-          <div className="nav-user" title="계정">
-            <div className="nav-user__avatar">VM</div>
-            <div className="nav-user__meta">
-              <span className="nav-user__name">vmgfh878</span>
-              <span className="nav-user__email">research@lens.io</span>
-            </div>
-          </div>
           <button
             className="nav-collapse"
             type="button"
@@ -258,15 +222,6 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
               <Icon name="chevron" />
             </span>
             <strong>{activeLabel}</strong>
-          </div>
-          <div className="topbar__actions">
-            <button className="icon-btn" type="button" title="알림">
-              <Icon name="bell" />
-              <span className="icon-btn__dot" aria-hidden="true" />
-            </button>
-            <button className="icon-btn" type="button" title="설정">
-              <Icon name="settings" />
-            </button>
           </div>
         </header>
         <div className="workspace__body">{children}</div>

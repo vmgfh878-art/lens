@@ -6,7 +6,7 @@ import pandas as pd
 
 from app.core.exceptions import InvalidRunStatusError, ResourceNotFoundError
 from app.repositories.ai_repo import fetch_model_run
-from app.repositories.market_repo import fetch_price_rows, fetch_stocks
+from app.repositories.market_repo import fetch_indicator_rows, fetch_price_rows, fetch_stocks
 from app.repositories.prediction_repo import fetch_latest_prediction, fetch_prediction_by_run
 from app.services.model_svc import (
     normalize_display_timeframe,
@@ -84,6 +84,45 @@ def get_price_response_data(
     }
 
 
+def get_indicator_response_data(
+    ticker: str,
+    *,
+    timeframe: str = "1D",
+    limit: int = 300,
+) -> dict:
+    normalized_timeframe = normalize_display_timeframe(timeframe)
+    rows = fetch_indicator_rows(ticker, timeframe=normalized_timeframe, limit=limit)
+    return {
+        "ticker": ticker.upper(),
+        "timeframe": normalized_timeframe,
+        "data": rows,
+    }
+
+
+def _build_prediction_meta(prediction: dict, model_run: dict | None) -> dict:
+    meta = prediction.get("meta") if isinstance(prediction.get("meta"), dict) else {}
+    merged = dict(meta)
+    if not model_run:
+        return merged
+
+    config = model_run.get("config") if isinstance(model_run.get("config"), dict) else {}
+    feature_version = model_run.get("feature_version") or config.get("feature_version")
+    if feature_version:
+        merged.setdefault("feature_contract", feature_version)
+        merged.setdefault("feature_contract_version", feature_version)
+    for key in (
+        "line_model_run_id",
+        "band_model_run_id",
+        "composition_policy",
+        "band_calibration_method",
+        "band_calibration_params",
+        "prediction_composition_version",
+    ):
+        if config.get(key) is not None:
+            merged.setdefault(key, config[key])
+    return merged
+
+
 def get_latest_prediction_data(
     ticker: str,
     *,
@@ -92,6 +131,7 @@ def get_latest_prediction_data(
     horizon: int | None = None,
     run_id: str | None = None,
 ) -> dict:
+    model_run = None
     if run_id:
         model_run = fetch_model_run(run_id)
         if model_run is None:
@@ -103,7 +143,7 @@ def get_latest_prediction_data(
                 details={"run_id": run_id, "status": run_status},
             )
         prediction = fetch_prediction_by_run(ticker, run_id=run_id)
-        model_name = normalize_model_name(str(model_run.get("model_name") or model))
+        model_name = str(model_run.get("model_name") or model).strip().lower()
         normalized_timeframe = normalize_prediction_timeframe(str(model_run.get("timeframe") or timeframe))
         resolved_horizon = int(model_run.get("horizon") or resolve_horizon(normalized_timeframe, horizon))
     else:
@@ -131,4 +171,5 @@ def get_latest_prediction_data(
     prediction["lower_band_series"] = prediction.get("lower_band_series") or []
     prediction["line_series"] = prediction.get("line_series") or prediction.get("conservative_series") or []
     prediction["conservative_series"] = prediction.get("conservative_series") or prediction["line_series"]
+    prediction["meta"] = _build_prediction_meta(prediction, model_run)
     return prediction

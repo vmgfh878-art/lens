@@ -42,6 +42,31 @@ class StorageContractsTestCase(unittest.TestCase):
             on_conflict="run_id,ticker,model_name,timeframe,horizon,asof_date",
         )
 
+    def test_save_predictions_preserves_composition_meta(self):
+        records = [
+            {
+                "run_id": "composite-run-1",
+                "ticker": "AAPL",
+                "model_name": "patchtst_line__cnn_lstm_calibrated_band",
+                "timeframe": "1D",
+                "horizon": 5,
+                "asof_date": "2026-04-01",
+                "meta": {
+                    "line_model_run_id": "line-run",
+                    "band_model_run_id": "band-run",
+                    "band_calibration_method": "scalar_width",
+                    "prediction_composition_version": "line_band_v1",
+                },
+            }
+        ]
+
+        with patch("ai.storage.upsert_records") as upsert:
+            save_predictions(records)
+
+        saved_records = upsert.call_args.args[1]
+        self.assertEqual(saved_records[0]["meta"]["line_model_run_id"], "line-run")
+        self.assertEqual(saved_records[0]["meta"]["band_model_run_id"], "band-run")
+
 
 if __name__ == "__main__":
     unittest.main()

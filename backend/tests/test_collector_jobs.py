@@ -225,6 +225,91 @@ class CollectorJobTestCase(unittest.TestCase):
         ]
         self.assertEqual(full_group_calls, [])
 
+    def test_compute_indicators_can_limit_timeframes_for_backfill(self):
+        def fake_fetch_frame(table, **kwargs):
+            if table == "price_data":
+                return pd.DataFrame(
+                    {
+                        "ticker": ["AAPL"],
+                        "date": ["2026-04-24"],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.0],
+                        "adjusted_close": [100.0],
+                        "volume": [1000],
+                        "amount": [100000.0],
+                        "per": [10.0],
+                        "pbr": [2.0],
+                    }
+                )
+            return pd.DataFrame()
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame), patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            return_value=pd.DataFrame(),
+        ) as build_features_mock, patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value={},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            result = run_compute_indicators(
+                lookback_days=14,
+                tickers=["AAPL"],
+                force_full_backfill=True,
+                full_start_date="2024-01-01",
+                timeframes=["1D"],
+            )
+
+        self.assertEqual(list(result["timeframes"].keys()), ["1D"])
+        build_features_mock.assert_called_once()
+
+    def test_compute_indicators_splits_large_ticker_queries_into_batches(self):
+        observed_batches: list[list[str]] = []
+
+        def fake_fetch_frame(table, **kwargs):
+            filters = kwargs.get("filters") or []
+            if table == "price_data":
+                tickers = next((item[2] for item in filters if item[0] == "in" and item[1] == "ticker"), [])
+                observed_batches.append(list(tickers))
+                return pd.DataFrame(
+                    {
+                        "ticker": tickers,
+                        "date": ["2026-04-24"] * len(tickers),
+                        "open": [100.0] * len(tickers),
+                        "high": [101.0] * len(tickers),
+                        "low": [99.0] * len(tickers),
+                        "close": [100.0] * len(tickers),
+                        "adjusted_close": [100.0] * len(tickers),
+                        "volume": [1000] * len(tickers),
+                        "amount": [100000.0] * len(tickers),
+                        "per": [10.0] * len(tickers),
+                        "pbr": [2.0] * len(tickers),
+                    }
+                )
+            return pd.DataFrame()
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame), patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            return_value=pd.DataFrame(),
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value={ticker: {"last_cursor_date": "2026-04-24"} for ticker in ["AAPL", "MSFT", "NVDA"]},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.TIMEFRAME_BATCH_SIZE",
+            {"1D": 2, "1W": 2, "1M": 2},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            run_compute_indicators(
+                lookback_days=14,
+                tickers=["AAPL", "MSFT", "NVDA"],
+                timeframes=["1D"],
+            )
+
+        self.assertEqual(observed_batches, [["AAPL", "MSFT"], ["NVDA"]])
+
 
 if __name__ == "__main__":
     unittest.main()

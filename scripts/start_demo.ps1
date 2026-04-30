@@ -8,6 +8,10 @@ $FrontendDir = Join-Path $RootDir "frontend"
 $LogDir = Join-Path $RootDir "logs"
 $VenvPython = Join-Path $RootDir ".venv\Scripts\python.exe"
 $PythonExe = if (Test-Path $VenvPython) { $VenvPython } else { "python" }
+$NpmCommand = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+if (-not $NpmCommand) {
+  $NpmCommand = "npm"
+}
 $BackendRunner = Join-Path $LogDir "run_backend_demo.ps1"
 $FrontendRunner = Join-Path $LogDir "run_frontend_demo.ps1"
 
@@ -27,10 +31,11 @@ Set-Location "$RootDir"
 `$Host.UI.RawUI.WindowTitle = "Lens frontend 3000"
 Set-Location "$FrontendDir"
 `$env:NEXT_PUBLIC_BACKEND_URL="http://127.0.0.1:8000"
-npm run dev -- --hostname 127.0.0.1 --port 3000
+& "$NpmCommand" run dev -- --hostname 127.0.0.1 --port 3000
 "@ | Set-Content -Path $FrontendRunner -Encoding UTF8
 
-Start-Process -FilePath "powershell.exe" -ArgumentList @(
+Start-Process -WindowStyle Hidden -FilePath "powershell.exe" -ArgumentList @(
+  "-NoProfile",
   "-NoExit",
   "-ExecutionPolicy",
   "Bypass",
@@ -40,7 +45,8 @@ Start-Process -FilePath "powershell.exe" -ArgumentList @(
 
 Start-Sleep -Seconds 2
 
-Start-Process -FilePath "powershell.exe" -ArgumentList @(
+Start-Process -WindowStyle Hidden -FilePath "powershell.exe" -ArgumentList @(
+  "-NoProfile",
   "-NoExit",
   "-ExecutionPolicy",
   "Bypass",

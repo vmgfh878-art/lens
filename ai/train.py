@@ -81,16 +81,23 @@ RUN_STATUS_FAILED_NAN = "failed_nan"
 RUN_STATUS_FAILED_QUALITY_GATE = "failed_quality_gate"
 NAN_STREAK_LIMIT = 3
 CLI_CUDA_CLEANUP_STATE: dict[str, Any] | None = None
-CHECKPOINT_SELECTION_CHOICES = ("val_total", "coverage_gate")
+CHECKPOINT_SELECTION_CHOICES = ("val_total", "line_gate", "band_gate", "combined_gate", "coverage_gate")
 
 COVERAGE_GATE_MIN = 0.75
 COVERAGE_GATE_MAX = 0.95
 COVERAGE_GATE_MAX_UPPER_BREACH = 0.15
 COVERAGE_GATE_MAX_LOWER_BREACH = 0.20
+BAND_GATE_TARGET_COVERAGE = 0.85
 
 
-def resolve_persisted_run_status(*, coverage_gate_failed: bool) -> str:
-    return RUN_STATUS_FAILED_QUALITY_GATE if coverage_gate_failed else RUN_STATUS_COMPLETED
+def resolve_persisted_run_status(
+    *,
+    gate_failed: bool | None = None,
+    coverage_gate_failed: bool | None = None,
+) -> str:
+    if gate_failed is None:
+        gate_failed = bool(coverage_gate_failed)
+    return RUN_STATUS_FAILED_QUALITY_GATE if gate_failed else RUN_STATUS_COMPLETED
 
 
 @dataclass
@@ -146,6 +153,7 @@ class TrainConfig:
     detect_anomaly: bool = False
     explicit_cuda_cleanup: bool = False
     hard_exit_after_result: bool = False
+    use_revin: bool = True
     patch_len: int = 16
     patch_stride: int = 8
     patchtst_d_model: int = 128
@@ -244,6 +252,11 @@ class CheckpointSelectionResult:
     candidate: CheckpointCandidate
     checkpoint_selection: str
     selected_reason: str
+    gate_type: str
+    gate_failed: bool
+    line_gate_pass: bool
+    band_gate_pass: bool
+    combined_gate_pass: bool
     coverage_gate_failed: bool
     best_val_total_epoch: int | None
 
@@ -255,12 +268,50 @@ def clone_state_dict(model) -> dict[str, torch.Tensor]:
     }
 
 
-def coverage_gate_eligible(metrics: dict[str, float]) -> bool:
-    coverage = float(metrics.get("coverage", float("nan")))
-    upper_breach = float(metrics.get("upper_breach_rate", float("nan")))
-    lower_breach = float(metrics.get("lower_breach_rate", float("nan")))
-    spearman_ic = metrics.get("spearman_ic")
-    long_short_spread = metrics.get("long_short_spread")
+def _finite_metric(metrics: dict[str, float], key: str, default: float = float("nan")) -> float:
+    try:
+        return float(metrics.get(key, default))
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def normalize_checkpoint_selection(mode: str) -> str:
+    if mode == "coverage_gate":
+        return "combined_gate"
+    return mode
+
+
+def checkpoint_role_for_gate(gate_type: str) -> str:
+    if gate_type == "line_gate":
+        return "line_model"
+    if gate_type == "band_gate":
+        return "band_model"
+    if gate_type == "combined_gate":
+        return "combined_model"
+    return "legacy_val_total"
+
+
+def line_gate_eligible(metrics: dict[str, float]) -> bool:
+    spearman_ic = _finite_metric(metrics, "spearman_ic")
+    long_short_spread = _finite_metric(metrics, "long_short_spread")
+    mae = _finite_metric(metrics, "mae")
+    smape = _finite_metric(metrics, "smape")
+    return (
+        math.isfinite(spearman_ic)
+        and spearman_ic > 0.0
+        and math.isfinite(long_short_spread)
+        and long_short_spread > 0.0
+        and math.isfinite(mae)
+        and math.isfinite(smape)
+    )
+
+
+def band_gate_eligible(metrics: dict[str, float]) -> bool:
+    coverage = _finite_metric(metrics, "coverage")
+    upper_breach = _finite_metric(metrics, "upper_breach_rate")
+    lower_breach = _finite_metric(metrics, "lower_breach_rate")
+    avg_band_width = _finite_metric(metrics, "avg_band_width")
+    band_loss = _finite_metric(metrics, "band_loss")
     return (
         math.isfinite(coverage)
         and COVERAGE_GATE_MIN <= coverage <= COVERAGE_GATE_MAX
@@ -268,22 +319,49 @@ def coverage_gate_eligible(metrics: dict[str, float]) -> bool:
         and upper_breach <= COVERAGE_GATE_MAX_UPPER_BREACH
         and math.isfinite(lower_breach)
         and lower_breach <= COVERAGE_GATE_MAX_LOWER_BREACH
-        and spearman_ic is not None
-        and math.isfinite(float(spearman_ic))
-        and float(spearman_ic) > 0.0
-        and long_short_spread is not None
-        and math.isfinite(float(long_short_spread))
-        and float(long_short_spread) > 0.0
+        and math.isfinite(avg_band_width)
+        and avg_band_width > 0.0
+        and math.isfinite(band_loss)
     )
 
 
-def coverage_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float]:
+def combined_gate_eligible(metrics: dict[str, float]) -> bool:
+    return line_gate_eligible(metrics) and band_gate_eligible(metrics)
+
+
+def coverage_gate_eligible(metrics: dict[str, float]) -> bool:
+    return combined_gate_eligible(metrics)
+
+
+def line_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float]:
     metrics = candidate.metrics
     return (
-        float(metrics.get("upper_breach_rate", float("inf"))),
-        -float(metrics.get("spearman_ic", float("-inf"))),
-        -float(metrics.get("long_short_spread", float("-inf"))),
-        float(metrics.get("forecast_loss", metrics.get("total_loss", float("inf")))),
+        -_finite_metric(metrics, "spearman_ic", float("-inf")),
+        -_finite_metric(metrics, "long_short_spread", float("-inf")),
+        _finite_metric(metrics, "mae", float("inf")),
+        _finite_metric(metrics, "forecast_loss", _finite_metric(metrics, "total_loss", float("inf"))),
+    )
+
+
+def band_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float, float]:
+    metrics = candidate.metrics
+    coverage = _finite_metric(metrics, "coverage")
+    return (
+        abs(coverage - BAND_GATE_TARGET_COVERAGE),
+        _finite_metric(metrics, "upper_breach_rate", float("inf")),
+        _finite_metric(metrics, "lower_breach_rate", float("inf")),
+        _finite_metric(metrics, "avg_band_width", float("inf")),
+        _finite_metric(metrics, "band_loss", float("inf")),
+    )
+
+
+def combined_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float]:
+    metrics = candidate.metrics
+    return (
+        _finite_metric(metrics, "upper_breach_rate", float("inf")),
+        -_finite_metric(metrics, "spearman_ic", float("-inf")),
+        -_finite_metric(metrics, "long_short_spread", float("-inf")),
+        _finite_metric(metrics, "forecast_loss", _finite_metric(metrics, "total_loss", float("inf"))),
     )
 
 
@@ -294,8 +372,32 @@ class CheckpointSelector:
         if mode not in CHECKPOINT_SELECTION_CHOICES:
             raise ValueError(f"지원하지 않는 checkpoint_selection 값입니다: {mode}")
         self.mode = mode
+        self.gate_type = normalize_checkpoint_selection(mode)
         self.best_val_total_candidate: CheckpointCandidate | None = None
-        self.best_coverage_gate_candidate: CheckpointCandidate | None = None
+        self.best_gate_candidate: CheckpointCandidate | None = None
+
+    def _gate_eligible(self, metrics: dict[str, float]) -> bool:
+        if self.gate_type == "line_gate":
+            return line_gate_eligible(metrics)
+        if self.gate_type == "band_gate":
+            return band_gate_eligible(metrics)
+        if self.gate_type == "combined_gate":
+            return combined_gate_eligible(metrics)
+        return False
+
+    def _gate_sort_key(self, candidate: CheckpointCandidate):
+        if self.gate_type == "line_gate":
+            return line_gate_sort_key(candidate)
+        if self.gate_type == "band_gate":
+            return band_gate_sort_key(candidate)
+        if self.gate_type == "combined_gate":
+            return combined_gate_sort_key(candidate)
+        return ()
+
+    def _selected_reason(self, passed: bool) -> str:
+        if self.mode == "coverage_gate":
+            return "coverage_gate_eligible" if passed else "coverage_gate_failed_fallback_val_total"
+        return f"{self.gate_type}_eligible" if passed else f"{self.gate_type}_failed_fallback_val_total"
 
     def update(self, *, epoch: int, metrics: dict[str, float], model) -> None:
         current_value = float(metrics.get("forecast_loss", metrics.get("total_loss", float("inf"))))
@@ -307,17 +409,15 @@ class CheckpointSelector:
             best_value = float(best_metrics.get("forecast_loss", best_metrics.get("total_loss", float("inf"))))
             is_best_val_total = current_value < best_value
 
-        is_best_coverage_gate = False
-        if self.mode == "coverage_gate" and coverage_gate_eligible(metrics):
-            candidate_key = coverage_gate_sort_key(
-                CheckpointCandidate(epoch=epoch, metrics=metrics, state_dict={})
-            )
-            if self.best_coverage_gate_candidate is None:
-                is_best_coverage_gate = True
+        is_best_gate = False
+        if self.gate_type != "val_total" and self._gate_eligible(metrics):
+            candidate_key = self._gate_sort_key(CheckpointCandidate(epoch=epoch, metrics=metrics, state_dict={}))
+            if self.best_gate_candidate is None:
+                is_best_gate = True
             else:
-                is_best_coverage_gate = candidate_key < coverage_gate_sort_key(self.best_coverage_gate_candidate)
+                is_best_gate = candidate_key < self._gate_sort_key(self.best_gate_candidate)
 
-        if not (is_best_val_total or is_best_coverage_gate):
+        if not (is_best_val_total or is_best_gate):
             return
 
         candidate = CheckpointCandidate(
@@ -327,35 +427,53 @@ class CheckpointSelector:
         )
         if is_best_val_total:
             self.best_val_total_candidate = candidate
-        if is_best_coverage_gate:
-            self.best_coverage_gate_candidate = candidate
+        if is_best_gate:
+            self.best_gate_candidate = candidate
 
     def select(self) -> CheckpointSelectionResult:
         if self.best_val_total_candidate is None:
             raise RuntimeError("선택할 checkpoint 후보가 없습니다.")
 
         if self.mode == "val_total":
+            metrics = self.best_val_total_candidate.metrics
             return CheckpointSelectionResult(
                 candidate=self.best_val_total_candidate,
                 checkpoint_selection=self.mode,
                 selected_reason="val_total_best",
+                gate_type="val_total",
+                gate_failed=False,
+                line_gate_pass=line_gate_eligible(metrics),
+                band_gate_pass=band_gate_eligible(metrics),
+                combined_gate_pass=combined_gate_eligible(metrics),
                 coverage_gate_failed=False,
                 best_val_total_epoch=self.best_val_total_candidate.epoch,
             )
 
-        if self.best_coverage_gate_candidate is None:
+        if self.best_gate_candidate is None:
+            metrics = self.best_val_total_candidate.metrics
             return CheckpointSelectionResult(
                 candidate=self.best_val_total_candidate,
                 checkpoint_selection=self.mode,
-                selected_reason="coverage_gate_failed_fallback_val_total",
+                selected_reason=self._selected_reason(passed=False),
+                gate_type=self.gate_type,
+                gate_failed=True,
+                line_gate_pass=line_gate_eligible(metrics),
+                band_gate_pass=band_gate_eligible(metrics),
+                combined_gate_pass=combined_gate_eligible(metrics),
                 coverage_gate_failed=True,
                 best_val_total_epoch=self.best_val_total_candidate.epoch,
             )
 
+        metrics = self.best_gate_candidate.metrics
         return CheckpointSelectionResult(
-            candidate=self.best_coverage_gate_candidate,
+            candidate=self.best_gate_candidate,
             checkpoint_selection=self.mode,
-            selected_reason="coverage_gate_eligible",
+            selected_reason=self._selected_reason(passed=True),
+            gate_type=self.gate_type,
+            gate_failed=False,
+            line_gate_pass=line_gate_eligible(metrics),
+            band_gate_pass=band_gate_eligible(metrics),
+            combined_gate_pass=combined_gate_eligible(metrics),
             coverage_gate_failed=False,
             best_val_total_epoch=self.best_val_total_candidate.epoch,
         )
@@ -396,6 +514,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", default="auto")
     parser.add_argument("--compile", dest="compile_model", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--ci-target-fast", dest="ci_target_fast", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--use-revin", dest="use_revin", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--patch-len", type=int, default=16)
     parser.add_argument("--patch-stride", type=int, default=8)
     parser.add_argument("--patchtst-d-model", type=int, default=128)
@@ -440,6 +559,7 @@ def build_model(config: TrainConfig):
         "ticker_emb_dim": config.ticker_emb_dim,
     }
     if config.model == "patchtst":
+        common_kwargs["use_revin"] = config.use_revin
         common_kwargs["ci_aggregate"] = config.ci_aggregate
         common_kwargs["target_channel_idx"] = config.target_channel_idx
         common_kwargs["ci_target_fast"] = config.ci_target_fast
@@ -769,6 +889,10 @@ def _summarize_predictions(
     metadata: Any | None = None,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    q_low: float = 0.1,
+    q_high: float = 0.9,
+    severe_downside_threshold: float | None = None,
+    squeeze_breakout_threshold: float | None = None,
 ) -> dict[str, float]:
     return summarize_forecast_metrics(
         metadata=metadata if metadata is not None else None,
@@ -780,7 +904,38 @@ def _summarize_predictions(
         raw_future_returns=torch.cat(raw_future_returns, dim=0),
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        q_low=q_low,
+        q_high=q_high,
+        severe_downside_threshold=severe_downside_threshold,
+        squeeze_breakout_threshold=squeeze_breakout_threshold,
     )
+
+
+def estimate_train_risk_thresholds(bundle: SequenceDatasetBundle | SequenceDataset) -> dict[str, float | None]:
+    """train split raw return만 사용해 누수 없는 risk 기준값을 계산한다."""
+    if isinstance(bundle, SequenceDatasetBundle):
+        raw_values = bundle.raw_future_returns.detach().cpu().to(torch.float32).reshape(-1)
+    else:
+        chunks: list[np.ndarray] = []
+        for ticker, end_idx in bundle.sample_refs:
+            ticker_array = bundle.ticker_arrays[ticker]
+            future_start = end_idx + 1
+            future_end = future_start + bundle.horizon
+            anchor_close = float(ticker_array["closes"][end_idx])
+            future_returns = (ticker_array["closes"][future_start:future_end] / anchor_close) - 1.0
+            chunks.append(np.asarray(future_returns, dtype="float32"))
+        raw_values = torch.from_numpy(np.concatenate(chunks)).to(torch.float32) if chunks else torch.empty(0)
+
+    finite = raw_values[torch.isfinite(raw_values)]
+    if finite.numel() == 0:
+        return {
+            "severe_downside_threshold": None,
+            "squeeze_breakout_threshold": None,
+        }
+    return {
+        "severe_downside_threshold": float(torch.quantile(finite, 0.10).item()),
+        "squeeze_breakout_threshold": float(torch.quantile(finite.abs(), 0.80).item()),
+    }
 
 
 def _find_first_nonfinite_tensor(
@@ -819,6 +974,10 @@ def evaluate_loader(
     metadata: Any | None = None,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    q_low: float = 0.1,
+    q_high: float = 0.9,
+    severe_downside_threshold: float | None = None,
+    squeeze_breakout_threshold: float | None = None,
     amp_dtype: str = "bf16",
     phase: str = "val",
     run_id: str = "",
@@ -917,6 +1076,10 @@ def evaluate_loader(
             metadata=metadata,
             line_target_type=line_target_type,
             band_target_type=band_target_type,
+            q_low=q_low,
+            q_high=q_high,
+            severe_downside_threshold=severe_downside_threshold,
+            squeeze_breakout_threshold=squeeze_breakout_threshold,
         )
     )
     return averaged
@@ -930,6 +1093,10 @@ def evaluate_bundle(
     num_workers: int | str,
     line_target_type: str = "raw_future_return",
     band_target_type: str = "raw_future_return",
+    q_low: float = 0.1,
+    q_high: float = 0.9,
+    severe_downside_threshold: float | None = None,
+    squeeze_breakout_threshold: float | None = None,
     amp_dtype: str = "bf16",
     phase: str = "test",
     run_id: str = "",
@@ -945,12 +1112,16 @@ def evaluate_bundle(
         metadata=bundle.metadata,
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        q_low=q_low,
+        q_high=q_high,
+        severe_downside_threshold=severe_downside_threshold,
+        squeeze_breakout_threshold=squeeze_breakout_threshold,
         amp_dtype=amp_dtype,
         phase=phase,
         run_id=run_id,
         epoch=epoch,
     )
-    return {
+    result = {
         "total_loss": metrics["total_loss"],
         "forecast_loss": metrics["forecast_loss"],
         "direction_loss": metrics["direction_loss"],
@@ -967,6 +1138,13 @@ def evaluate_bundle(
         "mean_signed_error": metrics["mean_signed_error"],
         "overprediction_rate": metrics["overprediction_rate"],
         "mean_overprediction": metrics["mean_overprediction"],
+        "underprediction_rate": metrics.get("underprediction_rate"),
+        "mean_underprediction": metrics.get("mean_underprediction"),
+        "downside_capture_rate": metrics.get("downside_capture_rate"),
+        "severe_downside_recall": metrics.get("severe_downside_recall"),
+        "false_safe_rate": metrics.get("false_safe_rate"),
+        "conservative_bias": metrics.get("conservative_bias"),
+        "upside_sacrifice": metrics.get("upside_sacrifice"),
         "spearman_ic": metrics["spearman_ic"],
         "top_k_long_spread": metrics["top_k_long_spread"],
         "top_k_short_spread": metrics["top_k_short_spread"],
@@ -975,6 +1153,10 @@ def evaluate_bundle(
         "fee_adjusted_sharpe": metrics["fee_adjusted_sharpe"],
         "fee_adjusted_turnover": metrics["fee_adjusted_turnover"],
     }
+    for key, value in metrics.items():
+        if key not in result:
+            result[key] = value
+    return result
 
 
 def maybe_init_wandb(
@@ -1094,6 +1276,9 @@ def save_checkpoint(
     checkpoint_config = {
         **asdict(config),
         "feature_version": FEATURE_CONTRACT_VERSION,
+        "severe_downside_threshold": metrics.get("severe_downside_threshold"),
+        "squeeze_breakout_threshold": metrics.get("squeeze_breakout_threshold"),
+        "risk_threshold_source": metrics.get("risk_threshold_source"),
     }
     torch.save(
         {
@@ -1148,6 +1333,9 @@ def run_training(
     assert_dataset_features_finite("train_bundle", train_bundle)
     assert_dataset_features_finite("val_bundle", val_bundle)
     assert_dataset_features_finite("test_bundle", test_bundle)
+    risk_thresholds = estimate_train_risk_thresholds(train_bundle)
+    severe_downside_threshold = risk_thresholds["severe_downside_threshold"]
+    squeeze_breakout_threshold = risk_thresholds["squeeze_breakout_threshold"]
 
     train_loader = make_loader(
         train_bundle,
@@ -1297,6 +1485,10 @@ def run_training(
             metadata=val_bundle.metadata,
             line_target_type=config.line_target_type,
             band_target_type=config.band_target_type,
+            q_low=config.q_low,
+            q_high=config.q_high,
+            severe_downside_threshold=severe_downside_threshold,
+            squeeze_breakout_threshold=squeeze_breakout_threshold,
             amp_dtype=config.amp_dtype,
             phase="val",
             run_id=run_id,
@@ -1398,6 +1590,12 @@ def run_training(
         "checkpoint_selection": selection_result.checkpoint_selection,
         "selected_epoch": selection_result.candidate.epoch,
         "selected_reason": selection_result.selected_reason,
+        "gate_type": selection_result.gate_type,
+        "gate_failed": selection_result.gate_failed,
+        "line_gate_pass": selection_result.line_gate_pass,
+        "band_gate_pass": selection_result.band_gate_pass,
+        "combined_gate_pass": selection_result.combined_gate_pass,
+        "role": checkpoint_role_for_gate(selection_result.gate_type),
         "coverage_gate_failed": selection_result.coverage_gate_failed,
         "selected_coverage": selected_summary.get("coverage"),
         "selected_upper_breach_rate": selected_summary.get("upper_breach_rate"),
@@ -1407,6 +1605,9 @@ def run_training(
         "selected_fee_adjusted_return": selected_summary.get("fee_adjusted_return"),
         "best_val_total_epoch": selection_result.best_val_total_epoch,
         "legacy_best_val_total": early_stopping.best_value,
+        "severe_downside_threshold": severe_downside_threshold,
+        "squeeze_breakout_threshold": squeeze_breakout_threshold,
+        "risk_threshold_source": "train_split_quantile",
     }
     print(
         json.dumps(
@@ -1414,6 +1615,11 @@ def run_training(
                 "checkpoint_selection": checkpoint_metrics["checkpoint_selection"],
                 "selected_epoch": checkpoint_metrics["selected_epoch"],
                 "selected_reason": checkpoint_metrics["selected_reason"],
+                "gate_type": checkpoint_metrics["gate_type"],
+                "gate_failed": checkpoint_metrics["gate_failed"],
+                "line_gate_pass": checkpoint_metrics["line_gate_pass"],
+                "band_gate_pass": checkpoint_metrics["band_gate_pass"],
+                "combined_gate_pass": checkpoint_metrics["combined_gate_pass"],
                 "coverage_gate_failed": checkpoint_metrics["coverage_gate_failed"],
                 "selected_coverage": checkpoint_metrics["selected_coverage"],
                 "selected_upper_breach_rate": checkpoint_metrics["selected_upper_breach_rate"],
@@ -1446,6 +1652,10 @@ def run_training(
         num_workers=config.num_workers,
         line_target_type=config.line_target_type,
         band_target_type=config.band_target_type,
+        q_low=config.q_low,
+        q_high=config.q_high,
+        severe_downside_threshold=severe_downside_threshold,
+        squeeze_breakout_threshold=squeeze_breakout_threshold,
         amp_dtype=config.amp_dtype,
         phase="test",
         run_id=run_id,
@@ -1508,6 +1718,10 @@ def run_training(
                     "feature_mean": mean.tolist(),
                     "feature_std": std.tolist(),
                     "grad_norm_history": grad_norm_history,
+                    "role": checkpoint_metrics.get("role"),
+                    "severe_downside_threshold": severe_downside_threshold,
+                    "squeeze_breakout_threshold": squeeze_breakout_threshold,
+                    "risk_threshold_source": "train_split_quantile",
                     "best_val_loss": checkpoint_metrics.get("best_val_total"),
                     "best_epoch": checkpoint_metrics.get("best_epoch"),
                     "best_val_total": checkpoint_metrics.get("best_val_total"),
@@ -1515,7 +1729,7 @@ def run_training(
                 },
                 "checkpoint_path": str(checkpoint_path),
                 "status": resolve_persisted_run_status(
-                    coverage_gate_failed=selection_result.coverage_gate_failed,
+                    gate_failed=selection_result.gate_failed,
                 ),
             }
         )
@@ -1706,6 +1920,7 @@ if __name__ == "__main__":
         detect_anomaly=args.detect_anomaly,
         explicit_cuda_cleanup=args.explicit_cuda_cleanup,
         hard_exit_after_result=args.hard_exit_after_result,
+        use_revin=args.use_revin,
         patch_len=args.patch_len,
         patch_stride=args.patch_stride,
         patchtst_d_model=args.patchtst_d_model,

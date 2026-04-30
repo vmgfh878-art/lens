@@ -35,6 +35,12 @@ CONFIG_SUMMARY_KEYS = (
     "ci_aggregate",
     "ci_target_fast",
     "band_mode",
+    "line_model_run_id",
+    "band_model_run_id",
+    "composition_policy",
+    "band_calibration_method",
+    "band_calibration_params",
+    "prediction_composition_version",
 )
 
 

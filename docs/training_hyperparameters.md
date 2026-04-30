@@ -1074,6 +1074,7 @@ inference 계약:
 - ticker embedding checkpoint는 checkpoint의 `ticker_registry_path`를 사용한다.
 - registry mismatch는 실패 처리한다.
 - subset inference가 ticker id를 다시 매기지 않는다.
+- 학습 registry는 ticker 집합 fingerprint가 포함된 파일로 저장한다.
 
 backtest 계약:
 
@@ -1082,3 +1083,613 @@ backtest 계약:
 - active `BUY/SELL` 포지션은 절대 노출 합 1로 정규화한다.
 
 RevIN은 이번 CP에서 변경하지 않는다. 다음 ablation은 같은 split, 같은 seed, 같은 CP29/CP30 데이터/저장 계약에서 `use_revin=True`와 `use_revin=False`만 비교한다.
+
+### CP31-S 저장 run 스모크 결과
+
+저장 계약 검증용 학습은 성능 실험이 아니라 다음 최소 조건으로 실행했다.
+
+```powershell
+python -m ai.train --model patchtst --timeframe 1D --seq-len 252 --epochs 1 --batch-size 64 --device cuda --no-wandb --no-compile --ci-aggregate target --line-target-type raw_future_return --band-target-type raw_future_return --limit-tickers 5 --patch-len 16 --patch-stride 8 --band-mode direct --save-run
+```
+
+저장 run 정책 확인:
+
+- `model_runs.feature_version`은 `v3_adjusted_ohlc`다.
+- `model_runs.band_mode`는 `direct`로 저장된다.
+- `model_runs.status`는 completed run이면 `completed`, coverage gate fallback이면 `failed_quality_gate`다.
+- inference는 `model_runs.checkpoint_path`와 checkpoint 내부 `ticker_registry_path`를 사용한다.
+- `predictions`와 `prediction_evaluations`는 run_id를 unique key에 포함해 run별 이력을 보존한다.
+- `backtest_results`는 `run_id,strategy_name,timeframe` 단위로 저장한다.
+
+CP31-S 실제 run에서는 `patchtst-1D-01ab0fc075f4`가 completed로 저장됐고, inference/backtest 저장까지 통과했다. 같은 ticker/asof_date에 두 번째 run `patchtst-1D-239b58ab90f0`을 저장해도 기존 prediction row가 덮이지 않는 것을 확인했다.
+
+### CP32-M clean feature 재검증 결과
+
+CP32-M은 기존 PatchTST preset을 `feature_version=v3_adjusted_ohlc` 기준으로 다시 검증했다. 조건은 `seq_len=252`, `patch_len=16`, `patch_stride=8`, `ci_aggregate=target`, `raw_future_return`, `checkpoint_selection=coverage_gate`, `batch_size=256`, `--no-compile`, `--no-wandb`로 고정했다.
+
+50티커 결과:
+
+| preset | q_low | q_high | lambda_band | selected_reason | coverage | upper_breach_rate | test fee | 판정 |
+|---|---:|---:|---:|---|---:|---:|---:|---|
+| baseline | 0.10 | 0.90 | 1.0 | coverage_gate_failed_fallback_val_total | 0.999977 | 0.000012 | -0.333283 | 탈락 |
+| q20-b2 | 0.20 | 0.80 | 2.0 | coverage_gate_failed_fallback_val_total | 0.984291 | 0.011219 | -0.266205 | 탈락 |
+| q25-b2 | 0.25 | 0.75 | 2.0 | coverage_gate_eligible | 0.949298 | 0.035584 | -0.103182 | 탈락 |
+| q15-b2 | 0.15 | 0.85 | 2.0 | coverage_gate_failed_fallback_val_total | 0.995788 | 0.002738 | -0.222129 | 탈락 |
+
+현재 정책:
+
+- 위 preset들은 100티커 이상으로 올리지 않는다.
+- full 473티커는 금지한다.
+- `coverage_gate`는 유지하지만, clean feature 기준에서는 기존 q preset만으로 유효 후보가 없다.
+
+### CP33-M RevIN ablation 결과
+
+PatchTST RevIN 실험을 위해 `--use-revin / --no-use-revin`을 학습 CLI에 노출했다. 기본값은 기존 동작 보존을 위해 `--use-revin`이다.
+
+50티커 3epoch 결과:
+
+| preset | use_revin | q_low | q_high | lambda_band | selected_reason | coverage | upper_breach_rate | test fee | 판정 |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---|
+| q25-b2 | true | 0.25 | 0.75 | 2.0 | coverage_gate_eligible | 0.949298 | 0.035584 | -0.103182 | 탈락 |
+| q25-b2 | false | 0.25 | 0.75 | 2.0 | coverage_gate_failed_fallback_val_total | 0.992308 | 0.004687 | -0.484688 | 탈락 |
+| q30-b2 | false | 0.30 | 0.70 | 2.0 | coverage_gate_failed_fallback_val_total | 0.980636 | 0.011045 | -0.376120 | 탈락 |
+| q35-b2 | false | 0.35 | 0.65 | 2.0 | coverage_gate_failed_fallback_val_total | 0.962583 | 0.021186 | -0.454023 | 탈락 |
+
+현재 정책:
+
+- PatchTST 기존 preset 실험은 중단한다.
+- full 473티커는 계속 금지한다.
+- 다음 CP는 같은 clean feature와 저장 계약 위에서 DLinear/NLinear baseline 준비로 전환한다.
+
+### CP34-M 예측선/밴드 평가판 분리와 q25-b2 smoke
+
+CP34-M에서는 성능 비교판을 예측선, 밴드, 시그널/백테스트로 분리했다. 시그널/백테스트 지표는 아직 규칙 기반이 단순하므로 모델 탈락 기준으로 과하게 쓰지 않고 보조 지표로만 기록한다.
+
+공통 학습 조건:
+
+| 항목 | 값 |
+|---|---|
+| feature_version | `v3_adjusted_ohlc` |
+| timeframe | `1D` |
+| seq_len / horizon | `252 / 5` |
+| line_target_type / band_target_type | `raw_future_return / raw_future_return` |
+| checkpoint_selection | `coverage_gate` |
+| batch_size | `256` |
+| compile / wandb / save_run | off / off / off |
+| ticker limit / epochs | 50 / 3 |
+| q preset | q25-b2, `q_low=0.25`, `q_high=0.75`, `lambda_band=2.0` |
+
+결과:
+
+| 모델 | selected_epoch | selected_reason | coverage | upper_breach_rate | avg_band_width | spearman_ic | long_short_spread | 판정 |
+|---|---:|---|---:|---:|---:|---:|---:|---|
+| TiDE | 3 | coverage_gate_failed_fallback_val_total | 0.426697 | 0.235190 | 0.040327 | -0.019393 | 0.000855 | 탈락 |
+| CNN-LSTM | 3 | coverage_gate_failed_fallback_val_total | 0.631953 | 0.231825 | 0.053698 | -0.065226 | -0.003284 | 탈락 |
+
+현재 정책:
+
+- q25-b2 기준 TiDE와 CNN-LSTM은 밴드 후보로 채택하지 않는다.
+- TiDE/CNN-LSTM 자체를 최종 폐기한 것은 아니며, 필요하면 q20-b2 같은 더 넓은 preset만 최소 smoke로 재확인한다.
+- PatchTST는 line 후보로 보류하되 direct band 후보로는 현재 탈락/보류한다.
+- full 473티커 학습은 계속 금지한다.
+
+### CP35-M TiDE/CNN-LSTM rescue smoke 설정
+
+CP35-M에서는 TiDE/CNN-LSTM을 바로 폐기하지 않고, 최소 rescue smoke만 수행했다. 공통 조건은 `feature_version=v3_adjusted_ohlc`, `1D`, `horizon=5`, `raw_future_return`, `coverage_gate`, `batch_size=256`, `epochs=3`, `limit_tickers=50`, `--no-compile`, `--no-wandb`, `--save-run` 미사용이다.
+
+| 실험 | 모델 | seq_len | q_low | q_high | lambda_band | band_mode | selected_reason | coverage | upper_breach_rate | avg_band_width | 판정 |
+|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|---|
+| A | TiDE | 252 | 0.15 | 0.85 | 2.0 | direct | coverage_gate_failed_fallback_val_total | 0.618807 | 0.152117 | 0.065644 | 탈락 |
+| B | TiDE | 252 | 0.10 | 0.90 | 2.0 | direct | coverage_gate_failed_fallback_val_total | 0.726848 | 0.102320 | 0.087572 | 근접 탈락 |
+| C | CNN-LSTM | 120 | 0.20 | 0.80 | 2.0 | direct | coverage_gate_failed_fallback_val_total | 0.720917 | 0.163246 | 0.064094 | 근접 탈락 |
+| D | CNN-LSTM | 60 | 0.20 | 0.80 | 2.0 | direct | coverage_gate_failed_fallback_val_total | 0.727251 | 0.169876 | 0.062560 | 근접 탈락 |
+| E | TiDE | 252 | 0.10 | 0.90 | 2.0 | param | coverage_gate_failed_fallback_val_total | 0.823158 | 0.062084 | 0.107054 | 밴드 약한 보류 |
+
+`positive_width`는 현재 CLI에 없으므로 E는 `band_mode=param`으로 실행했다. `param`은 `center ± exp(log_half_width)` 방식이라 밴드 폭을 양수로 강제한다.
+
+현재 정책:
+
+- TiDE q10-b2 param은 band 전용 관점에서만 약한 보류 후보다.
+- line 기준은 A~E 모두 실패했다.
+- 현재 selector가 line 지표까지 포함하므로, band 후보를 계속 보려면 `coverage_gate`를 band 전용 selector와 line-aware selector로 분리해야 한다.
+- CP35 결과만으로 full 473티커 학습에 들어가지 않는다.
+
+### CP36-M checkpoint selection 모드
+
+CP36-M부터 `--checkpoint-selection`은 다음 값을 받는다.
+
+| 값 | 사용 목적 | 상태 |
+|---|---|---|
+| `val_total` | legacy loss 기준 | 유지 |
+| `line_gate` | 예측선 실험 | 신규 |
+| `band_gate` | 밴드 실험 | 신규 |
+| `combined_gate` | line + band 동시 실험 | 신규 |
+| `coverage_gate` | 기존 명령 호환 | deprecated alias |
+
+`line_gate`는 `spearman_ic > 0`, `long_short_spread > 0`, `mae finite`, `smape finite`를 요구한다. 정렬은 `spearman_ic desc`, `long_short_spread desc`, `mae asc`, `forecast_loss asc` 순서다.
+
+`band_gate`는 `0.75 <= coverage <= 0.95`, `upper_breach_rate <= 0.15`, `lower_breach_rate <= 0.20`, `avg_band_width > 0`, `band_loss finite`를 요구한다. 정렬은 목표 coverage 0.85와의 거리, upper breach, lower breach, band width, band loss 순서다.
+
+`combined_gate`는 두 gate를 모두 통과해야 한다. 기존 `coverage_gate`는 같은 정책의 alias로 남긴다.
+
+CP36 smoke:
+
+| 실험 | selector | role | gate_failed | line_gate_pass | band_gate_pass | combined_gate_pass |
+|---|---|---|---:|---:|---:|---:|
+| TiDE q10-b2 param | band_gate | band_model | false | true | true | true |
+| PatchTST q25-b2 | line_gate | line_model | false | true | false | false |
+
+현재 정책상 `band_gate` 통과 run은 line 실패와 무관하게 band 모델로 저장 가능하다. 반대로 `line_gate` 통과 run은 coverage 실패와 무관하게 line 모델로 저장 가능하다.
+
+### CP37-M 역할별 재평가 결과
+
+CP37-M은 50티커 3epoch, `v3_adjusted_ohlc`, `1D`, `horizon=5`, `batch_size=256`, `--no-compile`, `--no-wandb`, `--save-run` 미사용 조건으로 실행했다.
+
+| 실험 | 모델 | selector | seq_len | q_low | q_high | band_mode | selected_epoch | gate_pass | 판정 |
+|---|---|---|---:|---:|---:|---|---:|---|---|
+| A | PatchTST | line_gate | 252 | 0.25 | 0.75 | direct | 2 | line true | line 생존 |
+| B | TiDE | band_gate | 252 | 0.10 | 0.90 | param | 3 | band true | band 보류 |
+| C | TiDE | band_gate | 252 | 0.10 | 0.90 | direct | 1 | band true | band 보류 |
+| D | CNN-LSTM | band_gate | 120 | 0.20 | 0.80 | direct | 3 | band false | 탈락 |
+| E | CNN-LSTM | band_gate | 60 | 0.20 | 0.80 | direct | 2 | band true | band 보류 |
+
+주요 지표:
+
+| 실험 | coverage | upper_breach_rate | spearman_ic | long_short_spread | test coverage | test upper_breach_rate |
+|---|---:|---:|---:|---:|---:|---:|
+| A | 0.981634 | 0.013528 | 0.073986 | 0.005177 | 0.980075 | 0.015325 |
+| B | 0.823158 | 0.062084 | -0.027770 | -0.001251 | 0.589787 | 0.135763 |
+| C | 0.776830 | 0.070205 | -0.038396 | -0.001571 | 0.529882 | 0.157517 |
+| D | 0.720917 | 0.163246 | -0.039287 | -0.000196 | 0.662821 | 0.191043 |
+| E | 0.755517 | 0.142050 | -0.043676 | -0.000364 | 0.698842 | 0.157765 |
+
+현재 정책:
+
+- PatchTST는 line model 후보로 유지한다.
+- TiDE param/direct와 CNN-LSTM seq60은 band model 보류 후보로 둔다.
+- band 후보는 line IC/spread 음수만으로 탈락시키지 않는다.
+- test coverage가 낮으므로 full 473티커는 여전히 금지한다.
+
+### CP38-M band calibration smoke
+
+CP38-M에서는 CP37 band 후보 중 TiDE param과 CNN-LSTM seq60을 대상으로 후처리 calibration을 적용했다. 추가 학습은 하지 않고 checkpoint 예측을 재사용했다.
+
+공통 calibration 설정:
+
+| 항목 | 값 |
+|---|---|
+| target_coverage | 0.85 |
+| 대상 split | validation으로 calibration fit, test로 평가 |
+| 학습 loss 변경 | 없음 |
+| save-run | 없음 |
+
+결과:
+
+| 후보 | 방식 | test coverage | test upper_breach_rate | test lower_breach_rate | test avg_band_width | 판정 |
+|---|---|---:|---:|---:|---:|---|
+| TiDE param | 원본 | 0.589787 | 0.135763 | 0.274450 | 0.105727 | 탈락 |
+| TiDE param | scalar width | 0.648969 | 0.140620 | 0.210411 | 0.116588 | 탈락 |
+| TiDE param | conformal residual | 0.598300 | 0.130814 | 0.270886 | 0.126687 | 탈락 |
+| CNN-LSTM seq60 | 원본 | 0.699801 | 0.157572 | 0.142628 | 0.082385 | 탈락 |
+| CNN-LSTM seq60 | scalar width | 0.829036 | 0.078392 | 0.092571 | 0.128096 | 생존 |
+| CNN-LSTM seq60 | conformal residual | 0.708474 | 0.152734 | 0.138792 | 0.111810 | 탈락 |
+
+채택 후보:
+
+- `CNN-LSTM seq60 q20-b2 direct + scalar width calibration`
+- lower_scale: 1.095193
+- upper_scale: 1.420661
+
+현재 정책:
+
+- band 후보 1순위는 CNN-LSTM seq60 + scalar width calibration이다.
+- TiDE param은 validation/test 분포 이동이 커서 단순 calibration으로는 보류 해제하지 않는다.
+- 다음은 full run이 아니라 100티커 제한 검증이다.
+
+### CP39-M 100티커 역할 후보 검증
+
+CP39-M은 100티커 3epoch, `v3_adjusted_ohlc`, `1D`, `horizon=5`, `batch_size=256`, `--no-compile`, `--no-wandb`, `--save-run` 미사용 조건으로 실행했다.
+
+CNN-LSTM band 설정:
+
+| 항목 | 값 |
+|---|---|
+| model | `cnn_lstm` |
+| seq_len | 60 |
+| q_low / q_high | 0.20 / 0.80 |
+| lambda_band | 2.0 |
+| band_mode | `direct` |
+| checkpoint_selection | `band_gate` |
+| fp32_modules | `lstm,heads` |
+
+CNN-LSTM 결과:
+
+| 상태 | coverage | lower_breach_rate | upper_breach_rate | avg_band_width | 판정 |
+|---|---:|---:|---:|---:|---|
+| raw validation | 0.672702 | 0.175678 | 0.151621 | 0.048305 | 실패 |
+| raw test | 0.573707 | 0.264400 | 0.161893 | 0.053179 | 실패 |
+| scalar validation | 0.850022 | 0.074968 | 0.075010 | 0.087036 | 통과 |
+| scalar test | 0.796509 | 0.112616 | 0.090876 | 0.098413 | 통과 |
+
+scalar width calibration 계수:
+
+- lower scale: 1.908173
+- upper scale: 1.378499
+
+PatchTST line 설정:
+
+| 항목 | 값 |
+|---|---|
+| model | `patchtst` |
+| seq_len | 252 |
+| patch_len / patch_stride | 16 / 8 |
+| q_low / q_high | 0.25 / 0.75 |
+| lambda_band | 2.0 |
+| checkpoint_selection | `line_gate` |
+
+PatchTST 결과:
+
+| split | spearman_ic | long_short_spread | mae | smape | line_gate |
+|---|---:|---:|---:|---:|---|
+| validation | 0.018231 | 0.002256 | 0.049054 | 1.525516 | 통과 |
+| test | 0.045832 | 0.006690 | 0.055652 | 1.508459 | 통과 |
+
+현재 정책:
+
+- line 후보는 PatchTST q25-b2 line_gate다.
+- band 후보는 CNN-LSTM seq60 q20-b2 direct + scalar width calibration이다.
+- full 473티커는 아직 금지한다.
+- 다음은 200티커 제한 검증 또는 조합 저장 계약 스모크다.
+
+## CP40-M 조합 inference smoke 설정
+
+CP40-M에서는 학습을 새로 돌리지 않고 CP39 checkpoint를 사용해 조합 prediction 계약만 검증했다.
+
+| 항목 | 값 |
+|---|---|
+| line checkpoint | `patchtst_1D_patchtst-1D-19103d294e6b.pt` |
+| band checkpoint | `cnn_lstm_1D_cnn_lstm-1D-b882658d1561.pt` |
+| split | `test` |
+| tickers | `A`, `AAPL`, `ABBV`, `ABNB`, `ABT` |
+| horizon | 5 |
+| device | `cpu` |
+| amp_dtype | `off` |
+| batch_size | 256 |
+| composition_version | `line_band_v1` |
+
+Band calibration 계수는 CP39 100티커 결과를 그대로 사용했다.
+
+| 항목 | 값 |
+|---|---:|
+| lower_scale | 1.908173 |
+| upper_scale | 1.378499 |
+| target_coverage | 0.85 |
+
+Smoke 검증 결과:
+
+| 항목 | 값 |
+|---|---|
+| row_count | 5 |
+| lower <= upper | PASS |
+| series length = 5 | PASS |
+| 필수 meta 포함 | PASS |
+| coverage | 0.920000 |
+| avg_band_width | 0.290036 |
+
+이번 CP의 수치는 성능 판단이 아니라 저장/추론 계약 검증용이다.
+
+## CP41-S 실제 저장 run 조합 smoke
+
+CP41-S에서는 `--save-run`으로 실제 `model_runs.run_id`를 만든 뒤 composite 저장을 실행했다.
+
+지시된 5티커/1epoch strict 조건은 gate 통과가 되지 않아 저장 계약 입력으로 사용할 수 없었다. 최종 composite에는 `completed` 상태 run만 사용했다.
+
+| 역할 | 조건 | run_id | status |
+|---|---|---|---|
+| line_model | PatchTST q25-b2, 50티커, 1epoch, `line_gate` | `patchtst-1D-41d584bcb3cb` | completed |
+| band_model | CNN-LSTM seq60 q20-b2, 50티커, 3epoch, `band_gate`, `fp32_modules=lstm,heads` | `cnn_lstm-1D-76f363b84218` | completed |
+| composite | A/AAPL/ABBV/ABNB/ABT 5 row 저장 smoke | `composite-1D-a0786769a07a` | completed |
+
+Composite 실행 설정:
+
+| 항목 | 값 |
+|---|---|
+| split | `test` |
+| device | `cuda` |
+| amp_dtype | `off` |
+| batch_size | 256 |
+| lower_scale | 1.908173 |
+| upper_scale | 1.378499 |
+| save | true |
+
+저장 결과:
+
+| 항목 | 값 |
+|---|---:|
+| predictions rows | 5 |
+| prediction_evaluations rows | 5 |
+| backtest_results rows | 1 |
+| coverage | 0.800000 |
+| avg_band_width | 0.354500 |
+| upper_breach_rate | 0.160000 |
+
+Backtest는 composite signal이 `HOLD`라 `num_trades=0`, `return_pct=0`이다. 이는 성능 결과가 아니라 저장 계약 확인값이다.
+
+## CP42-M 200티커 안정성 검증 설정
+
+PatchTST line 200티커 설정:
+
+| 항목 | 값 |
+|---|---|
+| model | `patchtst` |
+| checkpoint_selection | `line_gate` |
+| seq_len | 252 |
+| patch_len / patch_stride | 16 / 8 |
+| q_low / q_high | 0.25 / 0.75 |
+| lambda_band | 2.0 |
+| batch_size | 256 |
+| epochs | 3 |
+| limit_tickers | 200 |
+| save_run | false |
+
+PatchTST 결과:
+
+| split | spearman_ic | long_short_spread | line_gate |
+|---|---:|---:|---|
+| validation | 0.069564 | 0.012140 | PASS |
+| test | 0.028802 | 0.001868 | 참고 |
+
+CNN-LSTM band 200티커 설정:
+
+| 항목 | 값 |
+|---|---|
+| model | `cnn_lstm` |
+| checkpoint_selection | `band_gate` |
+| seq_len | 60 |
+| q_low / q_high | 0.20 / 0.80 |
+| lambda_band | 2.0 |
+| band_mode | `direct` |
+| fp32_modules | `lstm,heads` |
+| batch_size | 256 |
+| epochs | 3 |
+| limit_tickers | 200 |
+| save_run | false |
+
+CNN-LSTM scalar calibration:
+
+| 항목 | 값 |
+|---|---:|
+| lower_scale | 2.731744 |
+| upper_scale | 1.767985 |
+| validation coverage | 0.849999 |
+| test coverage | 0.830066 |
+| test upper_breach_rate | 0.085802 |
+| test lower_breach_rate | 0.084131 |
+| test avg_band_width | 0.119297 |
+
+속도 참고:
+
+| 모델 | epoch seconds | VRAM peak |
+|---|---|---:|
+| PatchTST | 310.44 / 309.09 / 301.35 | 약 5153 MB |
+| CNN-LSTM | 103.05 / 96.18 / 98.82 | 약 324 MB |
+
+현재 full run 전제 후보는 `PatchTST line + CNN-LSTM calibrated band`다. 다만 full 473 진입 전 composite policy를 먼저 결정해야 한다.
+
+### CP43-M composite 후처리 정책
+
+CP43-M은 학습 하이퍼파라미터 변경이 아니라 composite inference 후처리 정책 비교다. 재학습 없이 CP42의 200티커 test split 예측을 사용했다.
+
+고정값:
+
+| 항목 | 값 |
+|---|---|
+| line model | PatchTST q25-b2 |
+| band model | CNN-LSTM seq60 q20-b2 direct |
+| band calibration | scalar width |
+| lower_scale | 2.731744 |
+| upper_scale | 1.767985 |
+| split | test |
+| row_count | 188 |
+
+채택 후보:
+
+| 정책 | coverage | upper breach | lower breach | avg width | line_inside |
+|---|---:|---:|---:|---:|---:|
+| risk_first_lower_preserve | 0.870213 | 0.122340 | 0.007447 | 0.294814 | 1.000000 |
+
+다음 저장 smoke에서는 `composition_policy=risk_first_lower_preserve`를 meta에 남겨야 한다. full 473티커 실행은 아직 금지다.
+
+### CP44-D ATR ratio 백필과 학습 설정 영향
+
+CP44-D에서는 학습을 실행하지 않았다. `atr_ratio`는 indicator-only 컬럼으로 백필했으며, 학습 feature 설정은 그대로 유지한다.
+
+| 항목 | 값 |
+|---|---|
+| `MODEL_N_FEATURES` | 36 |
+| `atr_ratio in FEATURE_COLUMNS` | false |
+| `atr_ratio in MODEL_FEATURE_COLUMNS` | false |
+| feature contract version | 변경 없음 |
+| cache 무효화 | 없음 |
+| 모델 학습 | 실행 안 함 |
+
+백필 후 indicator 분포는 1D p99 0.073267, 1W p99 0.163629, 1M p99 0.367066이다. max는 1D SMCI 0.240202, 1W CVNA 1.096561, 1M CVNA 8.468068로 확인됐다. 따라서 나중에 `atr_ratio`를 학습 피처로 추가할 경우 1W/1M 극단값에 대한 clipping 또는 winsorization을 먼저 정해야 한다.
+
+이번 CP의 테스트는 feature/output contract와 collector timeframe 제한만 확인했다. full 473티커 모델 run, W&B sweep, 대형 성능 비교는 실행하지 않았다.
+
+### CP44-M composite 저장 기본값
+
+Composite 저장 경로 기본 정책은 `risk_first_lower_preserve`로 둔다.
+
+| 항목 | 값 |
+|---|---|
+| CLI | `--composition-policy risk_first_lower_preserve` |
+| 기본값 | `risk_first_lower_preserve` |
+| lower 정책 | `min(calibrated_lower, line)` |
+| upper 정책 | `max(calibrated_upper, line)` |
+| 목적 | 하방 리스크를 축소하지 않고 line을 밴드 안에 포함 |
+
+CP44-M save-run smoke에서는 `composition_run_id=composite-1D-3a44b5e51ed2`, coverage 0.920000, upper breach 0.080000, line_inside_band_ratio 1.000000을 기록했다. full 473티커 실행은 아직 금지이며, 다음 단계는 CNN-LSTM band sweep이다.
+
+### CP46-M composite upper calibration
+
+CP46-M에서는 학습 하이퍼파라미터를 바꾸지 않고 composite 후처리 상단 보정만 비교했다.
+
+고정값:
+
+| 항목 | 값 |
+|---|---|
+| band checkpoint | `cnn_lstm_1D_cnn_lstm-1D-01f09b20945a.pt` |
+| lower_scale | 1.869896 |
+| upper_scale | 1.513046 |
+| base policy | `risk_first_lower_preserve` |
+
+채택 후보:
+
+| 항목 | 값 |
+|---|---|
+| composition policy | `risk_first_upper_buffer_1.10` |
+| upper buffer scale | 1.10 |
+| test coverage | 0.856383 |
+| test upper breach | 0.143617 |
+| test lower breach | 0.000000 |
+| width increase ratio | 1.087218 |
+
+`risk_first_upper_buffer_1.25`는 coverage 0.926596으로 과보수라 기본값으로 두지 않는다. `asymmetric_quantile_expand`는 validation에서는 통과했지만 test에서 upper breach 0.257447로 실패했다.
+
+### CP48-M h20 smoke hyperparameters
+
+CP48-M에서는 h20 feasibility만 확인했으며 full run이나 save-run은 금지했다.
+
+| 항목 | PatchTST line h20 | CNN-LSTM band h20 |
+|---|---|---|
+| timeframe | 1D | 1D |
+| horizon | 20 | 20 |
+| seq_len | 252 | 252 |
+| limit_tickers | 50 | 50 |
+| epochs | 1 | 1 |
+| batch_size | 256 | 256 |
+| target | raw_future_return | raw_future_return |
+| checkpoint_selection | line_gate | band_gate |
+| q_low/q_high | 0.25/0.75 | 0.15/0.85 |
+| lambda_band | 2.0 | 2.0 |
+| band_mode | direct | direct |
+| amp_dtype | bf16 | bf16 |
+| compile | off | off |
+| W&B | off | off |
+| save-run | off | off |
+
+결과상 PatchTST h20은 `line_gate_failed_fallback_val_total`, CNN-LSTM h20은 raw 기준 `band_gate_failed_fallback_val_total`이었다. CNN-LSTM h20 band는 scalar width calibration으로 test coverage 0.801636까지 회복됐지만, composite에서는 upper breach 0.268750으로 불안정했다.
+
+h20을 다시 실험할 경우 기본값을 본류에 섞지 말고 별도 branch에서 `epochs >= 3`, W&B on, h20 전용 report 이름을 사용한다.
+
+### CP49-M PatchTST horizon rescue hyperparameters
+
+CP49-M 실행판의 공통 조건은 다음과 같다. 실제 W&B matrix 실행은 사용자가 VSCode 로컬에서 수행한다.
+
+| 항목 | 값 |
+|---|---|
+| model | patchtst |
+| timeframe | 1D |
+| target | raw_future_return |
+| checkpoint_selection | line_gate |
+| limit_tickers | 50 |
+| epochs | 3 |
+| batch_size | 256 |
+| compile | off |
+| save-run | off |
+| W&B | matrix 실행 시 on |
+
+실험 후보는 h5/h10/h20 각각 patch_len/stride 16/8, 32/16, 16/4이며, h20에는 seq_len 504 baseline 후보를 추가한다. severe downside 기준은 h1~h5 5%, h6~h10 8%, h11~h20 12%로 둔다.
+
+CP49-M matrix 결과에서 다음 설정을 우선 후보로 둔다.
+
+| 목적 | horizon | seq_len | patch_len | stride | 상태 |
+|---|---:|---:|---:|---:|---|
+| 기본 line | 5 | 252 | 32 | 16 | 생존 |
+| 기존 기준선 | 5 | 252 | 16 | 8 | 보류 |
+| risk-only line | 5 | 252 | 16 | 4 | 보류 |
+| h20 branch | 20 | 252 | 32 | 16 | Phase 1.5 보류 |
+| h20 seq504 | 20 | 504 | 16 | 8 | 탈락 |
+
+다음 100티커 재확인은 h5 longer_context 32/16부터 실행한다. h20은 false_safe_rate를 낮추는 selector 또는 보수 line 전용 selector가 생기기 전까지 본류로 올리지 않는다.
+
+### CP51-M 평가 지표 하이퍼파라미터
+
+CP51-M은 학습 하이퍼파라미터를 바꾸지 않았다. 평가 지표 계산에만 다음 기준을 추가했다.
+
+| 항목 | 기본값 | 설명 |
+|---|---:|---|
+| `nominal_coverage` | `q_high - q_low` | 후보별 quantile 폭에서 계산 |
+| `interval_lower_penalty_weight` | 2.0 | 하방 breach를 상방보다 더 크게 벌점 |
+| `interval_upper_penalty_weight` | 1.0 | 상방 breach 벌점 |
+| `interval_score` | width + penalty | 밴드 폭과 breach를 같이 평가 |
+| `squeeze_breakout_rate` | width 하위 20% 기준 | 좁은 밴드 구간에서 realized move가 큰 비율 |
+
+W&B key는 기존과 같이 `train/<metric>`, `val/<metric>`, `test/<metric>` 형태를 유지한다. 새 지표는 모두 scalar로 기록되며, JSON schema는 `docs/cp51_metric_schema.json`을 기준으로 한다.
+
+### CP52-M 메트릭 기준선 계약
+
+CP52-M은 학습 인자를 바꾸지 않았고, 평가 기준만 고정했다.
+
+| 항목 | 값 |
+|---|---|
+| severe downside threshold | train split raw future return q10 |
+| squeeze breakout threshold | train split abs(raw future return) q80 |
+| interval lower penalty weight | 2.0 |
+| interval upper penalty weight | 1.0 |
+| coverage 판단 | `coverage` 단독이 아니라 `coverage_abs_error` 기준 |
+| quantile calibration | lower/upper만 지원. q50은 별도 head 전까지 미지원 |
+
+v1 guideline:
+
+| 역할 | 생존 기준 | 후보 기준 |
+|---|---|---|
+| line IC mean | > 0 | >= 0.02 |
+| line IC IR | > 0.25 | >= 0.5 |
+| long_short_spread net | > 0 | >= 0.003 |
+| fee_adjusted_sharpe | > 0 | >= 0.3 |
+| false_safe_tail_rate | < 0.25 | < 0.15 |
+| severe_downside_recall | >= 0.65 | >= 0.80 |
+| downside_capture_rate | >= 0.30 | >= 0.35 |
+| band coverage_abs_error | <= 0.15 | <= 0.08 |
+| band_width_ic | > 0 | >= 0.05 |
+| downside_width_ic | > 0 | >= 0.05 |
+| width_bucket_realized_vol_ratio | > 1.0 | >= 1.15 |
+
+band baseline은 Bollinger return band, historical quantile band, constant-width band로 고정한다. 다음 CP에서 기존 후보 재채점 또는 baseline 구현을 할 때 `docs/cp52_metric_definition_schema.json`을 기준으로 한다.
+
+### CP53-M 재채점 기준값
+
+CP53-M은 새 학습을 하지 않고 기존 checkpoint를 CP52 지표판으로 forward-only 재평가했다. 다음 실험 기준은 아래처럼 정리한다.
+
+| 항목 | 기준값 |
+|---|---|
+| line 기본 후보 | PatchTST h5, seq_len 252, patch_len 32, stride 16 |
+| line 기준선 | PatchTST h5, seq_len 252, patch_len 16, stride 8 |
+| risk-only line 보조 | PatchTST h5, seq_len 252, patch_len 16, stride 4 |
+| band 생존 후보 | CNN-LSTM seq_len 60, q15/q85, lambda_band 2.0, direct, scalar width calibration |
+| band 확장 후보 | 같은 설정의 188/200 ticker 확인 run |
+| composite 표시 정책 | `risk_first_upper_buffer_1.10` |
+
+CP52 기준으로 band는 empirical coverage만 보지 않는다. q15/q85는 nominal coverage 0.70이며, `coverage_abs_error`, `interval_score`, `band_width_ic`, `downside_width_ic`를 함께 본다. CP53 기준 CNN-LSTM `s60_q15_b2_direct_188`은 empirical coverage 0.8069, coverage_abs_error 0.1069, band_width_ic 0.2463, downside_width_ic 0.0333이므로 후보가 아니라 생존 상태다.
+
+다음 학습 또는 sweep 전에 baseline band 구현이 우선이다. Bollinger return band, historical quantile band, constant-width band를 같은 CP52 metric set으로 평가한 뒤 CNN-LSTM band sweep을 재개한다.
+
+### CP54-M baseline 비교 기준값
+
+CP54-M은 학습 없이 baseline만 같은 CP52 metric set으로 계산했다. 기본 평가 조건은 아래와 같다.
+
+| 항목 | 값 |
+|---|---|
+| timeframe | 1D |
+| horizon | 5 |
+| seq_len | 252 |
+| limit_tickers | 50 |
+| target space | raw_future_return |
+| q_low/q_high | 0.15 / 0.85 |
+| nominal coverage | 0.70 |
+
+Line 기준선 결과상 PatchTST h5 longer-context는 유지한다. test 기준 ic_mean 0.0241, long_short_spread 0.0034로 shuffled score IC 0.0213을 근소하게 넘고, false_safe_tail_rate 0.1475로 단순 기준선보다 보수성이 좋다.
+
+Band 기준선 결과상 CNN-LSTM band는 아직 baseline을 이기지 못했다. `s60_q15_b2_direct_188`은 interval_score 0.1487, coverage_abs_error 0.1069였고, rolling historical quantile w252는 interval_score 0.1310, Bollinger return w60 k1은 coverage_abs_error가 거의 0이었다. 다음 band 실험은 `coverage` 단독이 아니라 `coverage_abs_error`, `interval_score`, `band_width_ic`, `downside_width_ic`를 baseline 대비로 판단한다.

@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.app.services.feature_svc import build_features, resample_price_frame
+from backend.app.services.feature_svc import FEATURE_COLUMNS, build_features, resample_price_frame
 
 
 class FeatureServiceTestCase(unittest.TestCase):
@@ -41,6 +41,50 @@ class FeatureServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(float(features["open_ratio"].abs().max()), 0.0)
         self.assertLess(float(features["high_ratio"].abs().quantile(0.99)), 0.05)
         self.assertLess(float(features["low_ratio"].abs().quantile(0.99)), 0.05)
+
+    def test_atr_ratio_is_indicator_output_not_model_feature(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 90,
+                "date": pd.date_range("2026-01-01", periods=90, freq="D"),
+                "open": [100 + idx for idx in range(90)],
+                "high": [102 + idx for idx in range(90)],
+                "low": [98 + idx for idx in range(90)],
+                "close": [100 + idx for idx in range(90)],
+                "adjusted_close": [100 + idx for idx in range(90)],
+                "volume": [1000 + idx for idx in range(90)],
+            }
+        )
+
+        features = build_features(price_df=price_df, timeframe="1D")
+
+        self.assertIn("atr_ratio", features.columns)
+        self.assertGreater(int(features["atr_ratio"].notna().sum()), 0)
+        self.assertNotIn("atr_ratio", FEATURE_COLUMNS)
+
+    def test_monthly_indicator_allows_large_ratio_but_stays_finite(self):
+        dates = pd.date_range("2018-01-31", periods=90, freq="ME")
+        close_values = [100.0 + idx for idx in range(90)]
+        high_values = [value + 2.0 for value in close_values]
+        high_values[70] = close_values[69] * 2.4
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 90,
+                "date": dates,
+                "open": close_values,
+                "high": high_values,
+                "low": [value - 2.0 for value in close_values],
+                "close": close_values,
+                "adjusted_close": close_values,
+                "volume": [1000 + idx for idx in range(90)],
+            }
+        )
+
+        features = build_features(price_df=price_df, timeframe="1M")
+
+        self.assertFalse(features.empty)
+        self.assertIn("atr_ratio", features.columns)
+        self.assertTrue(features[["open_ratio", "high_ratio", "low_ratio", "atr_ratio"]].notna().all().all())
 
     def test_resample_price_frame_keeps_adjusted_ohlc_contract(self):
         price_df = pd.DataFrame(

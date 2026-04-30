@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -47,6 +48,9 @@ def should_use_cuda_optimizations(device: torch.device) -> bool:
 def maybe_compile_model(model, device: torch.device):
     if not should_use_cuda_optimizations(device) or not hasattr(torch, "compile"):
         return model
+    if importlib.util.find_spec("triton") is None:
+        print("triton이 없어 inference torch.compile을 건너뜁니다.")
+        return model
     return torch.compile(model, mode="reduce-overhead")
 
 
@@ -80,11 +84,18 @@ def load_checkpoint(checkpoint_path: str | Path):
         "ticker_emb_dim": config.get("ticker_emb_dim", 32),
     }
     if config["model"] == "patchtst":
+        model_kwargs["use_revin"] = bool(config.get("use_revin", True))
         model_kwargs["ci_aggregate"] = config.get("ci_aggregate", "target")
         model_kwargs["target_channel_idx"] = config.get("target_channel_idx", 0)
         model_kwargs["ci_target_fast"] = bool(config.get("ci_target_fast", False))
+        model_kwargs["patch_len"] = int(config.get("patch_len", 16))
+        model_kwargs["stride"] = int(config.get("patch_stride", config.get("stride", 8)))
+        model_kwargs["d_model"] = int(config.get("patchtst_d_model", 128))
+        model_kwargs["n_heads"] = int(config.get("patchtst_n_heads", 8))
+        model_kwargs["n_layers"] = int(config.get("patchtst_n_layers", 3))
     if config["model"] == "cnn_lstm":
         model_kwargs["use_direction_head"] = bool(config.get("use_direction_head", False))
+        model_kwargs["fp32_modules"] = str(config.get("fp32_modules", "none"))
     if config["model"] == "tide":
         use_future_covariate = bool(config.get("use_future_covariate", True))
         model_kwargs["future_cov_dim"] = config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
@@ -240,7 +251,8 @@ def infer_bundle(
             summary_lower_predictions.append(lower_returns)
             summary_upper_predictions.append(upper_returns)
             summary_line_targets.append(line_target.detach().cpu())
-            summary_band_targets.append(band_target.detach().cpu())
+            band_target_cpu = band_target.detach().cpu()
+            summary_band_targets.append(band_target_cpu)
             summary_raw_targets.append(raw_future_returns.detach().cpu())
             batch_size_now = line_returns.shape[0]
             if raw_return_mode:
@@ -305,11 +317,11 @@ def infer_bundle(
                         }
                     )
 
-                actual_return_tensor = band_target[batch_index].unsqueeze(0)
+                actual_return_tensor = band_target_cpu[batch_index].unsqueeze(0)
                 if raw_return_mode:
-                    actual_series = (anchor_batch[batch_index] * (1.0 + band_target[batch_index])).tolist()
+                    actual_series = (anchor_batch[batch_index] * (1.0 + band_target_cpu[batch_index])).tolist()
                 else:
-                    actual_series = band_target[batch_index].tolist()
+                    actual_series = band_target_cpu[batch_index].tolist()
                 quantile_return_tensor = torch.stack(
                     (lower_returns[batch_index], line_returns[batch_index], upper_returns[batch_index]),
                     dim=-1,
@@ -323,7 +335,7 @@ def infer_bundle(
                         "actual_series": actual_series,
                         "pinball_loss": float(pinball(quantile_return_tensor, actual_return_tensor).item()),
                         **build_single_sample_evaluation(
-                            actual_series=band_target[batch_index].tolist(),
+                            actual_series=band_target_cpu[batch_index].tolist(),
                             line_series=line_returns[batch_index].tolist(),
                             lower_series=lower_returns[batch_index].tolist(),
                             upper_series=upper_returns[batch_index].tolist(),
@@ -344,6 +356,10 @@ def infer_bundle(
         raw_future_returns=torch.cat(summary_raw_targets, dim=0),
         line_target_type=line_target_type,
         band_target_type=band_target_type,
+        q_low=q_low,
+        q_high=q_high,
+        severe_downside_threshold=model_config.get("severe_downside_threshold"),
+        squeeze_breakout_threshold=model_config.get("squeeze_breakout_threshold"),
     )
     return prediction_records, evaluation_records, summary_metrics
 

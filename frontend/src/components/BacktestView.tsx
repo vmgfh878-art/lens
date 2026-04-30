@@ -7,6 +7,7 @@ import MetricCard from "@/components/MetricCard";
 
 const STRATEGIES = ["band_breakout_v1"];
 const TIMEFRAMES: DisplayTimeframe[] = ["1D", "1W", "1M"];
+const DEMO_RUN_MODELS = new Set(["line_band_composite", "patchtst"]);
 
 function formatNumber(value: number | null | undefined, digits = 2) {
   if (value == null || Number.isNaN(value)) {
@@ -74,28 +75,40 @@ export default function BacktestView() {
     try {
       const runsResponse = await fetchAiRuns({
         status: "completed",
-        modelName: "patchtst",
+        modelName: "",
         timeframe: nextTimeframe,
-        limit: 20,
+        limit: 50,
       });
-      const latestRun = runsResponse.data[0] ?? null;
-      setRunId(latestRun?.run_id ?? null);
+      const candidateRuns = runsResponse.data.filter((run) => run.model_name && DEMO_RUN_MODELS.has(run.model_name));
+      const latestRun = candidateRuns[0] ?? null;
 
       if (!latestRun) {
+        setRunId(null);
         setBacktests([]);
         setRunDetail(null);
         return;
       }
 
-      const runResponse = await fetchAiRun(latestRun.run_id, { includeConfig: false });
-      setRunDetail(runResponse.data);
+      let selectedRun = latestRun;
+      let selectedBacktests: BacktestSummary[] = [];
 
-      const backtestsResponse = await fetchRunBacktests(latestRun.run_id, {
-        strategyName: nextStrategy,
-        timeframe: nextTimeframe,
-        limit: 50,
-      });
-      setBacktests(backtestsResponse.data);
+      for (const run of candidateRuns) {
+        const backtestsResponse = await fetchRunBacktests(run.run_id, {
+          strategyName: nextStrategy,
+          timeframe: nextTimeframe,
+          limit: 50,
+        });
+        if (backtestsResponse.data.length > 0) {
+          selectedRun = run;
+          selectedBacktests = backtestsResponse.data;
+          break;
+        }
+      }
+
+      setRunId(selectedRun.run_id);
+      const runResponse = await fetchAiRun(selectedRun.run_id, { includeConfig: false });
+      setRunDetail(runResponse.data);
+      setBacktests(selectedBacktests);
     } catch (error) {
       setBacktests([]);
       setRunDetail(null);

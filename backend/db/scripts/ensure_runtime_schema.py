@@ -30,6 +30,10 @@ RUNTIME_SCHEMA_STATEMENTS = [
     """,
     """
     ALTER TABLE public.predictions
+    ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+    """,
+    """
+    ALTER TABLE public.predictions
     DROP CONSTRAINT IF EXISTS predictions_ticker_model_name_timeframe_horizon_asof_date_key;
     """,
     """
@@ -46,6 +50,10 @@ RUNTIME_SCHEMA_STATEMENTS = [
                 UNIQUE (run_id, ticker, model_name, timeframe, horizon, asof_date);
         END IF;
     END $$;
+    """,
+    """
+    ALTER TABLE public.indicators
+    ADD COLUMN IF NOT EXISTS atr_ratio DOUBLE PRECISION;
     """,
     """
     ALTER TABLE public.indicators
@@ -265,6 +273,7 @@ def main() -> None:
                 WHERE table_schema = 'public'
                   AND table_name = 'indicators'
                   AND column_name IN (
+                      'atr_ratio',
                       'regime_label', 'regime_calm', 'regime_neutral', 'regime_stress',
                       'revenue', 'net_income', 'equity', 'eps', 'roe', 'debt_ratio',
                       'has_macro', 'has_breadth', 'has_fundamentals'
@@ -280,7 +289,7 @@ def main() -> None:
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
                   AND table_name = 'predictions'
-                  AND column_name IN ('line_series', 'band_quantile_low', 'band_quantile_high', 'run_id')
+                  AND column_name IN ('line_series', 'band_quantile_low', 'band_quantile_high', 'run_id', 'meta')
                 ORDER BY column_name
                 """
             )

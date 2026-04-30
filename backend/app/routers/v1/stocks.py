@@ -6,8 +6,8 @@ from fastapi import APIRouter, Query, Request, Response
 
 from app.core.http import success_response
 from app.schemas.common import ApiResponse, ErrorResponse
-from app.schemas.stocks import PredictionData, PriceResponseData, StockSummary
-from app.services.api_service import get_latest_prediction_data, get_price_response_data, get_stocks
+from app.schemas.stocks import IndicatorResponseData, PredictionData, PriceResponseData, StockSummary
+from app.services.api_service import get_indicator_response_data, get_latest_prediction_data, get_price_response_data, get_stocks
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -56,6 +56,23 @@ def get_prices(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     response.headers.update(headers)
+    return success_response(request, data)
+
+
+@router.get(
+    "/{ticker}/indicators",
+    response_model=ApiResponse[IndicatorResponseData],
+    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_indicators(
+    request: Request,
+    response: Response,
+    ticker: str,
+    timeframe: str = Query(default="1D", description="보조지표 타임프레임"),
+    limit: int = Query(default=300, ge=1, le=1000, description="반환할 최대 포인트 수"),
+):
+    data = get_indicator_response_data(ticker, timeframe=timeframe, limit=limit)
+    response.headers["Cache-Control"] = "public, max-age=3600"
     return success_response(request, data)
 
 

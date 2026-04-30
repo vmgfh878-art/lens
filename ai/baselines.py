@@ -166,6 +166,8 @@ def _evaluate_windows(windows: list[dict[str, Any]], predicted_line: np.ndarray,
         raw_future_returns=torch.tensor(targets, dtype=torch.float32),
         line_target_type="raw_future_return",
         band_target_type="raw_future_return",
+        q_low=0.1,
+        q_high=0.9,
     )
     metrics["pinball_loss"] = _pinball_metric(quantiles, targets)
     return metrics

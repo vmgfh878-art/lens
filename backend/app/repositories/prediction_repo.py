@@ -7,7 +7,7 @@ from app.db import get_supabase
 PREDICTION_COLUMNS = (
     "ticker, model_name, timeframe, horizon, asof_date, decision_time, "
     "run_id, model_ver, signal, forecast_dates, upper_band_series, "
-    "lower_band_series, conservative_series, line_series, band_quantile_low, band_quantile_high"
+    "lower_band_series, conservative_series, line_series, band_quantile_low, band_quantile_high, meta"
 )
 
 

@@ -104,6 +104,46 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
 
+    def test_stock_indicators_success(self):
+        payload = {
+            "ticker": "AAPL",
+            "timeframe": "1D",
+            "data": [
+                {
+                    "date": "2026-04-18",
+                    "rsi": 55.2,
+                    "macd_ratio": 0.01,
+                    "bb_position": 0.62,
+                    "ma_5_ratio": 0.02,
+                    "ma_20_ratio": -0.01,
+                    "ma_60_ratio": 0.04,
+                    "vol_change": 0.12,
+                    "volume": 123456,
+                    "atr_ratio": 0.03,
+                    "regime_label": "neutral",
+                }
+            ],
+        }
+        with patch("app.routers.v1.stocks.get_indicator_response_data", return_value=payload) as fetch:
+            response = self.client.get("/api/v1/stocks/AAPL/indicators", params={"timeframe": "1D", "limit": 20})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"]["ticker"], "AAPL")
+        self.assertEqual(body["data"]["data"][0]["rsi"], 55.2)
+        self.assertEqual(body["data"]["data"][0]["volume"], 123456)
+        self.assertEqual(body["data"]["data"][0]["regime_label"], "neutral")
+        self.assertEqual(response.headers["cache-control"], "public, max-age=3600")
+        fetch.assert_called_once_with("AAPL", timeframe="1D", limit=20)
+
+    def test_stock_indicators_allows_empty_data(self):
+        payload = {"ticker": "AAPL", "timeframe": "1M", "data": []}
+        with patch("app.routers.v1.stocks.get_indicator_response_data", return_value=payload):
+            response = self.client.get("/api/v1/stocks/AAPL/indicators", params={"timeframe": "1M"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["data"], [])
+
     def test_prediction_latest_success(self):
         payload = {
             "ticker": "AAPL",

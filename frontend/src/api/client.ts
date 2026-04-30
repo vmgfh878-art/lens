@@ -41,6 +41,26 @@ export interface PriceResult {
   data: PriceBar[];
 }
 
+export interface IndicatorPoint {
+  date: string;
+  rsi: number | null;
+  macd_ratio: number | null;
+  bb_position: number | null;
+  ma_5_ratio: number | null;
+  ma_20_ratio: number | null;
+  ma_60_ratio: number | null;
+  vol_change: number | null;
+  volume: number | null;
+  atr_ratio: number | null;
+  regime_label: string | null;
+}
+
+export interface IndicatorResult {
+  ticker: string;
+  timeframe: DisplayTimeframe;
+  data: IndicatorPoint[];
+}
+
 export interface PredictionResult {
   ticker: string;
   model_name: string;
@@ -58,9 +78,10 @@ export interface PredictionResult {
   line_series: number[];
   band_quantile_low: number | null;
   band_quantile_high: number | null;
+  meta: Record<string, unknown>;
 }
 
-export type AiRunStatus = "completed" | "failed_nan";
+export type AiRunStatus = "completed" | "failed_nan" | "failed_quality_gate";
 
 export interface AiRunSummary {
   run_id: string;
@@ -70,6 +91,8 @@ export interface AiRunSummary {
   horizon: number | null;
   created_at: string | null;
   model_ver: string | null;
+  feature_version: string | null;
+  band_mode: string | null;
   checkpoint_path: string | null;
   best_epoch: number | null;
   best_val_total: number | null;
@@ -135,6 +158,18 @@ export async function fetchPrices(
     timeframe: options?.timeframe ?? "1D",
   };
   const res = await api.get<ApiResponse<PriceResult>>(`/api/v1/stocks/${ticker}/prices`, { params });
+  return res.data;
+}
+
+export async function fetchIndicators(
+  ticker: string,
+  options?: { timeframe?: DisplayTimeframe; limit?: number }
+): Promise<ApiResponse<IndicatorResult>> {
+  const params = {
+    timeframe: options?.timeframe ?? "1D",
+    limit: options?.limit ?? 300,
+  };
+  const res = await api.get<ApiResponse<IndicatorResult>>(`/api/v1/stocks/${ticker}/indicators`, { params });
   return res.data;
 }
 

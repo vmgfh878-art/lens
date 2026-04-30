@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StockSummary(BaseModel):
@@ -29,9 +29,29 @@ class PriceResponseData(BaseModel):
     data: list[PriceBar]
 
 
+class IndicatorPoint(BaseModel):
+    date: str
+    rsi: float | None = None
+    macd_ratio: float | None = None
+    bb_position: float | None = None
+    ma_5_ratio: float | None = None
+    ma_20_ratio: float | None = None
+    ma_60_ratio: float | None = None
+    vol_change: float | None = None
+    volume: int | None = None
+    atr_ratio: float | None = None
+    regime_label: str | None = None
+
+
+class IndicatorResponseData(BaseModel):
+    ticker: str
+    timeframe: Literal["1D", "1W", "1M"]
+    data: list[IndicatorPoint]
+
+
 class PredictionData(BaseModel):
     ticker: str
-    model_name: Literal["patchtst", "cnn_lstm", "tide"]
+    model_name: str
     timeframe: Literal["1D", "1W"]
     horizon: int
     asof_date: str
@@ -46,3 +66,4 @@ class PredictionData(BaseModel):
     line_series: list[float]
     band_quantile_low: float | None = None
     band_quantile_high: float | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)

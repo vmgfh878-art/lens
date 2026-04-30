@@ -35,3 +35,9 @@ docs/cp8_gpu_benchmark.json
 .idea/
 
 remember.md
+
+# 로컬 실행 임시 파일
+.tmp/
+artifacts/
+*.log
+logs/cp*/

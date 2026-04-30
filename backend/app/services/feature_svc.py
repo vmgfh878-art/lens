@@ -92,7 +92,8 @@ _FUNDAMENTAL_SOURCE_COLUMNS = (
     "eps",
     "total_liabilities",
 )
-_OUTPUT_COLUMNS = ["ticker", "date", "timeframe", "regime_label", *FEATURE_COLUMNS]
+_INDICATOR_ONLY_COLUMNS = ["atr_ratio"]
+_OUTPUT_COLUMNS = ["ticker", "date", "timeframe", "regime_label", *FEATURE_COLUMNS, *_INDICATOR_ONLY_COLUMNS]
 PRICE_DERIVED_FEATURE_COLUMNS = [
     "log_return",
     "open_ratio",
@@ -177,7 +178,7 @@ def _apply_adjusted_ohlc_contract(df: pd.DataFrame, *, context: str) -> pd.DataF
     return frame
 
 
-def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str) -> None:
+def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str, enforce_distribution: bool = True) -> None:
     if frame.empty:
         return
     ratio_frame = frame[list(_RATIO_SANITY_COLUMNS)].dropna()
@@ -186,6 +187,8 @@ def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str) -> None
     ratio_values = ratio_frame.to_numpy(dtype=float)
     if not np.isfinite(ratio_values).all():
         raise ValueError(f"{context}: OHLC ratio 피처에 non-finite 값이 있습니다.")
+    if not enforce_distribution:
+        return
 
     abs_ratios = ratio_frame.abs()
     p99_abs = abs_ratios.quantile(0.99)
@@ -280,7 +283,7 @@ def _compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
+def _compute_features_for_single_ticker(df: pd.DataFrame, *, enforce_ratio_distribution: bool = True) -> pd.DataFrame:
     frame = _apply_adjusted_ohlc_contract(
         df.copy().sort_values("date").reset_index(drop=True),
         context="compute_features",
@@ -322,7 +325,11 @@ def _compute_features_for_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
     upper = ma20 + (2 * std20)
     lower = ma20 - (2 * std20)
     frame["bb_position"] = (frame["close"] - lower) / ((upper - lower).replace(0, _EPSILON))
-    _validate_ratio_feature_sanity(frame, context="compute_features")
+    _validate_ratio_feature_sanity(
+        frame,
+        context="compute_features",
+        enforce_distribution=enforce_ratio_distribution,
+    )
 
     return frame
 
@@ -337,7 +344,10 @@ def build_price_features(price_df: pd.DataFrame, timeframe: str = "1D") -> pd.Da
     built_frames: list[pd.DataFrame] = []
     grouped_frames = price_frame.groupby("ticker", sort=True) if "ticker" in price_frame.columns else [(None, price_frame)]
     for ticker_name, ticker_frame in grouped_frames:
-        feature_frame = _compute_features_for_single_ticker(ticker_frame)
+        feature_frame = _compute_features_for_single_ticker(
+            ticker_frame,
+            enforce_ratio_distribution=timeframe != "1M",
+        )
         if "ticker" not in feature_frame.columns:
             feature_frame["ticker"] = ticker_name or "UNKNOWN"
         feature_frame["timeframe"] = timeframe
@@ -489,7 +499,10 @@ def build_features(
     built_frames: list[pd.DataFrame] = []
     grouped_frames = price_frame.groupby("ticker", sort=True) if "ticker" in price_frame.columns else [(None, price_frame)]
     for ticker_name, ticker_frame in grouped_frames:
-        feature_frame = _compute_features_for_single_ticker(ticker_frame)
+        feature_frame = _compute_features_for_single_ticker(
+            ticker_frame,
+            enforce_ratio_distribution=timeframe != "1M",
+        )
         if "ticker" not in feature_frame.columns:
             feature_frame["ticker"] = ticker_name or "UNKNOWN"
         if not macro_frame.empty:

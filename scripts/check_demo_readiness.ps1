@@ -172,6 +172,17 @@ if ($prices.Ok -and $priceCount -gt 0) {
   Write-Check -State "FAIL" -Label "1D prices" -Detail "$($prices.StatusCode) $($prices.ErrorCode) $($prices.ErrorMessage)"
 }
 
+$indicatorPath = "/api/v1/stocks/{0}/indicators?timeframe={1}&limit=5" -f $Ticker, $Timeframe
+$indicators = Invoke-DemoGet -Name "AAPL 1D indicators" -Path $indicatorPath
+$indicatorCount = Get-Count -Value $indicators.Body.data.data
+if ($indicators.Ok -and $indicatorCount -gt 0) {
+  Write-Check -State "OK" -Label "indicators" -Detail "$Ticker $indicatorCount rows"
+} elseif ($indicators.Ok) {
+  Write-Check -State "WARN" -Label "indicators" -Detail "$Ticker indicator rows missing"
+} else {
+  Write-Check -State "FAIL" -Label "indicators" -Detail "$($indicators.StatusCode) $($indicators.ErrorCode) $($indicators.ErrorMessage)"
+}
+
 $monthPricePath = "/api/v1/stocks/{0}/prices?timeframe=1M&limit=5" -f $Ticker
 $monthPrices = Invoke-DemoGet -Name "AAPL 1M prices" -Path $monthPricePath
 $monthPriceCount = Get-Count -Value $monthPrices.Body.data.data
@@ -187,21 +198,22 @@ $searchPath = "/api/v1/stocks?search={0}&limit=5" -f $Ticker
 $search = Invoke-DemoGet -Name "stock search" -Path $searchPath
 $searchCount = Get-Count -Value $search.Body.data
 if ($search.Ok -and $searchCount -gt 0) {
-  Write-Check -State "OK" -Label "stock search" -Detail "$searchCount rows"
+  Write-Check -State "OK" -Label "stock search" -Detail "$searchCount rows, stock_info or price_data fallback available"
 } elseif ($search.Ok) {
   Write-Check -State "WARN" -Label "stock search" -Detail "search rows missing"
 } else {
   Write-Check -State "FAIL" -Label "stock search" -Detail "$($search.StatusCode) $($search.ErrorCode) $($search.ErrorMessage)"
 }
 
-$runsPath = "/api/v1/ai/runs?model_name=patchtst&status=completed&timeframe={0}&limit=20" -f $Timeframe
+$runsPath = "/api/v1/ai/runs?model_name=&status=completed&timeframe={0}&limit=50" -f $Timeframe
 $runs = Invoke-DemoGet -Name "latest completed run" -Path $runsPath
-$completedRuns = @($runs.Body.data)
+$candidateModels = @("line_band_composite", "patchtst")
+$completedRuns = @($runs.Body.data | Where-Object { $candidateModels -contains $_.model_name })
 $latestRun = $completedRuns | Select-Object -First 1
 if ($runs.Ok -and $completedRuns.Count -gt 0) {
-  Write-Check -State "OK" -Label "completed runs" -Detail "$($completedRuns.Count) rows, latest $($latestRun.run_id)"
+  Write-Check -State "OK" -Label "completed runs" -Detail "$($completedRuns.Count) demo candidate rows, latest $($latestRun.run_id)"
 } elseif ($runs.Ok) {
-  Write-Check -State "WARN" -Label "completed runs" -Detail "PatchTST completed run missing"
+  Write-Check -State "WARN" -Label "completed runs" -Detail "completed demo candidate run missing"
 } else {
   Write-Check -State "FAIL" -Label "completed runs" -Detail "$($runs.StatusCode) $($runs.ErrorCode) $($runs.ErrorMessage)"
 }
@@ -237,6 +249,8 @@ if ($demoRun) {
 
   if ($latestRun -and $latestRun.run_id -ne $runId) {
     Write-Check -State "WARN" -Label "latest run" -Detail "latest $($latestRun.run_id) has no usable $Ticker prediction; demo uses $runId"
+  } else {
+    Write-Check -State "OK" -Label "latest run" -Detail "latest demo candidate has usable $Ticker prediction"
   }
 
   $evaluationPath = "/api/v1/ai/runs/{0}/evaluations?ticker={1}&timeframe={2}&limit=1" -f $runId, $Ticker, $Timeframe

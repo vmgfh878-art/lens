@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS public.predictions (
     conservative_series JSONB NOT NULL DEFAULT '[]'::jsonb,
     band_quantile_low   DOUBLE PRECISION,
     band_quantile_high  DOUBLE PRECISION,
+    meta                JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (run_id, ticker, model_name, timeframe, horizon, asof_date)
 );
@@ -206,6 +207,7 @@ CREATE INDEX IF NOT EXISTS idx_predictions_ticker_timeframe_asof
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS line_series JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_low DOUBLE PRECISION;
 ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS band_quantile_high DOUBLE PRECISION;
+ALTER TABLE public.predictions ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE public.predictions
     DROP CONSTRAINT IF EXISTS predictions_ticker_model_name_timeframe_horizon_asof_date_key;
 DO $$

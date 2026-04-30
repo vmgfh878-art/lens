@@ -83,6 +83,12 @@ class PatchTSTCliConfigTestCase(unittest.TestCase):
         self.assertEqual(model.patch_proj.out_features, 64)
         self.assertEqual(len(model.encoder.layers), 2)
 
+    def test_patchtst_revin_flag_is_applied(self):
+        model = build_model(_config(use_revin=False))
+        self.assertIsInstance(model, PatchTST)
+        self.assertFalse(model.use_revin)
+        self.assertIsNone(model.revin)
+
     def test_patchtst_args_do_not_affect_cnn_lstm(self):
         model = build_model(
             _config(

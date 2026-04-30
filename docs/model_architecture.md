@@ -766,6 +766,35 @@ CP27-R에서 coverage-aware checkpoint selection을 추가해 100티커 기준 q
 - loss 구조 변경 없음
 
 200티커 결과는 구조 개선보다 baseline 비교가 먼저 필요하다는 쪽으로 기운다. q20/q25는 coverage가 0.50~0.60대로 무너졌고, q15도 upper breach가 0.15를 넘었다. 따라서 현재 PatchTST preset은 full 473티커 후보가 아니며, 다음 단계에서는 DLinear/NLinear 같은 단순 시계열 baseline을 같은 evaluation contract로 붙여 비교해야 한다.
+
+### CP32-M 이후 PatchTST 구조 판정
+
+CP32-M에서는 PatchTST 구조를 전혀 변경하지 않고 `v3_adjusted_ohlc` clean feature 기준으로 기존 preset을 재검증했다.
+
+고정 구조:
+
+- `patch_len=16`, `stride=8`
+- channel independence 유지
+- `ci_aggregate=target`
+- `band_mode=direct`
+- direction/rank head 없음
+- loss 구조 변경 없음
+
+50티커 clean feature 재검증 결과, baseline/q20/q15는 coverage가 0.98~1.00에 가까워 밴드가 과도하게 넓었고 coverage gate fallback으로 떨어졌다. q25-b2만 coverage gate는 통과했지만 coverage 0.949298로 기본형 범위를 넘고 test fee가 음수였다.
+
+따라서 현재 구조의 기존 preset은 full run 후보가 아니다. 이 결론은 PatchTST 구조 자체의 최종 폐기가 아니라, 기존 q preset과 현재 구조 조합이 clean feature 기준에서 유효하지 않다는 뜻이다.
+
+### CP33-M 이후 RevIN 판정
+
+CP33-M에서 PatchTST의 `use_revin`을 CLI로 노출하고 RevIN output denormalize 영향을 분리했다. 구조 자체는 유지했고, 새 head나 새 target은 추가하지 않았다.
+
+결과적으로 `use_revin=False`는 밴드 문제를 해결하지 못했다. q25/q30/q35 모두 coverage가 0.96~0.99 수준으로 높았고, validation long-short spread가 음수였다. 이는 과보수 밴드 문제가 RevIN denormalize 하나로 설명되지 않는다는 뜻이다.
+
+현재 구조 판정:
+
+- PatchTST 기존 preset 실험은 중단한다.
+- `use_revin` 옵션은 ablation과 checkpoint 재현성을 위해 유지한다.
+- 다음 모델 계층 판단은 DLinear/NLinear baseline을 같은 clean feature/evaluation contract에 붙여 비교하는 방향이 맞다.
 ### CP29-D 이후 가격 피처 계약
 
 PatchTST 구조는 CP29-D에서 바꾸지 않았다. 변경점은 모델이 먹는 가격 파생 피처의 입력 계약이다. 기존에는 raw EODHD `open/high/low`와 `adjusted_close` 기반 previous close가 섞일 수 있어 `open_ratio/high_ratio/low_ratio`가 비정상적으로 폭주했다.
@@ -789,6 +818,7 @@ CP30-G는 모델 구조를 바꾸지 않았다. PatchTST, RevIN, channel indepen
 
 - ticker embedding이 활성화된 checkpoint는 checkpoint config의 `ticker_registry_path`를 필수로 사용한다.
 - inference subset이 새 ticker registry를 만들지 않는다.
+- 학습 registry는 ticker 집합 fingerprint가 있는 파일로 저장해 이후 run이 같은 timeframe 공용 파일을 덮어쓰지 못하게 한다.
 - registry `timeframe`, `num_tickers`, mapping 크기가 checkpoint config와 다르면 실패한다.
 
 백테스트 계약:
@@ -798,3 +828,299 @@ CP30-G는 모델 구조를 바꾸지 않았다. PatchTST, RevIN, channel indepen
 - 같은 날짜의 `BUY/SELL` 활성 포지션은 절대 노출 합 1로 정규화하고, turnover는 이전 날짜 weight와 현재 날짜 weight의 L1 변화량으로 계산한다.
 
 RevIN은 이번 CP에서 수정하지 않는다. 다음 ablation에서는 CP29/CP30 계약을 고정한 뒤 `use_revin=True/False`만 분리해 비교한다.
+
+### CP34-M 이후 모델 역할 분리
+
+CP34-M에서는 모델 구조를 새로 늘리지 않고 예측선 역할과 밴드 역할을 분리했다. 같은 모델이라도 line 후보와 band 후보를 같은 기준으로 탈락시키지 않고, 평가판을 분리해 판단한다.
+
+| 모델 | 현재 역할 | CP34-M 판정 |
+|---|---|---|
+| PatchTST | line 후보로 보류 | clean feature 기준 direct band preset은 탈락/보류 |
+| TiDE | band 후보 1번 | q25-b2 50티커 smoke에서 coverage 부족과 breach 과다로 탈락 |
+| CNN-LSTM | band 후보 2번, 빠른 smoke/calibration용 | q25-b2 50티커 smoke에서 coverage 부족과 upper breach 과다로 탈락 |
+| DLinear/NLinear | 다음 단순 baseline 후보 | 이번 CP에서는 구현하지 않음 |
+| NHITS/N-BEATS | Phase 1.5 후보 | 이번 CP 범위 밖 |
+
+CP34-M에서 구조 변경은 하지 않았다. TiDE의 future covariate 구조와 CNN-LSTM의 빠른 학습 특성은 여전히 검토 가치가 있지만, q25-b2 smoke 기준으로는 밴드 후보 생존 조건을 통과하지 못했다. 이후 다시 확인한다면 q20-b2처럼 더 넓은 preset 또는 lambda 조정만 최소 범위로 확인해야 하며, 대규모 head 추가나 target 변경은 금지한다.
+
+### CP35-M 이후 TiDE/CNN-LSTM 역할 조정
+
+CP35-M에서도 모델 구조는 변경하지 않았다. TiDE는 q10-b2 direct와 q10-b2 param을 확인했고, CNN-LSTM은 seq_len 120/60 짧은 lookback을 확인했다.
+
+| 모델 | 확인한 구조적 가정 | 결과 | 현재 역할 |
+|---|---|---|---|
+| TiDE | 더 보수적인 q10/q15 밴드, param 양수 폭 밴드 | q10-b2 param은 validation band 기준만 약한 보류 | band 전용 gate 분리 후 재검토 가능 |
+| CNN-LSTM | seq_len 120/60으로 local volatility band 확인 | coverage 0.72대까지 회복했지만 upper breach와 line 지표 실패 | 현재 band 후보 탈락, 빠른 smoke용 보조 |
+
+중요한 구조적 관찰은 `coverage_gate`가 line 지표까지 포함한다는 점이다. CP34에서 평가판을 분리했으므로, band 모델 후보를 별도로 검증하려면 checkpoint selector도 band 전용으로 분리되어야 한다. 그렇지 않으면 TiDE q10-b2 param처럼 밴드 자체는 기준에 들어오는 후보도 line 실패 때문에 fallback으로 저장된다.
+
+### CP36-M 이후 checkpoint selector 구조
+
+CP36-M부터 모델 구조와 checkpoint selector 역할을 분리한다. 모델 architecture 자체는 변경하지 않았고, 어떤 epoch를 저장할지 고르는 정책만 분리했다.
+
+| selector | 모델 역할 | 통과 기준 |
+|---|---|---|
+| `line_gate` | 예측선 후보 | IC/spread/MAE/SMAPE |
+| `band_gate` | 밴드 후보 | coverage/breach/width/band loss |
+| `combined_gate` | line + band 동시 후보 | line_gate와 band_gate 모두 통과 |
+| `coverage_gate` | deprecated alias | 내부적으로 combined_gate |
+
+이제 TiDE 같은 band 후보는 `role=band_model`로 저장될 수 있고, PatchTST 같은 line 후보는 `role=line_model`로 저장될 수 있다. `band_gate` 통과 여부는 line 지표 실패와 독립이며, `line_gate` 통과 여부도 band 과보수 문제와 독립이다.
+
+구조적으로 중요한 점은 이 변경이 head, target, loss, 모델 forward를 바꾸지 않는다는 것이다. CP36은 모델 성능 개선이 아니라 실험판 분리다.
+
+### CP37-M 이후 역할별 후보
+
+CP37-M에서 같은 clean feature 기준으로 `line_gate`와 `band_gate`를 실제 실험에 적용했다. 그 결과 모델 역할은 다음처럼 정리한다.
+
+| 역할 | 후보 | 상태 | 근거 |
+|---|---|---|---|
+| line_model | PatchTST | 생존 | `line_gate_pass=true`, IC/spread 양수 |
+| band_model | TiDE param | 보류 | validation `band_gate_pass=true`, test coverage 낮음 |
+| band_model | TiDE direct | 보류 | validation `band_gate_pass=true`, test coverage 낮음 |
+| band_model | CNN-LSTM seq60 | 보류 | validation `band_gate_pass=true`, test upper breach 약간 초과 |
+| band_model | CNN-LSTM seq120 | 탈락 | validation `band_gate_pass=false` |
+
+PatchTST는 direct band 후보로는 여전히 약하지만 line 후보로는 살아 있다. TiDE/CNN-LSTM은 band 후보로 일부 살아났지만, test split에서 coverage가 낮아 구조 확장보다 split 안정성 확인이 먼저다.
+
+### CP38-M 이후 band calibration 구조
+
+CP38-M에서는 모델 구조를 바꾸지 않고 band output 후처리 보정층만 검토했다. 추가한 도구는 `ai/band_calibration.py`이며, checkpoint의 val/test 예측을 다시 모아 calibration을 적용한다.
+
+검토한 calibration 방식:
+
+| 방식 | 설명 | 모델 구조 영향 |
+|---|---|---|
+| scalar width calibration | line 기준 lower/upper 폭에 validation 기반 scale을 곱함 | 없음 |
+| conformal residual calibration | validation residual 분위수로 line 기준 offset 산출 | 없음 |
+
+결과적으로 CNN-LSTM seq60은 scalar width calibration에서 test coverage 0.829036, upper breach 0.078392, lower breach 0.092571로 band 후보 기준을 통과했다. TiDE param은 lower breach가 남아 단순 보정으로 해결되지 않았다.
+
+현재 역할 구조:
+
+- line_model: PatchTST
+- band_model: CNN-LSTM seq60 + scalar width calibration
+- TiDE param/direct: 보류에서 탈락 쪽으로 이동. 단, 다른 split 안정성 실험 전 완전 폐기는 보류한다.
+
+### CP39-M 이후 역할 조합 구조
+
+CP39-M에서 100티커 기준 역할 조합 가능성이 확인됐다. 모델 구조는 여전히 분리되어 있다.
+
+| 역할 | 모델 | 입력 길이 | 출력 계약 | 상태 |
+|---|---|---:|---|---|
+| line_model | PatchTST q25-b2 | 252 | 1D horizon=5 raw return line | 생존 |
+| band_model | CNN-LSTM seq60 q20-b2 direct + scalar width calibration | 60 | 1D horizon=5 raw return lower/upper band | 생존 |
+
+두 모델의 seq_len은 다르지만 `feature_version=v3_adjusted_ohlc`, `timeframe=1D`, `horizon=5`, `raw_future_return` 출력 공간이 같다. 따라서 같은 ticker/asof_date/horizon에 대해 inference 단계 조합이 가능하다.
+
+향후 저장 구조는 단일 `run_id`만으로 부족하다. 조합 예측에는 최소 `line_model_run_id`, `band_model_run_id`, `band_calibration_method`, `band_calibration_params`가 필요하다.
+
+`conservative_series` 초안은 long-only 기준으로 calibrated lower band를 사용한다. short 문맥을 열 경우 `conservative_short_series=calibrated_upper_band_series`를 별도로 둔다.
+
+### CP40-M 조합 prediction 구조
+
+CP40-M부터 line/band 조합 output의 계약은 다음처럼 둔다.
+
+| prediction 필드 | 소스 |
+|---|---|
+| `line_series` | PatchTST line model |
+| `lower_band_series` | CNN-LSTM band model + scalar width calibration |
+| `upper_band_series` | CNN-LSTM band model + scalar width calibration |
+| `conservative_series` | calibrated lower band |
+| `band_quantile_low/high` | band model checkpoint의 q_low/q_high |
+| `meta.line_model_run_id` | line 모델 run 또는 checkpoint ref |
+| `meta.band_model_run_id` | band 모델 run 또는 checkpoint ref |
+| `meta.band_calibration_params` | scalar width calibration 계수 |
+| `meta.prediction_composition_version` | `line_band_v1` |
+
+두 모델의 `seq_len`은 달라도 되지만 `feature_version`, `timeframe`, `horizon`, `line_target_type`, `band_target_type`은 같아야 한다. `ticker`, `asof_date`, `forecast_dates`가 맞지 않으면 조합 inference는 실패해야 한다.
+
+이번 CP에서는 `lower <= upper`만 hard contract로 두고, `lower <= line <= upper`는 기록만 한다. line과 band가 서로 다른 모델에서 오기 때문에 중심선이 밴드 밖에 나갈 수 있으며, 이를 강제로 보정할지는 다음 calibration/policy CP에서 결정한다.
+
+### CP41-S 실제 저장 run 조합 구조
+
+CP41-S에서 composite prediction도 하나의 `model_runs` row로 저장한다.
+
+| 역할 | 저장 위치 |
+|---|---|
+| line 모델 추적 | `predictions.meta.line_model_run_id` |
+| band 모델 추적 | `predictions.meta.band_model_run_id` |
+| 조합 run 추적 | `predictions.run_id = composite run_id` |
+| calibration 추적 | `predictions.meta.band_calibration_method`, `predictions.meta.band_calibration_params` |
+
+Composite `model_runs.model_name`은 `line_band_composite`이고, `band_mode`는 `composite_direct`로 저장한다. checkpoint는 새로 만들지 않으므로 `checkpoint_path`는 비워 둔다.
+
+실제 검증 run은 `composite-1D-a0786769a07a`이며, line source는 `patchtst-1D-41d584bcb3cb`, band source는 `cnn_lstm-1D-76f363b84218`이다. 이 구조로 `predictions`, `prediction_evaluations`, `backtest_results` 저장이 모두 통과했다.
+
+### CP42-M 200티커 역할 구조 판정
+
+200티커 제한 검증에서도 모델 역할 분리는 유지한다.
+
+| 역할 | 모델 | 구조 | 200티커 판정 |
+|---|---|---|---|
+| line_model | PatchTST | seq_len 252, patch_len 16, stride 8, q25-b2 | 생존 |
+| band_model | CNN-LSTM | seq_len 60, q20-b2 direct, scalar width calibration | 생존 |
+
+CNN-LSTM 원본 밴드는 200티커에서 coverage 0.483245로 너무 좁아 실패했다. 따라서 band 모델은 반드시 scalar width calibration 후처리와 함께 사용해야 한다.
+
+Composite probe에서 `line_inside_band_ratio`는 약 0.516이었다. 즉, line과 band를 다른 모델에서 가져오는 구조는 가능하지만 line이 항상 band 내부에 들어간다는 보장은 없다. 현재 hard contract는 `lower <= upper`이며, `line_inside_band`는 기록 지표로 유지한다.
+
+다음 구조 결정 후보:
+
+- band를 PatchTST line 중심으로 recenter한다.
+- `conservative_series=min(line_series, lower_band_series)`로 더 보수화한다.
+- 현재처럼 calibrated lower band를 conservative_series로 유지하고, line_inside_band는 진단 지표로만 둔다.
+
+### CP43-M composite policy 구조 결정
+
+CP43-M에서 line/band composite 후처리 정책을 비교했다. 입력 모델은 그대로 유지한다.
+
+| 역할 | 모델 | checkpoint |
+|---|---|---|
+| line_model | PatchTST q25-b2 line_gate | `patchtst_1D_patchtst-1D-d521eff215b1.pt` |
+| band_model | CNN-LSTM seq60 q20-b2 direct + scalar width calibration | `cnn_lstm_1D_cnn_lstm-1D-5a347fab1538.pt` |
+
+비교 결과 `risk_first_lower_preserve`가 다음 composite 정책 후보로 올라갔다. 정책 수식은 raw return 공간에서 `lower=min(calibrated_lower,line)`, `upper=max(calibrated_upper,line)`로 둔다. 이 정책은 `lower <= line <= upper`를 보장하고, CP42 raw composite 대비 avg_band_width를 약 2.94%만 늘리면서 coverage 0.870213, upper breach 0.122340을 기록했다.
+
+`line_centered_asymmetric`은 CNN-LSTM의 하방폭/상방폭을 PatchTST line 중심으로 옮겼지만 coverage 0.374468, upper breach 0.562766으로 실패했다. 따라서 단순 recentering은 현 구조에서 사용하지 않는다.
+
+### CP44-D indicator-only ATR ratio 계약
+
+CP44-D에서 `atr_ratio`는 차트 보조지표용 indicator로만 다룬다. 모델 구조, 입력 feature 수, target, loss, checkpoint selector는 변경하지 않았다.
+
+계약:
+
+| 항목 | 상태 |
+|---|---|
+| `FEATURE_COLUMNS` | 변경 없음 |
+| `MODEL_N_FEATURES` | 36 유지 |
+| `ai/preprocessing.py` feature list | 변경 없음 |
+| `build_features()` output | indicator upsert를 위해 `atr_ratio` 포함 |
+| 학습 입력 | `atr_ratio` 미포함 |
+
+`atr_ratio`는 `ATR14 / close`이며 adjusted OHLC 계약 위에서 계산된다. 이 값은 `public.indicators`와 read-only indicator API에는 내려가지만, 모델 입력에는 들어가지 않는다. 향후 모델 피처로 승격하려면 별도 CP에서 feature contract version bump, cache 무효화, finite/p99/max contract, 1W/1M 극단값 clipping 또는 winsorization 정책을 먼저 정의해야 한다.
+
+### CP44-M composite 저장 정책
+
+Composite inference 저장 경로는 다음 정책을 지원한다.
+
+| 정책 | 저장 경로 지원 | 설명 |
+|---|---|---|
+| `raw_composite` | 지원 | CP42 기준선. line이 밴드 밖에 있을 수 있음 |
+| `include_line_clamp` | 지원 | line 포함을 위해 lower/upper를 확장 |
+| `risk_first_lower_preserve` | 기본값 | 하방 보수성 우선. `lower=min(lower,line)`, `upper=max(upper,line)` |
+
+`line_centered_asymmetric`은 CP43-M에서 탈락했으므로 저장 경로 기본 후보에서 제외했다.
+
+저장 meta에는 `composition_policy`, `line_model_run_id`, `band_model_run_id`, `band_calibration_method`, `band_calibration_params`, `prediction_composition_version`을 기록한다. CP44-M smoke run `composite-1D-3a44b5e51ed2`에서 `lower <= line <= upper`와 meta 저장이 모두 통과했다.
+
+### CP46-M composite upper buffer 정책
+
+CP46-M에서 CNN-LSTM band 후보 `s60_q15_b2_direct_188`을 대상으로 composite 상단 보정을 비교했다. 기존 `risk_first_lower_preserve`는 line을 밴드 안에 넣지만 test upper breach가 0.285106으로 너무 컸다.
+
+새 생존 정책:
+
+| 정책 | 수식 | 역할 |
+|---|---|---|
+| `risk_first_upper_buffer_1.10` | `lower=base_lower`, `upper=line+(base_upper-line)*1.10` | 하방 보수성 유지, 상단만 10% 확장 |
+
+이 정책은 `lower <= line <= upper`를 유지하고, conservative_series 기반 lower를 변경하지 않는다. test 기준 coverage 0.856383, upper breach 0.143617, width increase 1.087218로 통과했다.
+
+따라서 현재 composite 후보 구조는 다음과 같다.
+
+| 역할 | 후보 |
+|---|---|
+| line_model | PatchTST completed run |
+| band_model | CNN-LSTM `s60_q15_b2_direct_188` |
+| band calibration | scalar width |
+| composition policy | `risk_first_upper_buffer_1.10` |
+
+### CP48-M h20 branch architecture note
+
+horizon=20은 h5 composite와 같은 후보군으로 섞지 않는다. CP48-M smoke에서 PatchTST line과 CNN-LSTM band 모두 h20 checkpoint 생성은 가능했지만, role gate 기준으로는 본류 후보가 아니었다.
+
+| horizon | line model | band model | 상태 |
+|---|---|---|---|
+| h5 | PatchTST | CNN-LSTM scalar calibrated band + composite upper buffer | 본류 유지 |
+| h20 | PatchTST smoke | CNN-LSTM smoke | Phase 1.5 보류 |
+
+h20 composite는 `forecast_dates`와 예측 series 길이 20을 정상 생성했다. 다만 `composite_inference` 내부 contract check 이름이 `series_length_all_5`로 남아 있어 h20에서는 false가 찍힌다. 실제 길이 검증은 별도 확인했고, 향후 h20을 본류로 올릴 때 이 체크는 horizon 일반화가 필요하다.
+
+h20 현재 실패 원인은 저장 계약이 아니라 모델 지표다. PatchTST h20 line은 IC와 spread가 음수였고, CNN-LSTM h20 band는 scalar calibration 후에도 composite upper breach가 과도했다.
+
+### CP49-M PatchTST horizon rescue note
+
+PatchTST 구조 자체는 변경하지 않았다. CP49-M은 모델 구조 변경이 아니라 horizon별 line 평가판 확장이다.
+
+비교 축은 다음으로 고정했다.
+
+| 축 | 값 |
+|---|---|
+| horizon | 5, 10, 20 |
+| geometry | patch_len/stride 16/8, 32/16, 16/4 |
+| seq_len | 252 기본, h20에서 504 1회 |
+| selector | line_gate |
+
+보수적 line 후보 판단을 위해 `false_safe_rate`, `downside_capture_rate`, `severe_downside_recall`, `conservative_bias`, `upside_sacrifice`를 추가했다. IC/spread가 약해도 false safe가 낮고 downside capture가 좋으면 risk 보조 line으로 보류할 수 있다.
+
+CP49-M 결과 기준 역할 업데이트:
+
+| 역할 | 후보 | 상태 |
+|---|---|---|
+| 제품 기본 line | PatchTST h5 longer_context, patch_len 32, stride 16 | 생존 |
+| 기존 비교 기준 | PatchTST h5 baseline, patch_len 16, stride 8 | 보류 |
+| 보수 risk-only line | PatchTST h5 dense overlap, patch_len 16, stride 4 | 보류 |
+| h20 branch | PatchTST h20 longer_context, patch_len 32, stride 16 | Phase 1.5 보류 |
+| h20 seq504 | PatchTST h20 baseline seq_len 504 | 탈락 |
+
+### CP51-M 평가 계층 분리
+
+모델 구조는 변경하지 않았다. 대신 평가 계층에서 line, band, composite 표시 지표를 분리했다.
+
+| 계층 | 역할 | 대표 지표 |
+|---|---|---|
+| line | 하방 보수적 예측선 | `spearman_ic`, `long_short_spread`, `false_safe_rate`, `severe_downside_recall`, `conservative_bias` |
+| band | calibrated risk interval | `nominal_coverage`, `empirical_coverage`, `coverage_error`, `interval_score`, `band_width_ic`, `downside_width_ic` |
+| composite 표시 | 제품 출력 보조 검증 | `line_inside_band_ratio`, `line_inside_band_point_ratio`, `product_display_warning_rate`, `conservative_series_false_safe_rate` |
+
+band horizon bucket은 line bucket과 충돌하지 않도록 `all_horizon_band_*`, `h1_h5_band_*`, `h6_h10_band_*`, `h11_h20_band_*` prefix를 사용한다. `line_inside_band_ratio`는 후보 탈락 기준이 아니라 화면 표시 안정성 지표다.
+
+### CP52-M 메트릭 계약
+
+모델 구조 변경 없이 평가 계약만 고정했다. line은 하방 보수적 예측선, band는 calibrated risk interval, composite는 제품 표시 정책 계층으로 분리한다.
+
+| 계층 | hard gate 여부 | v1 판단 축 |
+|---|---|---|
+| line | hard gate 아님 | IC/Spread 안정성, false safe, severe recall, downside capture |
+| band | hard gate 아님 | nominal 대비 coverage error, asymmetric interval score, dynamic width |
+| composite | 모델 탈락 기준 아님 | 표시 정합성, conservative series false safe, width increase |
+
+`false_safe_rate`는 deprecated alias로 보고, 명시 지표는 `false_safe_negative_rate`, `false_safe_tail_rate`, `false_safe_severe_rate`를 사용한다. train split 기반 threshold는 checkpoint config와 metrics에 남겨 inference/recheck에서 재사용할 수 있게 했다.
+
+### CP53-M 재채점 이후 역할 구조
+
+CP53-M 재채점 이후 line/band/composite 역할은 그대로 분리 유지한다. PatchTST는 line 후보, CNN-LSTM은 band 후보, composite는 제품 표시 정책 계층이다.
+
+| 역할 | 현재 후보 | CP53 해석 |
+|---|---|---|
+| h5 line | PatchTST `h5_longer_context_seq252_p32_s16` | ic_mean과 spread가 양수이고 false-safe 균형이 가장 좋아 기본 line 후보 유지 |
+| risk-only line | PatchTST `h5_dense_overlap_seq252_p16_s4` | IC/spread가 음수라 주 line 후보가 아니라 하방 위험 보조지표 후보 |
+| band | CNN-LSTM `s60_q15_b2_direct` / `s60_q15_b2_direct_188` | nominal 대비 coverage_abs_error는 아직 크지만 dynamic width가 양수라 생존 |
+| band 보류 | TiDE param/direct | coverage error와 downside_width_ic가 약해 composite 주력 후보에서 제외 |
+| composite policy | `risk_first_upper_buffer_1.10` | 제품 표시 정합성은 좋지만 width 증가가 커서 모델 성능 지표가 아니라 정책 비용으로 기록 |
+
+h10과 h20은 h5 제품 후보와 직접 경쟁시키지 않는다. h10은 별도 branch, h20은 Phase 1.5 branch로 유지한다.
+
+### CP54-M baseline 비교 이후 역할 해석
+
+CP54-M 이후에도 line/band/composite 역할 분리는 유지한다. 다만 band 후보의 해석은 낮춰 잡는다.
+
+| 역할 | 후보/기준 | CP54 해석 |
+|---|---|---|
+| h5 line | PatchTST `h5_longer_context_seq252_p32_s16` | zero, momentum, reversal, historical mean 기준선을 대체로 이긴다. line model 후보 유지 |
+| line baseline | shuffled momentum, reversal, historical mean | IC 일부는 양수지만 false-safe 보수성이 약하다. AI line의 최소 비교 기준 |
+| band | CNN-LSTM `s60_q15_b2_direct_188` | dynamic width는 양수지만 rolling historical quantile/Bollinger보다 interval_score와 calibration이 약하다. 생존이 아니라 개선 필요 |
+| band baseline | rolling historical quantile w252, Bollinger return w60 k1 | CP52 지표판에서 강한 기준선이다. 다음 band 모델은 이 기준선을 이겨야 한다 |
+| composite policy | `risk_first_upper_buffer_1.10` | 제품 표시 정책으로만 유지한다. 모델 성능 우위 근거로 쓰지 않는다 |
+
+따라서 현재 구조에서 PatchTST는 line 후보로 유지하지만, CNN-LSTM band는 “AI가 baseline을 이긴 band”가 아니다. band 계층은 baseline-aware calibration 또는 rolling quantile/Bollinger 대비 개선을 먼저 요구한다.

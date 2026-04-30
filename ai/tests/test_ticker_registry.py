@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ai.ticker_registry import build_registry, load_registry, lookup_id, save_registry
+from ai.ticker_registry import build_registry, load_registry, lookup_id, registry_path_for_tickers, save_registry
 
 
 class TickerRegistryTestCase(unittest.TestCase):
@@ -32,6 +32,15 @@ class TickerRegistryTestCase(unittest.TestCase):
         self.assertEqual(registry_1d["num_tickers"], 3)
         self.assertEqual(registry_1w["num_tickers"], 2)
         self.assertEqual(lookup_id("NVDA", registry_1w), registry_1w["num_tickers"])
+
+    def test_registry_path_for_tickers_is_subset_specific(self):
+        first = registry_path_for_tickers("1D", ["MSFT", "AAPL"])
+        same = registry_path_for_tickers("1D", ["AAPL", "MSFT"])
+        different = registry_path_for_tickers("1D", ["AAPL"])
+
+        self.assertEqual(first, same)
+        self.assertNotEqual(first, different)
+        self.assertIn("ticker_id_map_1d_", first.name)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import {
   AiRunDetail,
@@ -46,6 +46,14 @@ function extractErrorMessage(error: unknown, fallback: string) {
 }
 
 const CONFIG_KEYS = ["seq_len", "patch_len", "stride", "d_model", "n_heads", "n_layers", "dropout", "lr", "epochs", "seed"];
+const COMPOSITE_CONFIG_KEYS = [
+  "line_model_run_id",
+  "band_model_run_id",
+  "composition_policy",
+  "band_calibration_method",
+  "prediction_composition_version",
+];
+const TRAINING_RUN_MODELS = new Set(["patchtst", "line_band_composite"]);
 const QUALITY_METRICS = [
   { key: "coverage", label: "coverage" },
   { key: "avg_band_width", label: "avg_band_width" },
@@ -67,7 +75,14 @@ function formatStatusLabel(status: string | null | undefined) {
   if (status === "failed_nan") {
     return "NaN 실패(failed_nan)";
   }
+  if (status === "failed_quality_gate") {
+    return "품질 게이트 실패(failed_quality_gate)";
+  }
   return status ?? "-";
+}
+
+function isCompositeRun(detail: AiRunDetail | null) {
+  return detail?.model_name === "line_band_composite" || detail?.config_summary?.line_model_run_id != null;
 }
 
 export default function TrainingView() {
@@ -83,9 +98,10 @@ export default function TrainingView() {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const response = await fetchAiRuns({ status: nextStatus, modelName: "patchtst", limit: 50 });
-      setRuns(response.data);
-      const firstRunId = response.data[0]?.run_id ?? null;
+      const response = await fetchAiRuns({ status: nextStatus, modelName: "", limit: 50 });
+      const filteredRuns = response.data.filter((run) => TRAINING_RUN_MODELS.has(String(run.model_name ?? "")));
+      setRuns(filteredRuns);
+      const firstRunId = filteredRuns[0]?.run_id ?? null;
       setSelectedRunId(firstRunId);
       if (firstRunId) {
         await loadRunDetail(firstRunId);
@@ -150,6 +166,16 @@ export default function TrainingView() {
             }}
           >
             NaN 실패(failed_nan)
+          </button>
+          <button
+            type="button"
+            className={status === "failed_quality_gate" ? "is-active" : ""}
+            onClick={() => {
+              setStatus("failed_quality_gate");
+              void loadRuns("failed_quality_gate");
+            }}
+          >
+            품질 게이트 실패(failed_quality_gate)
           </button>
         </div>
       </header>
@@ -216,6 +242,31 @@ export default function TrainingView() {
 
           <section className="panel">
             <div className="panel-heading">
+              <div className="eyebrow">run provenance</div>
+              <h2>조합 정보</h2>
+            </div>
+            {detail ? (
+              <div className="provenance-grid provenance-grid--training">
+                <span>run_id</span>
+                <strong>{detail.run_id}</strong>
+                <span>model_name</span>
+                <strong>{detail.model_name ?? "-"}</strong>
+                <span>feature_version</span>
+                <strong>{detail.feature_version ?? "-"}</strong>
+                {COMPOSITE_CONFIG_KEYS.map((key) => (
+                  <Fragment key={key}>
+                    <span key={`${key}-label`}>{key}</span>
+                    <strong key={`${key}-value`}>{formatValue(detail.config_summary[key])}</strong>
+                  </Fragment>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">run을 선택하면 조합 정보를 표시합니다.</div>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
               <div className="eyebrow">summary</div>
               <h2>W&B / Optuna</h2>
             </div>
@@ -225,6 +276,33 @@ export default function TrainingView() {
               <MetricCard label="test mae" value={formatValue(detail ? getMetric(detail.test_metrics, "mae") : null)} />
               <MetricCard label="checkpoint" value={detail?.checkpoint_path ? "있음" : "없음"} />
             </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <div className="eyebrow">line / band</div>
+              <h2>모델별 지표 자리</h2>
+            </div>
+            {isCompositeRun(detail) ? (
+              <div className="quality-grid">
+                <div>
+                  <h3>line 모델</h3>
+                  <div className="summary-grid summary-grid--compact">
+                    <MetricCard label="line_model_run_id" value={formatValue(detail?.config_summary.line_model_run_id)} />
+                    <MetricCard label="model" value="PatchTST" />
+                  </div>
+                </div>
+                <div>
+                  <h3>band 모델</h3>
+                  <div className="summary-grid summary-grid--compact">
+                    <MetricCard label="band_model_run_id" value={formatValue(detail?.config_summary.band_model_run_id)} />
+                    <MetricCard label="model" value="CNN-LSTM" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">composite run을 선택하면 line/band 모델 지표 자리를 표시합니다.</div>
+            )}
           </section>
 
           <section className="panel">
