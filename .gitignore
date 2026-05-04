@@ -18,6 +18,8 @@ node_modules/
 *.pth
 *.onnx
 ai/cache/ticker_id_map_*.json
+ai/cache/*.manifest.json
+ai/cache/*.pt.manifest.json
 
 backend/data/parquet/
 *.parquet
@@ -30,6 +32,11 @@ wandb/
 optuna_artifacts/
 docs/cp8_sweep_plots/
 docs/cp8_gpu_benchmark.json
+logs/runs/
+frontend/tsconfig.tsbuildinfo
+backend/data/cache/yfinance/*.db
+backend/data/cache/yfinance/*.db-shm
+backend/data/cache/yfinance/*.db-wal
 
 .vscode/
 .idea/
