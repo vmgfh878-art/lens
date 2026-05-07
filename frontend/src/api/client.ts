@@ -1,7 +1,24 @@
 import axios from "axios";
 
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
+
+function resolveBackendUrl(value: string | undefined) {
+  const raw = value?.trim().replace(/^["']|["']$/g, "");
+  if (!raw) {
+    return DEFAULT_BACKEND_URL;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return DEFAULT_BACKEND_URL;
+  }
+}
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000",
+  baseURL: resolveBackendUrl(process.env.NEXT_PUBLIC_BACKEND_URL),
 });
 
 export type DisplayTimeframe = "1D" | "1W" | "1M";
@@ -81,6 +98,42 @@ export interface PredictionResult {
   meta: Record<string, unknown>;
 }
 
+export interface ProductLineHistoryPoint {
+  asof_date: string;
+  display_horizon: number;
+  value: number;
+  run_id: string;
+}
+
+export interface ProductBandHistoryPoint {
+  asof_date: string;
+  display_horizon: number;
+  lower: number;
+  upper: number;
+  run_id: string;
+}
+
+export interface ProductPredictionHistoryManifestSummary {
+  line_run_id: string | null;
+  band_run_id: string | null;
+  date_range: {
+    start?: string | null;
+    end?: string | null;
+  };
+  row_count: number;
+}
+
+export interface ProductPredictionHistoryResult {
+  ticker: string;
+  timeframe: string;
+  latest_asof_date: string | null;
+  source: string;
+  line_history: ProductLineHistoryPoint[];
+  band_history: ProductBandHistoryPoint[];
+  manifest_summary: ProductPredictionHistoryManifestSummary;
+  empty_reason: string | null;
+}
+
 export type AiRunStatus = "completed" | "failed_nan" | "failed_quality_gate";
 
 export interface AiRunSummary {
@@ -98,6 +151,13 @@ export interface AiRunSummary {
   best_val_total: number | null;
   line_target_type: string | null;
   band_target_type: string | null;
+  role: string | null;
+  feature_set: string | null;
+  checkpoint_selection: string | null;
+  wandb_status: string | null;
+  deprecated_for_phase1_product_contract: boolean | string | null;
+  indicator_layer_replacement: string | null;
+  is_legacy: boolean;
 }
 
 export interface AiRunDetail extends AiRunSummary {
@@ -204,10 +264,50 @@ export async function fetchPrediction(
   return res.data;
 }
 
+export async function fetchPredictionHistory(
+  ticker: string,
+  options: {
+    runId: string;
+    limit?: number;
+  }
+): Promise<ApiResponse<PredictionResult[]>> {
+  const params = {
+    run_id: options.runId,
+    limit: options.limit ?? 90,
+  };
+  const res = await api.get<ApiResponse<PredictionResult[]>>(`/api/v1/stocks/${ticker}/predictions/history`, { params });
+  return res.data;
+}
+
+export async function fetchProductPredictionHistory(
+  ticker: string,
+  options?: {
+    timeframe?: PredictionTimeframe;
+    roles?: "all" | "line" | "band" | "line,band";
+    runId?: string;
+    limit?: number;
+    lookbackDays?: number;
+  }
+): Promise<ApiResponse<ProductPredictionHistoryResult>> {
+  const params = {
+    timeframe: options?.timeframe ?? "1D",
+    roles: options?.roles ?? "all",
+    run_id: options?.runId,
+    limit: options?.limit,
+    lookback_days: options?.lookbackDays,
+  };
+  const res = await api.get<ApiResponse<ProductPredictionHistoryResult>>(
+    `/api/v1/stocks/${ticker}/predictions/product-history`,
+    { params }
+  );
+  return res.data;
+}
+
 export async function fetchAiRuns(options?: {
   modelName?: string;
   timeframe?: DisplayTimeframe;
   status?: AiRunStatus;
+  includeLegacy?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<ApiResponse<AiRunSummary[]>> {
@@ -215,6 +315,7 @@ export async function fetchAiRuns(options?: {
     model_name: options?.modelName ?? "patchtst",
     timeframe: options?.timeframe,
     status: options?.status ?? "completed",
+    include_legacy: options?.includeLegacy ?? false,
     limit: options?.limit ?? 20,
     offset: options?.offset ?? 0,
   };
