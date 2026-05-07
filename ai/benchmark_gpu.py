@@ -7,7 +7,9 @@ import statistics
 from pathlib import Path
 import time
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 
 from ai.models.patchtst import PatchTST
 from ai.train import should_use_cuda_optimizations

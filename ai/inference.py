@@ -8,9 +8,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
 
-torch.set_float32_matmul_precision("high")
+torch = bootstrap_torch()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -21,16 +21,26 @@ from ai.models.cnn_lstm import CNNLSTM
 from ai.models.patchtst import PatchTST
 from ai.models.tide import TiDE
 from ai.evaluation import build_single_sample_evaluation, summarize_forecast_metrics
+from ai.inference_save_guard import resolve_inference_save_contract
 from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import (
     FUTURE_COVARIATE_DIM,
+    MODEL_FEATURE_COLUMNS,
     MODEL_N_FEATURES,
     SequenceDataset,
     SequenceDatasetBundle,
     normalize_ai_timeframe,
     prepare_dataset_splits,
 )
-from ai.storage import get_model_run, save_prediction_evaluations, save_predictions, utc_now_iso
+from ai.storage import (
+    STORAGE_CONTRACT_EVALUATION_BULK,
+    get_model_run,
+    save_prediction_evaluations,
+    save_predictions,
+    save_product_latest_predictions,
+    utc_now_iso,
+    with_prediction_storage_contract,
+)
 from ai.ticker_registry import load_registry
 from ai.train import make_loader, resolve_device
 
@@ -67,15 +77,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--limit-tickers", type=int, default=None)
     parser.add_argument("--save", action="store_true", help="predictions와 prediction_evaluations에 저장합니다.")
-    return parser.parse_args()
+    parser.add_argument(
+        "--save-product-latest-only",
+        action="store_true",
+        help="제품 화면용 latest-only helper로만 저장합니다. 단일 asof_date 계약을 통과해야 합니다.",
+    )
+    parser.add_argument(
+        "--allow-bulk-evaluation-save",
+        action="store_true",
+        help="평가/레거시 목적의 bulk predictions 저장을 명시적으로 허용합니다.",
+    )
+    args = parser.parse_args()
+    if args.save_product_latest_only:
+        args.save = True
+    return args
 
 
 def load_checkpoint(checkpoint_path: str | Path):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     config = checkpoint["config"]
     model_cls = MODEL_REGISTRY[config["model"]]
+    feature_columns = list(config.get("feature_columns") or MODEL_FEATURE_COLUMNS)
+    n_features = int(config.get("n_features") or len(feature_columns) or MODEL_N_FEATURES)
     model_kwargs = {
-        "n_features": MODEL_N_FEATURES,
+        "n_features": n_features,
         "seq_len": config["seq_len"],
         "horizon": config["horizon"],
         "dropout": config["dropout"],
@@ -103,6 +128,50 @@ def load_checkpoint(checkpoint_path: str | Path):
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     return model, checkpoint
+
+
+def _feature_column_indices(columns: list[str] | None) -> list[int] | None:
+    if not columns or list(columns) == list(MODEL_FEATURE_COLUMNS):
+        return None
+    return [list(MODEL_FEATURE_COLUMNS).index(column) for column in columns]
+
+
+def _select_bundle_features(
+    bundle: SequenceDatasetBundle | SequenceDataset,
+    columns: list[str] | None,
+) -> SequenceDatasetBundle | SequenceDataset:
+    indices = _feature_column_indices(columns)
+    if indices is None:
+        return bundle
+    if isinstance(bundle, SequenceDatasetBundle):
+        index_tensor = torch.tensor(indices, dtype=torch.long)
+        return SequenceDatasetBundle(
+            features=bundle.features.index_select(2, index_tensor).contiguous(),
+            line_targets=bundle.line_targets,
+            band_targets=bundle.band_targets,
+            raw_future_returns=bundle.raw_future_returns,
+            anchor_closes=bundle.anchor_closes,
+            ticker_ids=bundle.ticker_ids,
+            future_covariates=bundle.future_covariates,
+            metadata=bundle.metadata.copy(),
+        )
+    ticker_arrays: dict[str, dict[str, Any]] = {}
+    for ticker, arrays in bundle.ticker_arrays.items():
+        copied = dict(arrays)
+        copied["features"] = arrays["features"][:, indices].copy()
+        ticker_arrays[ticker] = copied
+    return SequenceDataset(
+        ticker_arrays=ticker_arrays,
+        sample_refs=list(bundle.sample_refs),
+        metadata=bundle.metadata.copy(),
+        seq_len=bundle.seq_len,
+        horizon=bundle.horizon,
+        mean=bundle.mean.index_select(0, torch.tensor(indices, dtype=torch.long)) if bundle.mean is not None else None,
+        std=bundle.std.index_select(0, torch.tensor(indices, dtype=torch.long)) if bundle.std is not None else None,
+        include_future_covariate=bundle.include_future_covariate,
+        line_target_type=bundle.line_target_type,
+        band_target_type=bundle.band_target_type,
+    )
 
 
 def load_checkpoint_config(checkpoint_path: str | Path) -> dict[str, Any]:
@@ -206,6 +275,7 @@ def infer_bundle(
     raw_return_mode = line_target_type == "raw_future_return" and band_target_type == "raw_future_return"
     batch_size = int(model_config.get("batch_size", 64))
     num_workers = model_config.get("num_workers", "auto")
+    bundle = _select_bundle_features(bundle, list(model_config.get("feature_columns") or MODEL_FEATURE_COLUMNS))
     loader = make_loader(
         bundle,
         batch_size=batch_size,
@@ -371,6 +441,8 @@ def run_inference(
     tickers: list[str] | None = None,
     limit_tickers: int | None = None,
     save: bool = False,
+    save_product_latest_only: bool = False,
+    allow_bulk_evaluation_save: bool = False,
 ) -> dict[str, Any]:
     model_run = get_model_run(run_id)
     if model_run is None:
@@ -424,11 +496,21 @@ def run_inference(
         q_high=float(model_run.get("band_quantile_high") or config.get("q_high", 0.9)),
     )
 
-    if save and not raw_return_mode:
+    effective_save = save or save_product_latest_only
+    if effective_save and not raw_return_mode:
         raise ValueError("비 raw target 체크포인트는 predictions 저장과 시그널 생성을 지원하지 않습니다. score 모드로만 실행해 주세요.")
 
-    if save:
-        save_predictions(prediction_records)
+    storage_contract = resolve_inference_save_contract(
+        save=effective_save,
+        save_product_latest_only=save_product_latest_only,
+        allow_bulk_evaluation_save=allow_bulk_evaluation_save,
+        model_run=model_run,
+        config=config,
+    )
+    if storage_contract == "product_latest_only":
+        save_product_latest_predictions(prediction_records, evaluation_records)
+    elif storage_contract == STORAGE_CONTRACT_EVALUATION_BULK:
+        save_predictions(with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_EVALUATION_BULK))
         save_prediction_evaluations(evaluation_records)
 
     return {
@@ -439,6 +521,7 @@ def run_inference(
         "target_type": line_target_type,
         "band_target_type": band_target_type,
         "mode": "raw_return" if raw_return_mode else "score_only",
+        "storage_contract": storage_contract,
         "summary_metrics": summary_metrics,
     }
 
@@ -451,5 +534,7 @@ if __name__ == "__main__":
         tickers=args.tickers,
         limit_tickers=args.limit_tickers,
         save=args.save,
+        save_product_latest_only=args.save_product_latest_only,
+        allow_bulk_evaluation_save=args.allow_bulk_evaluation_save,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

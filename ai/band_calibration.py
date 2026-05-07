@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 
 from ai.evaluation import summarize_forecast_metrics
 from ai.inference import load_checkpoint, resolve_checkpoint_ticker_registry

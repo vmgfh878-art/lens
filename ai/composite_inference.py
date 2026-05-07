@@ -13,7 +13,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.train import autocast_context, forward_model, make_loader, resolve_device, torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 
 import pandas as pd
 
@@ -39,6 +41,30 @@ from ai.storage import (
 
 COMPOSITION_VERSION = "line_band_v1"
 COMPOSITION_POLICIES = ("raw_composite", "include_line_clamp", "risk_first_lower_preserve")
+COMPOSITION_TOOL_STATUS = "legacy_experimental_utility"
+COMPOSITION_PHASE1_NOTICE = (
+    "이 스크립트는 Phase 1 기본 제품 계약이 아니라, 과거 composite demo와 연구용 조합 실험을 위한 legacy tool입니다. "
+    "Phase 1 본류에서는 AI line layer와 AI band layer를 독립 저장·평가하고 화면에서만 overlay합니다."
+)
+from ai.train import autocast_context, forward_model, make_loader, resolve_device
+LEGACY_REASON = "line_and_band_layers_are_product-separated"
+INDICATOR_LAYER_REPLACEMENT = "overlay_bundle"
+LEGACY_COMPOSITE_META = {
+    "phase1_contract_status": COMPOSITION_TOOL_STATUS,
+    "deprecated_for_phase1_product_contract": True,
+    "indicator_layer_replacement": INDICATOR_LAYER_REPLACEMENT,
+    "role": "composite_model",
+    "legacy_reason": LEGACY_REASON,
+    "composite_is_not_product_default": True,
+}
+LEGACY_POLICY_NOTES = {
+    "raw_composite": "legacy diagnostic: line과 band를 보정 없이 나란히 비교합니다.",
+    "include_line_clamp": "legacy display diagnostic: line을 band 안에 포함하도록 표시 폭을 넓힙니다.",
+    "risk_first_lower_preserve": (
+        "legacy alias of include_line_clamp in the current implementation. "
+        "Phase 1 제품 기본 정책이 아닙니다."
+    ),
+}
 
 
 @dataclass
@@ -193,9 +219,9 @@ def _assert_compatible(line_config: dict[str, Any], band_config: dict[str, Any])
     if mismatches:
         raise ValueError(f"line/band checkpoint 계약 불일치: {mismatches}")
     if str(line_config.get("line_target_type")) != "raw_future_return":
-        raise ValueError("CP40 조합 저장 smoke는 raw_future_return checkpoint만 허용합니다.")
+        raise ValueError("legacy composite 진단은 raw_future_return line checkpoint만 허용합니다.")
     if str(line_config.get("band_target_type")) != "raw_future_return":
-        raise ValueError("CP40 조합 저장 smoke는 raw_future_return band checkpoint만 허용합니다.")
+        raise ValueError("legacy composite 진단은 raw_future_return band checkpoint만 허용합니다.")
 
 
 def _resolve_model_run_ref(config: dict[str, Any], checkpoint_path: Path) -> str:
@@ -232,7 +258,7 @@ def _apply_composition_policy(
     if policy == "include_line_clamp":
         return torch.minimum(lower, line), torch.maximum(upper, line)
     if policy == "risk_first_lower_preserve":
-        # 하방 밴드는 더 보수적인 쪽을 택한다. 즉 line이 lower보다 낮으면 lower를 끌어올리지 않고 line까지 확장한다.
+        # CP60 기준 이 정책은 Phase 1 제품 정책이 아니라 include_line_clamp와 같은 legacy 진단 alias다.
         return torch.minimum(lower, line), torch.maximum(upper, line)
     raise ValueError(f"지원하지 않는 composition policy입니다: {policy}")
 
@@ -296,7 +322,7 @@ def _resolve_checkpoint_from_run_id(run_id: str) -> tuple[Path, dict[str, Any]]:
         raise ValueError(f"model_runs에서 run_id={run_id}를 찾지 못했습니다.")
     status = str(model_run.get("status") or "")
     if status != "completed":
-        raise ValueError(f"run_id={run_id} status={status}: completed run만 composite에 사용할 수 있습니다.")
+        raise ValueError(f"run_id={run_id} status={status}: completed run만 legacy composite 진단에 사용할 수 있습니다.")
     checkpoint_path = model_run.get("checkpoint_path")
     if not checkpoint_path:
         raise ValueError(f"run_id={run_id}에는 checkpoint_path가 없습니다.")
@@ -306,6 +332,69 @@ def _resolve_checkpoint_from_run_id(run_id: str) -> tuple[Path, dict[str, Any]]:
     if not resolved.exists():
         raise FileNotFoundError(f"checkpoint_path가 존재하지 않습니다: {resolved}")
     return resolved, model_run
+
+
+def validate_legacy_save_allowed(*, save: bool, allow_legacy_composite_save: bool) -> None:
+    if save and not allow_legacy_composite_save:
+        raise ValueError(
+            "--save는 legacy composite row를 DB에 저장하므로 기본 차단됩니다. "
+            "연구용 legacy 저장이 꼭 필요하면 --allow-legacy-composite-save를 명시하십시오."
+        )
+
+
+def _build_contract_checks(
+    *,
+    records: list[dict[str, Any]],
+    lower_le_upper_flags: list[bool],
+    line_inside_band_flags: list[bool],
+    expected_horizon: int,
+) -> dict[str, Any]:
+    line_lengths = [len(record["line_series"]) for record in records]
+    lower_lengths = [len(record["lower_band_series"]) for record in records]
+    upper_lengths = [len(record["upper_band_series"]) for record in records]
+    conservative_lengths = [len(record["conservative_series"]) for record in records]
+    forecast_date_lengths = [len(record["forecast_dates"]) for record in records]
+    all_series_lengths = line_lengths + lower_lengths + upper_lengths + conservative_lengths
+    line_inside_ratio = (
+        sum(1 for flag in line_inside_band_flags if flag) / len(line_inside_band_flags)
+        if line_inside_band_flags
+        else None
+    )
+    return {
+        "lower_le_upper_all": all(lower_le_upper_flags),
+        "line_inside_band_all": all(line_inside_band_flags),
+        "line_inside_band_diagnostic_only": True,
+        "line_inside_band_is_success_condition": False,
+        "line_inside_band_ratio": line_inside_ratio,
+        "expected_horizon": int(expected_horizon),
+        "series_length_matches_horizon": all(length == expected_horizon for length in all_series_lengths),
+        "forecast_dates_length_matches_horizon": all(length == expected_horizon for length in forecast_date_lengths),
+        "actual_line_lengths": sorted(set(line_lengths)),
+        "actual_lower_lengths": sorted(set(lower_lengths)),
+        "actual_upper_lengths": sorted(set(upper_lengths)),
+        "actual_conservative_lengths": sorted(set(conservative_lengths)),
+        "actual_forecast_dates_lengths": sorted(set(forecast_date_lengths)),
+        "metadata_required_fields_present": all(
+            all(
+                key in record["meta"]
+                for key in (
+                    "line_model_run_id",
+                    "band_model_run_id",
+                    "composition_policy",
+                    "line_model_name",
+                    "band_model_name",
+                    "band_calibration_method",
+                    "band_calibration_params",
+                    "prediction_composition_version",
+                    "deprecated_for_phase1_product_contract",
+                    "indicator_layer_replacement",
+                    "legacy_reason",
+                    "composite_is_not_product_default",
+                )
+            )
+            for record in records
+        ),
+    }
 
 
 def _prediction_evaluation_records(
@@ -385,8 +474,10 @@ def _save_composite_run(
             "val_metrics": {},
             "test_metrics": summary,
             "config": {
-                "role": "composite_model",
+                **LEGACY_COMPOSITE_META,
+                "phase1_notice": COMPOSITION_PHASE1_NOTICE,
                 "composition_policy": composition_policy,
+                "composition_policy_note": LEGACY_POLICY_NOTES.get(composition_policy),
                 "line_model_run_id": line_model_run_id,
                 "band_model_run_id": band_model_run_id,
                 "band_calibration_method": "scalar_width",
@@ -416,9 +507,11 @@ def build_composite_contract(
     lower_scale: float,
     upper_scale: float,
     output_json: Path,
-    composition_policy: str = "risk_first_lower_preserve",
+    composition_policy: str = "raw_composite",
     save: bool = False,
+    allow_legacy_composite_save: bool = False,
 ) -> dict[str, Any]:
+    validate_legacy_save_allowed(save=save, allow_legacy_composite_save=allow_legacy_composite_save)
     if composition_policy not in COMPOSITION_POLICIES:
         raise ValueError(f"지원하지 않는 composition policy입니다: {composition_policy}")
     line_config = load_checkpoint_config(line_checkpoint)
@@ -506,7 +599,10 @@ def build_composite_contract(
         line_inside_band_flags.append(line_inside_band)
 
         record_meta = {
+            **LEGACY_COMPOSITE_META,
+            "phase1_notice": COMPOSITION_PHASE1_NOTICE,
             "composition_policy": composition_policy,
+            "composition_policy_note": LEGACY_POLICY_NOTES.get(composition_policy),
             "line_model_run_id": line_model_run_id,
             "band_model_run_id": band_model_run_id,
             "line_model_name": str(line_config["model"]),
@@ -527,7 +623,8 @@ def build_composite_contract(
             "validation": {
                 "lower_le_upper": lower_le_upper,
                 "line_inside_band": line_inside_band,
-                "line_inside_band_is_guardrail_only": True,
+                "line_inside_band_diagnostic_only": True,
+                "line_inside_band_is_success_condition": False,
             },
         }
         records.append(
@@ -597,6 +694,8 @@ def build_composite_contract(
     result = {
         "contract": "line_band_composite_inference",
         "composition_version": COMPOSITION_VERSION,
+        **LEGACY_COMPOSITE_META,
+        "phase1_notice": COMPOSITION_PHASE1_NOTICE,
         "storage_contract": {
             "repository_schema_supports_predictions_meta": True,
             "runtime_db_meta_column_verified": False,
@@ -610,46 +709,19 @@ def build_composite_contract(
         "line_model_run_id": line_model_run_id,
         "band_model_run_id": band_model_run_id,
         "composition_policy": composition_policy,
+        "composition_policy_note": LEGACY_POLICY_NOTES.get(composition_policy),
         "composition_run_id": composition_run_id,
         "saved_to_db": save,
         "split": split,
         "tickers": tickers,
         "max_rows": max_rows,
         "row_count": len(records),
-        "contract_checks": {
-            "lower_le_upper_all": all(lower_le_upper_flags),
-            "line_inside_band_all": all(line_inside_band_flags),
-            "line_inside_band_required": composition_policy != "raw_composite",
-            "line_inside_band_failures_allowed": composition_policy == "raw_composite",
-            "line_inside_band_ratio": (
-                sum(1 for flag in line_inside_band_flags if flag) / len(line_inside_band_flags)
-                if line_inside_band_flags
-                else None
-            ),
-            "series_length_all_5": all(
-                len(record["line_series"]) == 5
-                and len(record["lower_band_series"]) == 5
-                and len(record["upper_band_series"]) == 5
-                and len(record["conservative_series"]) == 5
-                for record in records
-            ),
-            "metadata_required_fields_present": all(
-                all(
-                    key in record["meta"]
-                    for key in (
-                        "line_model_run_id",
-                        "band_model_run_id",
-                        "composition_policy",
-                        "line_model_name",
-                        "band_model_name",
-                        "band_calibration_method",
-                        "band_calibration_params",
-                        "prediction_composition_version",
-                    )
-                )
-                for record in records
-            ),
-        },
+        "contract_checks": _build_contract_checks(
+            records=records,
+            lower_le_upper_flags=lower_le_upper_flags,
+            line_inside_band_flags=line_inside_band_flags,
+            expected_horizon=int(line_config["horizon"]),
+        ),
         "calibration": {
             "method": "scalar_width",
             "params": calibration_params,
@@ -664,7 +736,12 @@ def build_composite_contract(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="PatchTST line과 CNN-LSTM 보정 band 조합 smoke")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Legacy composite demo utility. Phase 1 본류에서는 line/band를 합성 prediction으로 저장하지 않고 "
+            "AI indicator layer로 분리합니다."
+        )
+    )
     parser.add_argument("--line-checkpoint", default=None)
     parser.add_argument("--band-checkpoint", default=None)
     parser.add_argument("--line-run-id", default=None)
@@ -679,14 +756,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--amp-dtype", default="off", choices=["off", "bf16", "fp16"])
     parser.add_argument("--lower-scale", type=float, required=True)
     parser.add_argument("--upper-scale", type=float, required=True)
-    parser.add_argument("--composition-policy", default="risk_first_lower_preserve", choices=COMPOSITION_POLICIES)
+    parser.add_argument("--composition-policy", default="raw_composite", choices=COMPOSITION_POLICIES)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--save", action="store_true")
+    parser.add_argument(
+        "--allow-legacy-composite-save",
+        action="store_true",
+        help="legacy composite row 저장을 명시적으로 허용합니다. Phase 1 제품 기본 계약에서는 사용하지 않습니다.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    validate_legacy_save_allowed(save=args.save, allow_legacy_composite_save=args.allow_legacy_composite_save)
     if not args.line_checkpoint and not args.line_run_id:
         raise ValueError("--line-checkpoint 또는 --line-run-id 중 하나가 필요합니다.")
     if not args.band_checkpoint and not args.band_run_id:
@@ -721,6 +804,7 @@ def main() -> None:
         output_json=Path(args.output_json),
         composition_policy=args.composition_policy,
         save=args.save,
+        allow_legacy_composite_save=args.allow_legacy_composite_save,
     )
     print(json.dumps(_json_safe({
         "row_count": result["row_count"],

@@ -3,22 +3,29 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 import numpy as np
-import torch
 import pandas as pd
 
 
 BAND_METRIC_NAMES = (
     "nominal_coverage",
     "empirical_coverage",
+    "coverage",
     "coverage_error",
     "coverage_abs_error",
+    "lower_breach_rate",
+    "upper_breach_rate",
+    "avg_band_width",
     "lower_breach_error",
     "lower_breach_abs_error",
     "upper_breach_error",
     "upper_breach_abs_error",
     "median_band_width",
     "p90_band_width",
+    "asymmetric_interval_score",
     "interval_score",
     "interval_width_component",
     "interval_lower_penalty",
@@ -41,11 +48,85 @@ BAND_METRIC_NAMES = (
     "width_bucket_realized_vol_ratio",
     "width_bucket_downside_rate_ratio",
     "squeeze_breakout_rate",
+)
+
+LINE_METRIC_NAMES = (
+    "spearman_ic",
+    "ic_mean",
+    "ic_std",
+    "ic_ir",
+    "ic_t_stat",
+    "top_k_long_spread",
+    "top_k_short_spread",
+    "long_short_spread",
+    "spread_mean",
+    "spread_std",
+    "spread_ir",
+    "spread_t_stat",
+    "direction_accuracy",
+    "mae",
+    "smape",
+    "mean_signed_error",
+    "overprediction_rate",
+    "mean_overprediction",
+    "underprediction_rate",
+    "mean_underprediction",
+    "false_safe_rate",
+    "false_safe_negative_rate",
+    "false_safe_tail_rate",
+    "false_safe_severe_rate",
+    "severe_downside_recall",
+    "downside_capture_rate",
+    "conservative_bias",
+    "upside_sacrifice",
+    "fee_adjusted_return",
+    "fee_adjusted_sharpe",
+    "fee_adjusted_turnover",
+)
+
+LEGACY_OVERLAY_DIAGNOSTIC_NAMES = (
     "line_inside_band_ratio",
     "line_inside_band_point_ratio",
     "product_display_warning_rate",
     "conservative_series_false_safe_rate",
 )
+
+
+def _is_legacy_overlay_metric(key: str) -> bool:
+    return any(key == name or key.endswith(f"_{name}") for name in LEGACY_OVERLAY_DIAGNOSTIC_NAMES)
+
+
+def _metric_layer_payload(summary: dict[str, Any], names: tuple[str, ...], *, kind: str) -> dict[str, Any]:
+    payload = {key: summary.get(key) for key in names if key in summary}
+    for key, value in summary.items():
+        if kind == "line" and (
+            key.startswith(("all_horizon_", "h1_h5_", "h6_h10_", "h11_h20_"))
+            and "_band_" not in key
+            and not _is_legacy_overlay_metric(key)
+        ):
+            payload[key] = value
+        if kind == "band" and (
+            key.startswith(("all_horizon_band_", "h1_h5_band_", "h6_h10_band_", "h11_h20_band_"))
+            and not _is_legacy_overlay_metric(key)
+        ):
+            payload[key] = value
+    return payload
+
+
+def _attach_metric_layers(
+    summary: dict[str, Any],
+    *,
+    include_legacy_overlay_diagnostics: bool,
+) -> dict[str, Any]:
+    legacy = {key: value for key, value in summary.items() if _is_legacy_overlay_metric(key)}
+    if not include_legacy_overlay_diagnostics:
+        for key in legacy:
+            summary.pop(key, None)
+    summary["line_metrics"] = _metric_layer_payload(summary, LINE_METRIC_NAMES, kind="line")
+    summary["band_metrics"] = _metric_layer_payload(summary, BAND_METRIC_NAMES, kind="band")
+    if include_legacy_overlay_diagnostics:
+        summary["legacy_overlay_diagnostics"] = legacy
+    return summary
 
 
 def _safe_mean(values: list[float]) -> float | None:
@@ -92,7 +173,7 @@ def _cross_section_line_risk_metrics(
     metadata: pd.DataFrame | None,
     score: torch.Tensor,
     actual: torch.Tensor,
-) -> dict[str, float | None]:
+) -> dict[str, Any]:
     if metadata is None or metadata.empty or len(metadata) != int(score.numel()):
         return {"false_safe_tail_rate": None, "downside_capture_rate": None}
 
@@ -425,6 +506,7 @@ def _band_interval_metrics(
         "upper_breach_abs_error": abs(float(upper_breach.float().mean().item()) - float(1.0 - q_high)),
         "median_band_width": float(torch.quantile(width, 0.50).item()),
         "p90_band_width": float(torch.quantile(width, 0.90).item()),
+        "asymmetric_interval_score": float((nonnegative_width + lower_penalty + upper_penalty).mean().item()),
         "interval_score": float((nonnegative_width + lower_penalty + upper_penalty).mean().item()),
         "interval_width_component": float(nonnegative_width.mean().item()),
         "interval_lower_penalty": float(lower_penalty.mean().item()),
@@ -594,6 +676,7 @@ def summarize_forecast_metrics(
     squeeze_breakout_threshold: float | None = None,
     top_k_frac: float = 0.1,
     fee_bps: float = 10.0,
+    include_legacy_overlay_diagnostics: bool = False,
 ) -> dict[str, float | None]:
     line_pred = line_predictions.detach().cpu().to(torch.float32)
     lower = lower_predictions.detach().cpu().to(torch.float32)
@@ -753,7 +836,10 @@ def summarize_forecast_metrics(
                 "fee_adjusted_turnover": None,
             }
         )
-        return summary
+        return _attach_metric_layers(
+            summary,
+            include_legacy_overlay_diagnostics=include_legacy_overlay_diagnostics,
+        )
 
     summary.update(
         _investment_metrics_for_score(
@@ -764,7 +850,10 @@ def summarize_forecast_metrics(
             fee_bps=fee_bps,
         )
     )
-    return summary
+    return _attach_metric_layers(
+        summary,
+        include_legacy_overlay_diagnostics=include_legacy_overlay_diagnostics,
+    )
 
 
 def build_single_sample_evaluation(

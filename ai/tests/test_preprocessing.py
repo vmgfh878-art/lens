@@ -74,8 +74,9 @@ class PreprocessingTestCase(unittest.TestCase):
     def test_default_horizon_matches_plan(self):
         self.assertEqual(default_horizon("1D"), 5)
         self.assertEqual(default_horizon("1W"), 4)
+        self.assertEqual(default_horizon("1M"), 3)
         with self.assertRaises(ValueError):
-            default_horizon("1M")
+            default_horizon("5M")
 
     def test_build_sequence_dataset_shapes(self):
         feature_df, price_df = _build_feature_rows()

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 # Windows에서는 torch DLL을 다른 네이티브 패키지보다 먼저 로드해야 한다.
 from ai.preprocessing import FUTURE_COVARIATE_DIM, default_horizon, prepare_dataset_splits  # noqa: E402
-from ai.train import TrainConfig, run_training  # noqa: E402
+from ai.train import TrainConfig, init_wandb_run, run_training  # noqa: E402
 
 import argparse  # noqa: E402
 import json  # noqa: E402
-import os  # noqa: E402
 from pathlib import Path  # noqa: E402
 import time  # noqa: E402
 from typing import Any  # noqa: E402
@@ -118,7 +117,7 @@ def namespace_to_config(base_args: argparse.Namespace, *, lr: float, weight_deca
         ci_target_fast=base_args.ci_target_fast,
         use_direction_head=False,
         fp32_modules="none",
-        use_wandb=bool(base_args.use_wandb and os.environ.get("WANDB_MODE") != "disabled"),
+        use_wandb=bool(base_args.use_wandb),
         wandb_project=base_args.wandb_project,
         model_ver="v2-multihead",
         early_stop_patience=10,
@@ -153,6 +152,7 @@ def objective_lr_sweep(
             wandb_group=base_args.study_name,
             wandb_name=run_name,
             wandb_config_override=wandb_config,
+            wandb_required=bool(config.use_wandb),
         )
     except optuna.TrialPruned:
         raise
@@ -224,15 +224,19 @@ def build_summary_payload(study: optuna.Study) -> dict[str, Any]:
 
 
 def maybe_log_summary_to_wandb(base_args: argparse.Namespace, summary: dict[str, Any]) -> None:
-    if not base_args.use_wandb or wandb is None or os.environ.get("WANDB_MODE") == "disabled":
+    if not base_args.use_wandb:
         return
-    run = wandb.init(
+    outcome = init_wandb_run(
+        use_wandb=True,
         project=base_args.wandb_project,
+        config_payload=summary,
         group=base_args.study_name,
         name="study_summary",
-        config=summary,
-        reinit=True,
+        required=True,
     )
+    run = outcome.run
+    if run is None:
+        return
     wandb.log(summary)
     run.finish()
 

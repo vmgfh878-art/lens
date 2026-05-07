@@ -287,6 +287,42 @@ class EvaluationTargetsTestCase(unittest.TestCase):
         self.assertAlmostEqual(float(metrics["h6_h10_band_empirical_coverage"]), 1.0, places=6)
         self.assertAlmostEqual(float(metrics["h11_h20_band_empirical_coverage"]), 1.0, places=6)
 
+    def test_default_metrics_split_line_band_and_hide_overlay(self):
+        actual = torch.tensor([[-0.20], [0.00], [0.20]], dtype=torch.float32)
+        metrics = summarize_forecast_metrics(
+            metadata=None,
+            line_predictions=torch.zeros((3, 1), dtype=torch.float32),
+            lower_predictions=torch.full((3, 1), -0.10, dtype=torch.float32),
+            upper_predictions=torch.full((3, 1), 0.10, dtype=torch.float32),
+            line_targets=actual,
+            band_targets=actual,
+            raw_future_returns=actual,
+        )
+
+        self.assertIn("line_metrics", metrics)
+        self.assertIn("band_metrics", metrics)
+        self.assertIn("spearman_ic", metrics["line_metrics"])
+        self.assertIn("empirical_coverage", metrics["band_metrics"])
+        self.assertNotIn("line_inside_band_ratio", metrics)
+        self.assertNotIn("legacy_overlay_diagnostics", metrics)
+
+    def test_legacy_overlay_diagnostics_are_opt_in(self):
+        actual = torch.tensor([[-0.20], [0.00], [0.20]], dtype=torch.float32)
+        metrics = summarize_forecast_metrics(
+            metadata=None,
+            line_predictions=torch.zeros((3, 1), dtype=torch.float32),
+            lower_predictions=torch.full((3, 1), -0.10, dtype=torch.float32),
+            upper_predictions=torch.full((3, 1), 0.10, dtype=torch.float32),
+            line_targets=actual,
+            band_targets=actual,
+            raw_future_returns=actual,
+            include_legacy_overlay_diagnostics=True,
+        )
+
+        self.assertIn("legacy_overlay_diagnostics", metrics)
+        self.assertIn("line_inside_band_ratio", metrics["legacy_overlay_diagnostics"])
+        self.assertIn("line_inside_band_ratio", metrics)
+
 
 if __name__ == "__main__":
     unittest.main()

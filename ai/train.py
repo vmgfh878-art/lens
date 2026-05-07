@@ -11,16 +11,17 @@ import os
 from pathlib import Path
 import platform
 import random
+import re
 import sys
 import time
 from typing import Any
 from uuid import uuid4
 
-import numpy as np
-import torch
-from torch.utils.data import DataLoader, TensorDataset
+from ai.torch_bootstrap import bootstrap_torch
 
-torch.set_float32_matmul_precision("high")
+torch = bootstrap_torch()
+import numpy as np
+from torch.utils.data import DataLoader, TensorDataset
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -33,9 +34,11 @@ from ai.finite import (
     is_nan_safe_better,
     tensor_finite_summary,
 )
+from ai.local_logging import LocalTrainingProgressLogger
 from ai.loss import ForecastCompositeLoss
 from ai.models.cnn_lstm import CNNLSTM
 from ai.models.patchtst import PatchTST
+from ai.models.tcn_quantile import TCNQuantile
 from ai.models.tide import TiDE
 from ai.postprocess import apply_band_postprocess
 from ai.evaluation import summarize_forecast_metrics
@@ -43,6 +46,7 @@ from ai.preprocessing import (
     DatasetPlan,
     FEATURE_CONTRACT_VERSION,
     FUTURE_COVARIATE_DIM,
+    MODEL_FEATURE_COLUMNS,
     MODEL_N_FEATURES,
     SequenceDataset,
     SequenceDatasetBundle,
@@ -50,6 +54,7 @@ from ai.preprocessing import (
     default_horizon,
     fetch_feature_index_frame,
     prepare_dataset_splits,
+    resolve_data_fingerprint,
 )
 from ai.storage import save_model_run
 
@@ -68,6 +73,7 @@ MODEL_REGISTRY = {
     "patchtst": PatchTST,
     "cnn_lstm": CNNLSTM,
     "tide": TiDE,
+    "tcn_quantile": TCNQuantile,
 }
 DEFAULT_NUM_WORKERS = 6
 
@@ -82,12 +88,23 @@ RUN_STATUS_FAILED_QUALITY_GATE = "failed_quality_gate"
 NAN_STREAK_LIMIT = 3
 CLI_CUDA_CLEANUP_STATE: dict[str, Any] | None = None
 CHECKPOINT_SELECTION_CHOICES = ("val_total", "line_gate", "band_gate", "combined_gate", "coverage_gate")
+FEATURE_SET_PLAN_PATH = PROJECT_ROOT / "docs" / "cp63_bm_feature_set_plan.json"
+DEFAULT_LOCAL_LOG_DIR = "logs/runs"
+WANDB_STATUS_ONLINE_OK = "online_ok"
+WANDB_STATUS_PACKAGE_MISSING = "package_missing"
+WANDB_STATUS_DISABLED_BY_ENV = "disabled_by_env"
+WANDB_STATUS_DISABLED_BY_CLI = "disabled_by_cli"
+WANDB_STATUS_DISABLED_MISSING_KEY = "disabled_missing_key"
+WANDB_STATUS_DISABLED_INIT_FAILED = "disabled_init_failed"
 
 COVERAGE_GATE_MIN = 0.75
 COVERAGE_GATE_MAX = 0.95
 COVERAGE_GATE_MAX_UPPER_BREACH = 0.15
 COVERAGE_GATE_MAX_LOWER_BREACH = 0.20
 BAND_GATE_TARGET_COVERAGE = 0.85
+BAND_GATE_MAX_COVERAGE_ABS_ERROR = 0.08
+BAND_GATE_MAX_TAIL_ABS_ERROR = 0.08
+BAND_GATE_MAX_TAIL_IMBALANCE = 0.12
 
 
 def resolve_persisted_run_status(
@@ -159,6 +176,29 @@ class TrainConfig:
     patchtst_d_model: int = 128
     patchtst_n_heads: int = 8
     patchtst_n_layers: int = 3
+    feature_set: str = "full_features"
+    feature_columns: list[str] | None = None
+    n_features: int = MODEL_N_FEATURES
+    market_data_provider: str | None = None
+    lower_band_loss_weight: float = 1.0
+    upper_band_loss_weight: float = 1.0
+
+
+@dataclass(frozen=True)
+class WandbInitOutcome:
+    run: Any | None
+    status: str
+    message: str | None = None
+    run_id: str | None = None
+    run_url: str | None = None
+
+    def to_meta(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "message": self.message,
+            "run_id": self.run_id,
+            "run_url": self.run_url,
+        }
 
 
 @dataclass
@@ -261,6 +301,124 @@ class CheckpointSelectionResult:
     best_val_total_epoch: int | None
 
 
+def load_feature_set_plan(path: Path | None = None) -> dict[str, Any]:
+    plan_path = path or FEATURE_SET_PLAN_PATH
+    if not plan_path.exists():
+        raise FileNotFoundError(f"feature set plan 파일이 없습니다: {plan_path}")
+    return json.loads(plan_path.read_text(encoding="utf-8"))
+
+
+def resolve_feature_columns(feature_set: str | None, *, plan_path: Path | None = None) -> list[str]:
+    selected_set = str(feature_set or "full_features").strip()
+    default_path = plan_path or FEATURE_SET_PLAN_PATH
+    if selected_set == "full_features" and not default_path.exists():
+        return list(MODEL_FEATURE_COLUMNS)
+
+    plan = load_feature_set_plan(default_path)
+    feature_sets = plan.get("feature_sets") or {}
+    if selected_set not in feature_sets:
+        allowed = ", ".join(sorted(feature_sets.keys()))
+        raise ValueError(f"알 수 없는 feature_set입니다: {selected_set}. 허용값: {allowed}")
+
+    spec = feature_sets[selected_set]
+    if spec.get("requires_contract_change"):
+        raise ValueError(f"{selected_set}은 feature contract 변경이 필요한 후보라 CP64 smoke 입력으로 사용할 수 없습니다.")
+    if spec.get("indicator_only_candidates"):
+        raise ValueError(f"{selected_set}은 indicator-only 후보를 포함하므로 현재 모델 feature로 사용할 수 없습니다.")
+
+    columns = [str(column) for column in spec.get("columns", [])]
+    if not columns:
+        raise ValueError(f"{selected_set} feature_set에 columns가 없습니다.")
+    missing = [column for column in columns if column not in MODEL_FEATURE_COLUMNS]
+    if missing:
+        raise ValueError(f"{selected_set}에 현재 MODEL_FEATURE_COLUMNS가 아닌 피처가 있습니다: {missing}")
+    duplicates = sorted({column for column in columns if columns.count(column) > 1})
+    if duplicates:
+        raise ValueError(f"{selected_set}에 중복 피처가 있습니다: {duplicates}")
+    return columns
+
+
+def apply_feature_set_to_config(config: TrainConfig) -> None:
+    columns = config.feature_columns or resolve_feature_columns(config.feature_set)
+    config.feature_columns = list(columns)
+    config.n_features = len(columns)
+
+
+def _feature_column_indices(columns: list[str]) -> list[int]:
+    return [MODEL_FEATURE_COLUMNS.index(column) for column in columns]
+
+
+def _select_bundle_features(
+    bundle: SequenceDatasetBundle | SequenceDataset,
+    *,
+    indices: list[int],
+    mean: torch.Tensor | None = None,
+    std: torch.Tensor | None = None,
+) -> SequenceDatasetBundle | SequenceDataset:
+    index_tensor = torch.tensor(indices, dtype=torch.long)
+    if isinstance(bundle, SequenceDatasetBundle):
+        return SequenceDatasetBundle(
+            features=bundle.features.index_select(2, index_tensor),
+            line_targets=bundle.line_targets,
+            band_targets=bundle.band_targets,
+            raw_future_returns=bundle.raw_future_returns,
+            anchor_closes=bundle.anchor_closes,
+            ticker_ids=bundle.ticker_ids,
+            future_covariates=bundle.future_covariates,
+            metadata=bundle.metadata.copy(),
+        )
+
+    ticker_arrays: dict[str, dict[str, Any]] = {}
+    for ticker, arrays in bundle.ticker_arrays.items():
+        copied = dict(arrays)
+        copied["features"] = arrays["features"][:, indices].copy()
+        ticker_arrays[ticker] = copied
+    selected_mean = mean.index_select(0, index_tensor) if mean is not None else None
+    selected_std = std.index_select(0, index_tensor) if std is not None else None
+    return SequenceDataset(
+        ticker_arrays=ticker_arrays,
+        sample_refs=list(bundle.sample_refs),
+        metadata=bundle.metadata.copy(),
+        seq_len=bundle.seq_len,
+        horizon=bundle.horizon,
+        mean=selected_mean,
+        std=selected_std,
+        include_future_covariate=bundle.include_future_covariate,
+        line_target_type=bundle.line_target_type,
+        band_target_type=bundle.band_target_type,
+    )
+
+
+def apply_feature_columns_to_splits(
+    train_bundle: SequenceDatasetBundle | SequenceDataset,
+    val_bundle: SequenceDatasetBundle | SequenceDataset,
+    test_bundle: SequenceDatasetBundle | SequenceDataset,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    feature_columns: list[str],
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    if feature_columns == list(MODEL_FEATURE_COLUMNS):
+        return train_bundle, val_bundle, test_bundle, mean, std
+
+    indices = _feature_column_indices(feature_columns)
+    index_tensor = torch.tensor(indices, dtype=torch.long)
+    selected_mean = mean.index_select(0, index_tensor)
+    selected_std = std.index_select(0, index_tensor)
+    return (
+        _select_bundle_features(train_bundle, indices=indices, mean=mean, std=std),
+        _select_bundle_features(val_bundle, indices=indices, mean=mean, std=std),
+        _select_bundle_features(test_bundle, indices=indices, mean=mean, std=std),
+        selected_mean,
+        selected_std,
+    )
+
+
 def clone_state_dict(model) -> dict[str, torch.Tensor]:
     return {
         key: value.detach().cpu().clone()
@@ -268,9 +426,21 @@ def clone_state_dict(model) -> dict[str, torch.Tensor]:
     }
 
 
-def _finite_metric(metrics: dict[str, float], key: str, default: float = float("nan")) -> float:
+def _metric_view(metrics: dict[str, Any], layer: str) -> dict[str, Any]:
+    nested = metrics.get(layer)
+    return nested if isinstance(nested, dict) else metrics
+
+
+def _finite_metric(
+    metrics: dict[str, Any],
+    key: str,
+    default: float = float("nan"),
+    *,
+    layer: str | None = None,
+) -> float:
+    source = _metric_view(metrics, layer) if layer else metrics
     try:
-        return float(metrics.get(key, default))
+        return float(source.get(key, metrics.get(key, default)))
     except (TypeError, ValueError):
         return float("nan")
 
@@ -291,11 +461,11 @@ def checkpoint_role_for_gate(gate_type: str) -> str:
     return "legacy_val_total"
 
 
-def line_gate_eligible(metrics: dict[str, float]) -> bool:
-    spearman_ic = _finite_metric(metrics, "spearman_ic")
-    long_short_spread = _finite_metric(metrics, "long_short_spread")
-    mae = _finite_metric(metrics, "mae")
-    smape = _finite_metric(metrics, "smape")
+def line_gate_eligible(metrics: dict[str, Any]) -> bool:
+    spearman_ic = _finite_metric(metrics, "spearman_ic", layer="line_metrics")
+    long_short_spread = _finite_metric(metrics, "long_short_spread", layer="line_metrics")
+    mae = _finite_metric(metrics, "mae", layer="line_metrics")
+    smape = _finite_metric(metrics, "smape", layer="line_metrics")
     return (
         math.isfinite(spearman_ic)
         and spearman_ic > 0.0
@@ -306,19 +476,41 @@ def line_gate_eligible(metrics: dict[str, float]) -> bool:
     )
 
 
-def band_gate_eligible(metrics: dict[str, float]) -> bool:
-    coverage = _finite_metric(metrics, "coverage")
-    upper_breach = _finite_metric(metrics, "upper_breach_rate")
-    lower_breach = _finite_metric(metrics, "lower_breach_rate")
-    avg_band_width = _finite_metric(metrics, "avg_band_width")
+def band_gate_eligible(metrics: dict[str, Any]) -> bool:
+    coverage = _finite_metric(metrics, "empirical_coverage", layer="band_metrics")
+    if not math.isfinite(coverage):
+        coverage = _finite_metric(metrics, "coverage", layer="band_metrics")
+    nominal_coverage = _finite_metric(metrics, "nominal_coverage", layer="band_metrics")
+    if not math.isfinite(nominal_coverage):
+        nominal_coverage = BAND_GATE_TARGET_COVERAGE
+    coverage_abs_error = _finite_metric(metrics, "coverage_abs_error", layer="band_metrics")
+    if not math.isfinite(coverage_abs_error) and math.isfinite(coverage) and math.isfinite(nominal_coverage):
+        coverage_abs_error = abs(coverage - nominal_coverage)
+    upper_breach = _finite_metric(metrics, "upper_breach_rate", layer="band_metrics")
+    lower_breach = _finite_metric(metrics, "lower_breach_rate", layer="band_metrics")
+    expected_tail = (1.0 - nominal_coverage) / 2.0 if 0.0 < nominal_coverage < 1.0 else float("nan")
+    upper_breach_abs_error = _finite_metric(metrics, "upper_breach_abs_error", layer="band_metrics")
+    if not math.isfinite(upper_breach_abs_error) and math.isfinite(upper_breach) and math.isfinite(expected_tail):
+        upper_breach_abs_error = abs(upper_breach - expected_tail)
+    lower_breach_abs_error = _finite_metric(metrics, "lower_breach_abs_error", layer="band_metrics")
+    if not math.isfinite(lower_breach_abs_error) and math.isfinite(lower_breach) and math.isfinite(expected_tail):
+        lower_breach_abs_error = abs(lower_breach - expected_tail)
+    tail_imbalance = abs(lower_breach - upper_breach) if math.isfinite(lower_breach) and math.isfinite(upper_breach) else float("inf")
+    avg_band_width = _finite_metric(metrics, "avg_band_width", layer="band_metrics")
     band_loss = _finite_metric(metrics, "band_loss")
     return (
         math.isfinite(coverage)
-        and COVERAGE_GATE_MIN <= coverage <= COVERAGE_GATE_MAX
+        and math.isfinite(nominal_coverage)
+        and 0.0 < nominal_coverage < 1.0
+        and math.isfinite(coverage_abs_error)
+        and coverage_abs_error <= BAND_GATE_MAX_COVERAGE_ABS_ERROR
         and math.isfinite(upper_breach)
-        and upper_breach <= COVERAGE_GATE_MAX_UPPER_BREACH
+        and math.isfinite(upper_breach_abs_error)
+        and upper_breach_abs_error <= BAND_GATE_MAX_TAIL_ABS_ERROR
         and math.isfinite(lower_breach)
-        and lower_breach <= COVERAGE_GATE_MAX_LOWER_BREACH
+        and math.isfinite(lower_breach_abs_error)
+        and lower_breach_abs_error <= BAND_GATE_MAX_TAIL_ABS_ERROR
+        and tail_imbalance <= BAND_GATE_MAX_TAIL_IMBALANCE
         and math.isfinite(avg_band_width)
         and avg_band_width > 0.0
         and math.isfinite(band_loss)
@@ -336,21 +528,35 @@ def coverage_gate_eligible(metrics: dict[str, float]) -> bool:
 def line_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float]:
     metrics = candidate.metrics
     return (
-        -_finite_metric(metrics, "spearman_ic", float("-inf")),
-        -_finite_metric(metrics, "long_short_spread", float("-inf")),
-        _finite_metric(metrics, "mae", float("inf")),
+        -_finite_metric(metrics, "spearman_ic", float("-inf"), layer="line_metrics"),
+        -_finite_metric(metrics, "long_short_spread", float("-inf"), layer="line_metrics"),
+        _finite_metric(metrics, "mae", float("inf"), layer="line_metrics"),
         _finite_metric(metrics, "forecast_loss", _finite_metric(metrics, "total_loss", float("inf"))),
     )
 
 
 def band_gate_sort_key(candidate: CheckpointCandidate) -> tuple[float, float, float, float, float]:
     metrics = candidate.metrics
-    coverage = _finite_metric(metrics, "coverage")
+    coverage = _finite_metric(metrics, "empirical_coverage", layer="band_metrics")
+    if not math.isfinite(coverage):
+        coverage = _finite_metric(metrics, "coverage", layer="band_metrics")
+    nominal_coverage = _finite_metric(metrics, "nominal_coverage", layer="band_metrics")
+    if not math.isfinite(nominal_coverage):
+        nominal_coverage = BAND_GATE_TARGET_COVERAGE
+    coverage_abs_error = _finite_metric(metrics, "coverage_abs_error", layer="band_metrics")
+    if not math.isfinite(coverage_abs_error) and math.isfinite(coverage) and math.isfinite(nominal_coverage):
+        coverage_abs_error = abs(coverage - nominal_coverage)
+    lower_breach = _finite_metric(metrics, "lower_breach_rate", float("inf"), layer="band_metrics")
+    upper_breach = _finite_metric(metrics, "upper_breach_rate", float("inf"), layer="band_metrics")
+    tail_imbalance = abs(lower_breach - upper_breach) if math.isfinite(lower_breach) and math.isfinite(upper_breach) else float("inf")
+    interval_score = _finite_metric(metrics, "asymmetric_interval_score", layer="band_metrics")
+    if not math.isfinite(interval_score):
+        interval_score = _finite_metric(metrics, "interval_score", float("inf"), layer="band_metrics")
     return (
-        abs(coverage - BAND_GATE_TARGET_COVERAGE),
-        _finite_metric(metrics, "upper_breach_rate", float("inf")),
-        _finite_metric(metrics, "lower_breach_rate", float("inf")),
-        _finite_metric(metrics, "avg_band_width", float("inf")),
+        coverage_abs_error,
+        tail_imbalance,
+        interval_score,
+        _finite_metric(metrics, "avg_band_width", float("inf"), layer="band_metrics"),
         _finite_metric(metrics, "band_loss", float("inf")),
     )
 
@@ -502,6 +708,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-width", type=float, default=0.1, help="레거시 호환용 인자이며 현재 손실 계산에는 사용하지 않습니다.")
     parser.add_argument("--lambda-cross", type=float, default=1.0)
     parser.add_argument("--lambda-direction", type=float, default=0.1)
+    parser.add_argument(
+        "--lower-band-loss-weight",
+        type=float,
+        default=1.0,
+        help="lower quantile pinball loss 가중치입니다. 기본값은 기존 동작과 같은 1.0입니다.",
+    )
+    parser.add_argument(
+        "--upper-band-loss-weight",
+        type=float,
+        default=1.0,
+        help="upper quantile pinball loss 가중치입니다. 기본값은 기존 동작과 같은 1.0입니다.",
+    )
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--band-mode", choices=["direct", "param"], default="direct")
     parser.add_argument("--num-tickers", type=int, default=0)
@@ -509,6 +727,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ci-aggregate", choices=["target", "mean", "attention"], default="target")
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--limit-tickers", type=int, default=None)
+    parser.add_argument("--market-data-provider", default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--num-workers", default="auto")
@@ -527,15 +746,33 @@ def parse_args() -> argparse.Namespace:
         default="none",
         help="CNN-LSTM에서 선택한 블록만 autocast를 끄고 fp32로 강제합니다.",
     )
-    parser.add_argument("--wandb", dest="use_wandb", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--wandb",
+        dest="use_wandb",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="W&B 기록 사용. full training에서는 init 실패 시 경고 후 자동 fallback하고, --no-wandb는 완전 비활성화합니다.",
+    )
     parser.add_argument("--wandb-project", default="lens-ai")
     parser.add_argument("--line-target-type", default="raw_future_return")
     parser.add_argument("--band-target-type", default="raw_future_return")
+    parser.add_argument(
+        "--feature-set",
+        "--feature-columns-preset",
+        dest="feature_set",
+        default="full_features",
+        help="docs/cp63_bm_feature_set_plan.json에 정의된 모델 입력 피처 세트 이름입니다.",
+    )
     parser.add_argument("--save-run", action="store_true")
     parser.add_argument("--model-ver", default="v2-multihead")
     parser.add_argument("--early-stop-patience", type=int, default=10)
     parser.add_argument("--early-stop-min-delta", type=float, default=1e-4)
-    parser.add_argument("--checkpoint-selection", choices=CHECKPOINT_SELECTION_CHOICES, default="val_total")
+    parser.add_argument(
+        "--checkpoint-selection",
+        choices=CHECKPOINT_SELECTION_CHOICES,
+        default="val_total",
+        help="checkpoint 선택 기준. coverage_gate는 deprecated alias이며 combined_gate로 해석됩니다.",
+    )
     parser.add_argument("--use-future-covariate", dest="use_future_covariate", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--amp-dtype", choices=AMP_DTYPE_CHOICES, default="bf16",
                         help="CUDA autocast dtype. 'off'는 autocast 자체를 끈다 (NaN 디버그용).")
@@ -543,14 +780,23 @@ def parse_args() -> argparse.Namespace:
                         help="torch.autograd.set_detect_anomaly 활성화. NaN 첫 발생 backward op 추적 (느려짐).")
     parser.add_argument("--explicit-cuda-cleanup", dest="explicit_cuda_cleanup", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--hard-exit-after-result", dest="hard_exit_after_result", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--local-log",
+        dest="local_log",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="epoch 진행률과 최종 요약을 로컬 logs/runs/{run_id}/에 기록합니다.",
+    )
+    parser.add_argument("--local-log-dir", default=DEFAULT_LOCAL_LOG_DIR)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
 def build_model(config: TrainConfig):
+    apply_feature_set_to_config(config)
     model_cls = MODEL_REGISTRY[config.model]
     common_kwargs = {
-        "n_features": MODEL_N_FEATURES,
+        "n_features": config.n_features,
         "seq_len": config.seq_len,
         "horizon": config.horizon,
         "dropout": config.dropout,
@@ -587,6 +833,139 @@ def set_seed(seed: int) -> None:
 def build_config_hash(config: TrainConfig) -> str:
     payload = json.dumps(asdict(config), ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def resolve_local_log_base_dir(local_log_dir: str | Path) -> Path:
+    path = Path(local_log_dir)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _local_metric(metrics: dict[str, Any], key: str, *, layer: str | None = None) -> Any:
+    if layer:
+        nested = metrics.get(layer)
+        if isinstance(nested, dict) and key in nested:
+            return nested.get(key)
+    return metrics.get(key)
+
+
+def _local_gate_status(checkpoint_selector: CheckpointSelector, metrics: dict[str, Any]) -> dict[str, Any]:
+    line_pass = line_gate_eligible(metrics)
+    band_pass = band_gate_eligible(metrics)
+    combined_pass = combined_gate_eligible(metrics)
+    gate_type = checkpoint_selector.gate_type
+    if gate_type == "line_gate":
+        gate_eligible: bool | None = line_pass
+    elif gate_type == "band_gate":
+        gate_eligible = band_pass
+    elif gate_type == "combined_gate":
+        gate_eligible = combined_pass
+    else:
+        gate_eligible = None
+    return {
+        "gate_type": gate_type,
+        "gate_eligible": gate_eligible,
+        "line_gate_pass": line_pass,
+        "band_gate_pass": band_pass,
+        "combined_gate_pass": combined_pass,
+    }
+
+
+def build_local_epoch_log_payload(
+    *,
+    run_id: str,
+    epoch: int,
+    epochs: int,
+    elapsed_seconds: float,
+    epoch_seconds: float,
+    estimated_remaining_seconds: float,
+    learning_rate: float,
+    train_metrics: dict[str, Any],
+    val_metrics: dict[str, Any],
+    early_state: EarlyStoppingState,
+    checkpoint_selector: CheckpointSelector,
+    checkpoint_selection: str,
+    vram_peak_allocated_mb: float,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "epoch": epoch,
+        "epochs": epochs,
+        "elapsed_seconds": round(elapsed_seconds, 4),
+        "epoch_seconds": round(epoch_seconds, 4),
+        "estimated_remaining_seconds": round(estimated_remaining_seconds, 4),
+        "learning_rate": learning_rate,
+        "train_total_loss": train_metrics.get("total_loss"),
+        "val_total_loss": val_metrics.get("total_loss"),
+        "val_forecast_loss": val_metrics.get("forecast_loss"),
+        "best_so_far": early_state.best_value,
+        "epochs_since_improve": early_state.epochs_since_improve,
+        "checkpoint_selection": checkpoint_selection,
+        "selected_reason": None,
+        "gate_status": _local_gate_status(checkpoint_selector, val_metrics),
+        "vram_peak_allocated_mb": vram_peak_allocated_mb,
+        "ic_mean": _local_metric(val_metrics, "ic_mean", layer="line_metrics"),
+        "long_short_spread": _local_metric(val_metrics, "long_short_spread", layer="line_metrics"),
+        "false_safe_tail_rate": _local_metric(val_metrics, "false_safe_tail_rate", layer="line_metrics"),
+        "severe_downside_recall": _local_metric(val_metrics, "severe_downside_recall", layer="line_metrics"),
+        "nominal_coverage": _local_metric(val_metrics, "nominal_coverage", layer="band_metrics"),
+        "empirical_coverage": _local_metric(val_metrics, "empirical_coverage", layer="band_metrics"),
+        "coverage_abs_error": _local_metric(val_metrics, "coverage_abs_error", layer="band_metrics"),
+        "asymmetric_interval_score": _local_metric(val_metrics, "asymmetric_interval_score", layer="band_metrics"),
+    }
+
+
+def build_local_config_payload(
+    *,
+    run_id: str,
+    config: TrainConfig,
+    local_log: bool,
+    local_log_dir: str | Path,
+    run_log_dir: Path,
+    source_data_hash: str | None = None,
+    dataset_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "feature_version": FEATURE_CONTRACT_VERSION,
+        "source_data_hash": source_data_hash,
+        "local_log": {
+            "enabled": bool(local_log),
+            "base_dir": str(resolve_local_log_base_dir(local_log_dir)),
+            "run_dir": str(run_log_dir),
+        },
+        "config": asdict(config),
+        "dataset_plan": dataset_plan,
+    }
+
+
+def build_local_summary_payload(
+    *,
+    run_id: str,
+    status: str,
+    config: TrainConfig,
+    checkpoint_path: str | None,
+    best_metrics: dict[str, Any] | None,
+    test_metrics: dict[str, Any] | None,
+    wandb_status: dict[str, Any] | None,
+    total_elapsed_seconds: float,
+    source_data_hash: str | None = None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "status": status,
+        "model": config.model,
+        "timeframe": config.timeframe,
+        "horizon": config.horizon,
+        "feature_set": config.feature_set,
+        "source_data_hash": source_data_hash,
+        "checkpoint_path": checkpoint_path,
+        "best_metrics": best_metrics or {},
+        "test_metrics": test_metrics or {},
+        "wandb_status": wandb_status,
+        "total_elapsed_seconds": round(total_elapsed_seconds, 4),
+        "error": error,
+    }
 
 
 def should_use_cuda_optimizations(device: torch.device) -> bool:
@@ -1159,6 +1538,131 @@ def evaluate_bundle(
     return result
 
 
+def _load_wandb_api_key_from_dotenv(dotenv_path: Path | None = None) -> bool:
+    if os.environ.get("WANDB_API_KEY"):
+        return False
+    path = dotenv_path if dotenv_path is not None else PROJECT_ROOT / ".env"
+    if path is None or not path.exists():
+        return False
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() != "WANDB_API_KEY":
+                continue
+            secret = value.strip().strip("'\"")
+            if secret:
+                os.environ["WANDB_API_KEY"] = secret
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _sanitize_wandb_message(message: Any) -> str:
+    text = str(message)
+    api_key = os.environ.get("WANDB_API_KEY")
+    if api_key:
+        text = text.replace(api_key, "[redacted]")
+    text = re.sub(r"(WANDB_API_KEY\s*=\s*)[^\s]+", r"\1[redacted]", text)
+    return text[:500]
+
+
+def _wandb_required_error(status: str, message: str | None = None) -> RuntimeError:
+    detail = f" ({message})" if message else ""
+    return RuntimeError(
+        "W&B required for sweep, set WANDB_API_KEY or use --no-wandb"
+        f"; status={status}{detail}"
+    )
+
+
+def init_wandb_run(
+    *,
+    use_wandb: bool,
+    project: str,
+    config_payload: dict[str, Any],
+    group: str | None = None,
+    name: str | None = None,
+    required: bool = False,
+    dotenv_path: Path | None = None,
+) -> WandbInitOutcome:
+    if not use_wandb:
+        return WandbInitOutcome(run=None, status=WANDB_STATUS_DISABLED_BY_CLI, message="--no-wandb")
+    if wandb is None:
+        outcome = WandbInitOutcome(run=None, status=WANDB_STATUS_PACKAGE_MISSING, message="wandb package is not installed")
+        if required:
+            raise _wandb_required_error(outcome.status, outcome.message)
+        print(f"W&B 초기화 경고: {outcome.status}. 학습은 계속 진행합니다.")
+        return outcome
+    if os.environ.get("WANDB_MODE") == "disabled":
+        outcome = WandbInitOutcome(run=None, status=WANDB_STATUS_DISABLED_BY_ENV, message="WANDB_MODE=disabled")
+        if required:
+            raise _wandb_required_error(outcome.status, outcome.message)
+        return outcome
+
+    _load_wandb_api_key_from_dotenv(dotenv_path)
+    if not os.environ.get("WANDB_API_KEY"):
+        outcome = WandbInitOutcome(
+            run=None,
+            status=WANDB_STATUS_DISABLED_MISSING_KEY,
+            message="WANDB_API_KEY is not set",
+        )
+        if required:
+            raise _wandb_required_error(outcome.status, outcome.message)
+        print(f"W&B 초기화 경고: {outcome.status}. 학습은 계속 진행합니다.")
+        return outcome
+
+    try:
+        run = wandb.init(
+            project=project,
+            config=config_payload,
+            group=group,
+            name=name,
+            reinit=True,
+        )
+    except Exception as exc:
+        message = _sanitize_wandb_message(exc)
+        outcome = WandbInitOutcome(
+            run=None,
+            status=WANDB_STATUS_DISABLED_INIT_FAILED,
+            message=message,
+        )
+        if required:
+            raise _wandb_required_error(outcome.status, outcome.message) from exc
+        print(f"W&B 초기화 경고: {outcome.status}: {message}. 학습은 계속 진행합니다.")
+        return outcome
+
+    return WandbInitOutcome(
+        run=run,
+        status=WANDB_STATUS_ONLINE_OK,
+        run_id=getattr(run, "id", None),
+        run_url=getattr(run, "url", None),
+    )
+
+
+def init_wandb_for_training(
+    config: TrainConfig,
+    run_id: str,
+    *,
+    group: str | None = None,
+    name: str | None = None,
+    config_override: dict[str, Any] | None = None,
+    required: bool = False,
+    dotenv_path: Path | None = None,
+) -> WandbInitOutcome:
+    return init_wandb_run(
+        use_wandb=config.use_wandb,
+        project=config.wandb_project,
+        config_payload=config_override or asdict(config),
+        group=group,
+        name=name or f"{config.model}-{config.timeframe}-{run_id[:8]}",
+        required=required,
+        dotenv_path=dotenv_path,
+    )
+
+
 def maybe_init_wandb(
     config: TrainConfig,
     run_id: str,
@@ -1167,20 +1671,13 @@ def maybe_init_wandb(
     name: str | None = None,
     config_override: dict[str, Any] | None = None,
 ):
-    if not config.use_wandb:
-        return None
-    if wandb is None:
-        print("wandb 패키지가 없어 W&B 기록을 건너뜁니다.")
-        return None
-    if os.environ.get("WANDB_MODE") == "disabled":
-        return None
-    return wandb.init(
-        project=config.wandb_project,
-        config=config_override or asdict(config),
+    return init_wandb_for_training(
+        config,
+        run_id,
         group=group,
-        name=name or f"{config.model}-{config.timeframe}-{run_id[:8]}",
-        reinit=True,
-    )
+        name=name,
+        config_override=config_override,
+    ).run
 
 
 def emit_exit_marker(step: str, *, run_id: str = "", extras: dict[str, Any] | None = None) -> None:
@@ -1303,10 +1800,31 @@ def run_training(
     wandb_group: str | None = None,
     wandb_name: str | None = None,
     wandb_config_override: dict[str, Any] | None = None,
+    wandb_required: bool = False,
+    local_log: bool = True,
+    local_log_dir: str | Path = DEFAULT_LOCAL_LOG_DIR,
 ) -> dict[str, Any]:
     set_seed(config.seed)
+    apply_feature_set_to_config(config)
     device = resolve_device(config.device)
     run_id = f"{config.model}-{config.timeframe}-{uuid4().hex[:12]}"
+    local_started_at = time.perf_counter()
+    source_data_hash: str | None = None
+    local_logger = LocalTrainingProgressLogger(
+        run_id=run_id,
+        base_dir=resolve_local_log_base_dir(local_log_dir),
+        enabled=local_log,
+    )
+    local_logger.write_config(
+        build_local_config_payload(
+            run_id=run_id,
+            config=config,
+            local_log=local_log,
+            local_log_dir=local_log_dir,
+            run_log_dir=local_logger.run_dir,
+            source_data_hash=source_data_hash,
+        )
+    )
     print(f"학습 디바이스: {device}")
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -1324,12 +1842,33 @@ def run_training(
             horizon=config.horizon,
             tickers=config.tickers,
             limit_tickers=config.limit_tickers,
+            market_data_provider=config.market_data_provider,
             include_future_covariate=config.model == "tide" and config.use_future_covariate,
             line_target_type=config.line_target_type,
             band_target_type=config.band_target_type,
         )
+    train_bundle, val_bundle, test_bundle, mean, std = apply_feature_columns_to_splits(
+        train_bundle,
+        val_bundle,
+        test_bundle,
+        mean,
+        std,
+        config.feature_columns or list(MODEL_FEATURE_COLUMNS),
+    )
     config.num_tickers = plan.num_tickers
     config.ticker_registry_path = plan.ticker_registry_path
+    source_data_hash = getattr(plan, "source_data_hash", None)
+    local_logger.write_config(
+        build_local_config_payload(
+            run_id=run_id,
+            config=config,
+            local_log=local_log,
+            local_log_dir=local_log_dir,
+            run_log_dir=local_logger.run_dir,
+            source_data_hash=source_data_hash,
+            dataset_plan=summarize_dataset_plan(plan, train_bundle, val_bundle, test_bundle),
+        )
+    )
     assert_dataset_features_finite("train_bundle", train_bundle)
     assert_dataset_features_finite("val_bundle", val_bundle)
     assert_dataset_features_finite("test_bundle", test_bundle)
@@ -1375,6 +1914,8 @@ def run_training(
         lambda_cross=config.lambda_cross,
         lambda_direction=config.lambda_direction,
         band_mode=config.band_mode,
+        lower_band_loss_weight=config.lower_band_loss_weight,
+        upper_band_loss_weight=config.upper_band_loss_weight,
     )
     early_stopping = EarlyStopping(
         patience=0 if config.early_stop_patience < 0 else config.early_stop_patience,
@@ -1383,16 +1924,43 @@ def run_training(
     )
     checkpoint_selector = CheckpointSelector(config.checkpoint_selection)
 
-    wandb_run = maybe_init_wandb(
+    wandb_outcome = init_wandb_for_training(
         config,
         run_id,
         group=wandb_group,
         name=wandb_name,
         config_override=wandb_config_override,
+        required=wandb_required,
     )
+    wandb_run = wandb_outcome.run
+    wandb_status = wandb_outcome.to_meta()
+    wandb_run_id = wandb_status["run_id"] if wandb_status["status"] == WANDB_STATUS_ONLINE_OK else None
     grad_norm_history: list[float] = []
     failure_state: FiniteCheckResult | None = None
     started_at = time.perf_counter()
+
+    def _write_local_summary(
+        *,
+        status: str,
+        checkpoint_path: str | None = None,
+        best_metrics: dict[str, Any] | None = None,
+        test_metrics: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        local_logger.write_summary(
+            build_local_summary_payload(
+                run_id=run_id,
+                status=status,
+                config=config,
+                checkpoint_path=checkpoint_path,
+                best_metrics=best_metrics,
+                test_metrics=test_metrics,
+                wandb_status=wandb_status,
+                total_elapsed_seconds=time.perf_counter() - local_started_at,
+                source_data_hash=source_data_hash,
+                error=error,
+            )
+        )
 
     def _record_failure(result: FiniteCheckResult) -> None:
         nonlocal failure_state
@@ -1415,7 +1983,7 @@ def run_training(
         save_model_run(
             {
                 "run_id": run_id,
-                "wandb_run_id": getattr(wandb_run, "id", None),
+                "wandb_run_id": wandb_run_id,
                 "model_name": config.model,
                 "timeframe": config.timeframe,
                 "horizon": config.horizon,
@@ -1438,6 +2006,7 @@ def run_training(
                     **asdict(config),
                     "config_hash": config_hash,
                     "feature_version": FEATURE_CONTRACT_VERSION,
+                    "wandb_status": wandb_status,
                     "failure": result.to_meta(),
                 },
                 "checkpoint_path": None,
@@ -1476,6 +2045,7 @@ def run_training(
             if wandb_run is not None:
                 wandb_run.finish()
             _persist_failed_run(result)
+            _write_local_summary(status=RUN_STATUS_FAILED_NAN, error=result.to_meta())
             raise
         val_summary = evaluate_loader(
             model=model,
@@ -1502,6 +2072,7 @@ def run_training(
             if wandb_run is not None:
                 wandb_run.finish()
             _persist_failed_run(val_check)
+            _write_local_summary(status=RUN_STATUS_FAILED_NAN, error=val_check.to_meta())
             raise RuntimeError(val_check.format_message())
         grad_norm_history.append(float(train_metrics.get("grad_norm_mean", 0.0)))
 
@@ -1544,6 +2115,23 @@ def run_training(
             **{f"train/{key}": value for key, value in train_metrics.items()},
             **{f"val/{key}": value for key, value in val_summary.items()},
         }
+        local_logger.write_epoch(
+            build_local_epoch_log_payload(
+                run_id=run_id,
+                epoch=epoch,
+                epochs=config.epochs,
+                elapsed_seconds=elapsed_total,
+                epoch_seconds=epoch_seconds,
+                estimated_remaining_seconds=estimated_remaining_seconds,
+                learning_rate=current_lr(optimizer),
+                train_metrics=train_metrics,
+                val_metrics=val_summary,
+                early_state=early_state,
+                checkpoint_selector=checkpoint_selector,
+                checkpoint_selection=config.checkpoint_selection,
+                vram_peak_allocated_mb=vram_peak_mb,
+            )
+        )
         print(json.dumps(summary, ensure_ascii=False))
         print(
             f"val_total={val_total:.6f} val_forecast={val_forecast:.6f} best_so_far={early_state.best_value:.6f} "
@@ -1640,6 +2228,11 @@ def run_training(
         if wandb_run is not None:
             wandb_run.finish()
         _persist_failed_run(cp_check)
+        _write_local_summary(
+            status=RUN_STATUS_FAILED_NAN,
+            best_metrics=checkpoint_metrics,
+            error=cp_check.to_meta(),
+        )
         raise RuntimeError(cp_check.format_message())
 
     checkpoint_path = save_checkpoint(model, config, run_id, checkpoint_metrics, mean, std)
@@ -1669,17 +2262,37 @@ def run_training(
         if wandb_run is not None:
             wandb_run.finish()
         _persist_failed_run(test_check)
+        _write_local_summary(
+            status=RUN_STATUS_FAILED_NAN,
+            checkpoint_path=str(checkpoint_path),
+            best_metrics=checkpoint_metrics,
+            error=test_check.to_meta(),
+        )
         raise RuntimeError(test_check.format_message())
 
+    persisted_status = resolve_persisted_run_status(gate_failed=selection_result.gate_failed)
     result = {
         "run_id": run_id,
         "checkpoint_path": str(checkpoint_path),
+        "local_log_dir": str(local_logger.run_dir) if local_log else None,
+        "feature_set": config.feature_set,
+        "feature_columns": config.feature_columns,
+        "n_features": config.n_features,
         "feature_mean": mean.tolist(),
         "feature_std": std.tolist(),
         "best_metrics": checkpoint_metrics,
         "test_metrics": test_quality,
         "dataset_plan": summarize_dataset_plan(plan, train_bundle, val_bundle, test_bundle),
+        "wandb_status": wandb_status,
+        "wandb_run_id": wandb_run_id,
+        "wandb_run_url": wandb_status.get("run_url") if wandb_status["status"] == WANDB_STATUS_ONLINE_OK else None,
     }
+    _write_local_summary(
+        status=persisted_status,
+        checkpoint_path=str(checkpoint_path),
+        best_metrics=checkpoint_metrics,
+        test_metrics=test_quality,
+    )
 
     if wandb_run is not None:
         wandb.log({f"test/{key}": value for key, value in test_quality.items()})
@@ -1692,7 +2305,7 @@ def run_training(
         save_model_run(
             {
                 "run_id": run_id,
-                "wandb_run_id": getattr(wandb_run, "id", None),
+                "wandb_run_id": wandb_run_id,
                 "model_name": config.model,
                 "timeframe": config.timeframe,
                 "horizon": config.horizon,
@@ -1715,6 +2328,7 @@ def run_training(
                     **asdict(config),
                     "config_hash": config_hash,
                     "feature_version": FEATURE_CONTRACT_VERSION,
+                    "wandb_status": wandb_status,
                     "feature_mean": mean.tolist(),
                     "feature_std": std.tolist(),
                     "grad_norm_history": grad_norm_history,
@@ -1728,9 +2342,7 @@ def run_training(
                     "early_stopped": checkpoint_metrics.get("early_stopped"),
                 },
                 "checkpoint_path": str(checkpoint_path),
-                "status": resolve_persisted_run_status(
-                    gate_failed=selection_result.gate_failed,
-                ),
+                "status": persisted_status,
             }
         )
 
@@ -1750,8 +2362,14 @@ def run_training(
     return result
 
 
-def train(config: TrainConfig, *, save_run: bool) -> dict[str, Any]:
-    return run_training(config, save_run=save_run)
+def train(
+    config: TrainConfig,
+    *,
+    save_run: bool,
+    local_log: bool = True,
+    local_log_dir: str | Path = DEFAULT_LOCAL_LOG_DIR,
+) -> dict[str, Any]:
+    return run_training(config, save_run=save_run, local_log=local_log, local_log_dir=local_log_dir)
 
 
 def summarize_dataset_plan(
@@ -1766,6 +2384,13 @@ def summarize_dataset_plan(
         "horizon": plan.horizon,
         "h_max": plan.h_max,
         "min_fold_samples": plan.min_fold_samples,
+        "provider": getattr(plan, "provider", None),
+        "source": getattr(plan, "source", None),
+        "source_data_hash": getattr(plan, "source_data_hash", None),
+        "date_min": getattr(plan, "date_min", None),
+        "date_max": getattr(plan, "date_max", None),
+        "usable_row_count": getattr(plan, "usable_row_count", None),
+        "estimated_usable_sample_count": getattr(plan, "estimated_usable_sample_count", None),
         "input_ticker_count": plan.input_ticker_count,
         "eligible_ticker_count": len(plan.eligible_tickers),
         "excluded_ticker_count": len(plan.excluded_reasons),
@@ -1789,6 +2414,13 @@ def summarize_plan_only(plan: DatasetPlan) -> dict[str, Any]:
         "horizon": plan.horizon,
         "h_max": plan.h_max,
         "min_fold_samples": plan.min_fold_samples,
+        "provider": getattr(plan, "provider", None),
+        "source": getattr(plan, "source", None),
+        "source_data_hash": getattr(plan, "source_data_hash", None),
+        "date_min": getattr(plan, "date_min", None),
+        "date_max": getattr(plan, "date_max", None),
+        "usable_row_count": getattr(plan, "usable_row_count", None),
+        "estimated_usable_sample_count": getattr(plan, "estimated_usable_sample_count", None),
         "input_ticker_count": plan.input_ticker_count,
         "eligible_ticker_count": len(plan.eligible_tickers),
         "excluded_ticker_count": len(plan.excluded_reasons),
@@ -1803,16 +2435,25 @@ def summarize_plan_only(plan: DatasetPlan) -> dict[str, Any]:
 
 
 def run_dry(config: TrainConfig) -> dict[str, Any]:
+    apply_feature_set_to_config(config)
     feature_index_frame = fetch_feature_index_frame(
         timeframe=config.timeframe,
         tickers=config.tickers,
         limit_tickers=config.limit_tickers,
+        market_data_provider=config.market_data_provider,
     )
     plan = build_dataset_plan(
         feature_index_frame,
         timeframe=config.timeframe,
         seq_len=config.seq_len,
         horizon=config.horizon,
+        market_data_provider=config.market_data_provider,
+        source_data_hash=resolve_data_fingerprint(
+            config.timeframe,
+            tickers=config.tickers,
+            limit_tickers=config.limit_tickers,
+            market_data_provider=config.market_data_provider,
+        ),
     )
     config.num_tickers = plan.num_tickers
     config.ticker_registry_path = plan.ticker_registry_path
@@ -1829,8 +2470,10 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
         lambda_cross=config.lambda_cross,
         lambda_direction=config.lambda_direction,
         band_mode=config.band_mode,
+        lower_band_loss_weight=config.lower_band_loss_weight,
+        upper_band_loss_weight=config.upper_band_loss_weight,
     )
-    sample_input = torch.randn(4, config.seq_len, MODEL_N_FEATURES)
+    sample_input = torch.randn(4, config.seq_len, config.n_features)
     sample_ticker_ids = torch.tensor([0, 1, 2, 3], dtype=torch.long)
     sample_future_covariates = torch.randn(4, config.horizon, FUTURE_COVARIATE_DIM)
     sample_line_target = torch.randn(4, config.horizon)
@@ -1847,6 +2490,9 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
         line_pp, lower_pp, upper_pp = apply_band_postprocess(output.line, output.lower_band, output.upper_band)
     summary = summarize_plan_only(plan)
     summary["forward_smoke"] = {
+        "feature_set": config.feature_set,
+        "n_features": config.n_features,
+        "feature_columns": config.feature_columns,
         "line_shape": list(output.line.shape),
         "lower_shape": list(output.lower_band.shape),
         "upper_shape": list(output.upper_band.shape),
@@ -1926,12 +2572,21 @@ if __name__ == "__main__":
         patchtst_d_model=args.patchtst_d_model,
         patchtst_n_heads=args.patchtst_n_heads,
         patchtst_n_layers=args.patchtst_n_layers,
+        feature_set=args.feature_set,
+        market_data_provider=args.market_data_provider,
+        lower_band_loss_weight=args.lower_band_loss_weight,
+        upper_band_loss_weight=args.upper_band_loss_weight,
     )
     is_cuda_run = str(config.device).lower().startswith("cuda")
     if args.dry_run:
         result = run_dry(config)
     else:
-        result = train(config, save_run=args.save_run)
+        result = train(
+            config,
+            save_run=args.save_run,
+            local_log=args.local_log,
+            local_log_dir=args.local_log_dir,
+        )
     emit_exit_marker("before_result_json", run_id=result.get("run_id", ""))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     emit_exit_marker("after_result_json", run_id=result.get("run_id", ""))

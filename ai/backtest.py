@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.preprocessing import normalize_ai_timeframe
+from ai.preprocessing import normalize_ai_timeframe, resolved_market_data_provider
 from ai.storage import fetch_run_evaluations, fetch_run_predictions, get_model_run, save_backtest_results
 from backend.collector.repositories.base import fetch_frame
 
@@ -21,13 +21,31 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="저장된 예측 결과로 규칙 기반 백테스트를 실행한다")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--timeframe", default=None)
+    parser.add_argument("--market-data-provider", default=None)
     parser.add_argument("--strategy-name", default="band_breakout_v1")
     parser.add_argument("--fee-bps", type=float, default=10.0)
     parser.add_argument("--save", action="store_true")
     return parser.parse_args()
 
 
-def build_backtest_frame(run_id: str, timeframe: str | None = None) -> pd.DataFrame:
+def _filter_price_frame_by_provider(frame: pd.DataFrame, provider: str) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    if "source" not in frame.columns:
+        return frame.copy() if provider == "eodhd" else frame.iloc[0:0].copy()
+    source = frame["source"].astype("string")
+    if provider == "eodhd":
+        return frame[source.isna() | (source.str.lower() == "eodhd")].copy()
+    return frame[source.str.lower() == provider].copy()
+
+
+def build_backtest_frame(
+    run_id: str,
+    timeframe: str | None = None,
+    *,
+    market_data_provider: str | None = None,
+) -> pd.DataFrame:
+    provider = resolved_market_data_provider(market_data_provider)
     predictions = fetch_run_predictions(run_id, timeframe)
     evaluations = fetch_run_evaluations(run_id, timeframe)
     if predictions.empty or evaluations.empty:
@@ -45,10 +63,11 @@ def build_backtest_frame(run_id: str, timeframe: str | None = None) -> pd.DataFr
     max_date = frame["asof_date"].max()
     price_frame = fetch_frame(
         "price_data",
-        columns="ticker,date,close,adjusted_close",
+        columns="ticker,date,close,adjusted_close,source,provider",
         filters=[("in", "ticker", tickers), ("gte", "date", min_date), ("lte", "date", max_date)],
         order_by="date",
     )
+    price_frame = _filter_price_frame_by_provider(price_frame, provider)
     if price_frame.empty:
         raise ValueError("anchor close를 찾을 수 없습니다. price_data를 확인하세요.")
 
@@ -181,6 +200,7 @@ def run_backtest(
     strategy_name: str,
     fee_bps: float = 10.0,
     save: bool = False,
+    market_data_provider: str | None = None,
 ) -> dict[str, Any]:
     if timeframe is not None:
         normalize_ai_timeframe(timeframe)
@@ -193,7 +213,8 @@ def run_backtest(
         raise ValueError(
             f"run_id={run_id} status={run_status}: completed 상태의 run에서만 backtest를 실행할 수 있습니다."
         )
-    frame = build_backtest_frame(run_id, timeframe)
+    provider = resolved_market_data_provider(market_data_provider)
+    frame = build_backtest_frame(run_id, timeframe, market_data_provider=provider)
     result = run_rule_based_backtest(frame, strategy_name=strategy_name, fee_bps=fee_bps)
     resolved_timeframe = timeframe or str(frame["timeframe"].iloc[0])
     normalize_ai_timeframe(resolved_timeframe)
@@ -202,6 +223,7 @@ def run_backtest(
     return {
         "run_id": run_id,
         "timeframe": resolved_timeframe,
+        "market_data_provider": provider,
         **result,
     }
 
@@ -214,5 +236,6 @@ if __name__ == "__main__":
         strategy_name=args.strategy_name,
         fee_bps=args.fee_bps,
         save=args.save,
+        market_data_provider=args.market_data_provider,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

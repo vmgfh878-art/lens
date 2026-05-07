@@ -1,7 +1,7 @@
 import unittest
 
-import pandas as pd
 import torch
+import pandas as pd
 
 from ai.evaluation import summarize_forecast_metrics
 
@@ -80,6 +80,25 @@ class MetricDefinitionContractTest(unittest.TestCase):
         self.assertIsNone(metrics["empirical_p10"])
         self.assertIsNone(metrics["empirical_p50"])
         self.assertIsNone(metrics["empirical_p90"])
+
+    def test_metric_layer_schema_splits_line_band_overlay(self):
+        actual = torch.tensor([[-0.20], [0.00], [0.20]], dtype=torch.float32)
+        metrics = summarize_forecast_metrics(
+            metadata=None,
+            line_predictions=torch.zeros((3, 1), dtype=torch.float32),
+            lower_predictions=torch.full((3, 1), -0.10, dtype=torch.float32),
+            upper_predictions=torch.full((3, 1), 0.10, dtype=torch.float32),
+            line_targets=actual,
+            band_targets=actual,
+            raw_future_returns=actual,
+        )
+
+        self.assertIn("line_metrics", metrics)
+        self.assertIn("band_metrics", metrics)
+        self.assertIn("false_safe_negative_rate", metrics["line_metrics"])
+        self.assertIn("asymmetric_interval_score", metrics["band_metrics"])
+        self.assertNotIn("line_inside_band_ratio", metrics)
+        self.assertNotIn("legacy_overlay_diagnostics", metrics)
 
 
 if __name__ == "__main__":

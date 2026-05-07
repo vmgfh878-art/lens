@@ -29,8 +29,10 @@ class TickerRegistryTestCase(unittest.TestCase):
     def test_ticker_registry_1d_and_1w_independent(self):
         registry_1d = build_registry(["AAPL", "MSFT", "NVDA"], "1D")
         registry_1w = build_registry(["AAPL", "MSFT"], "1W")
+        registry_1m = build_registry(["AAPL"], "1M")
         self.assertEqual(registry_1d["num_tickers"], 3)
         self.assertEqual(registry_1w["num_tickers"], 2)
+        self.assertEqual(registry_1m["num_tickers"], 1)
         self.assertEqual(lookup_id("NVDA", registry_1w), registry_1w["num_tickers"])
 
     def test_registry_path_for_tickers_is_subset_specific(self):
@@ -41,6 +43,7 @@ class TickerRegistryTestCase(unittest.TestCase):
         self.assertEqual(first, same)
         self.assertNotEqual(first, different)
         self.assertIn("ticker_id_map_1d_", first.name)
+        self.assertIn("ticker_id_map_1m_", registry_path_for_tickers("1M", ["AAPL"]).name)
 
 
 if __name__ == "__main__":

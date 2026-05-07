@@ -10,6 +10,7 @@ CACHE_DIR = Path("ai/cache")
 DEFAULT_PATHS = {
     "1D": CACHE_DIR / "ticker_id_map_1d.json",
     "1W": CACHE_DIR / "ticker_id_map_1w.json",
+    "1M": CACHE_DIR / "ticker_id_map_1m.json",
 }
 
 

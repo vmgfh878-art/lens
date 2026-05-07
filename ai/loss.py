@@ -136,6 +136,8 @@ class ForecastCompositeLoss(nn.Module):
         lambda_cross: float = 1.0,
         lambda_direction: float = 0.1,
         band_mode: str = "direct",
+        lower_band_loss_weight: float = 1.0,
+        upper_band_loss_weight: float = 1.0,
     ) -> None:
         super().__init__()
         self.band_mode = band_mode
@@ -150,6 +152,8 @@ class ForecastCompositeLoss(nn.Module):
         self.lambda_width = lambda_width
         self.lambda_cross = lambda_cross
         self.lambda_direction = lambda_direction
+        self.lower_band_loss_weight = lower_band_loss_weight
+        self.upper_band_loss_weight = upper_band_loss_weight
 
     def forward(
         self,
@@ -159,9 +163,14 @@ class ForecastCompositeLoss(nn.Module):
         raw_future_returns: torch.Tensor | None = None,
     ) -> LossBreakdown:
         line_component = self.line_loss(prediction.line, line_target)
-        band_component = self.low_quantile_loss(prediction.lower_band, band_target) + self.high_quantile_loss(
+        lower_band_component = self.low_quantile_loss(prediction.lower_band, band_target)
+        upper_band_component = self.high_quantile_loss(
             prediction.upper_band,
             band_target,
+        )
+        band_component = (
+            (self.lower_band_loss_weight * lower_band_component)
+            + (self.upper_band_loss_weight * upper_band_component)
         )
         if self.band_mode == "direct":
             cross_component = self.cross_loss(prediction.lower_band, prediction.upper_band)

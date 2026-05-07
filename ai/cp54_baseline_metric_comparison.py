@@ -6,7 +6,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 import numpy as np
 import pandas as pd
 

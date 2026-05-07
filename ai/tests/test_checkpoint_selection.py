@@ -17,6 +17,7 @@ from ai.train import (
 def _metrics(
     *,
     coverage: float = 0.82,
+    nominal_coverage: float = 0.80,
     upper: float = 0.09,
     lower: float = 0.10,
     ic: float = 0.02,
@@ -30,8 +31,13 @@ def _metrics(
 ) -> dict[str, float]:
     return {
         "coverage": coverage,
+        "empirical_coverage": coverage,
+        "nominal_coverage": nominal_coverage,
+        "coverage_abs_error": abs(coverage - nominal_coverage),
         "upper_breach_rate": upper,
         "lower_breach_rate": lower,
+        "upper_breach_abs_error": abs(upper - ((1.0 - nominal_coverage) / 2.0)),
+        "lower_breach_abs_error": abs(lower - ((1.0 - nominal_coverage) / 2.0)),
         "spearman_ic": ic,
         "long_short_spread": spread,
         "mae": mae,
@@ -52,11 +58,12 @@ class CheckpointSelectionTest(unittest.TestCase):
         self.assertFalse(line_gate_eligible(_metrics(ic=0.02, spread=0.003, mae=float("nan"))))
 
     def test_band_gate_pass_fail(self):
-        self.assertTrue(band_gate_eligible(_metrics(coverage=0.85, upper=0.08, lower=0.10)))
-        self.assertFalse(band_gate_eligible(_metrics(coverage=0.70, upper=0.08, lower=0.10)))
-        self.assertFalse(band_gate_eligible(_metrics(coverage=0.85, upper=0.16, lower=0.10)))
-        self.assertFalse(band_gate_eligible(_metrics(coverage=0.85, upper=0.08, lower=0.21)))
-        self.assertFalse(band_gate_eligible(_metrics(coverage=0.85, upper=0.08, lower=0.10, avg_band_width=0.0)))
+        self.assertTrue(band_gate_eligible(_metrics(coverage=0.80, nominal_coverage=0.80, upper=0.10, lower=0.10)))
+        self.assertTrue(band_gate_eligible(_metrics(coverage=0.70, nominal_coverage=0.70, upper=0.15, lower=0.15)))
+        self.assertFalse(band_gate_eligible(_metrics(coverage=0.60, nominal_coverage=0.70, upper=0.20, lower=0.20)))
+        self.assertFalse(band_gate_eligible(_metrics(coverage=0.80, nominal_coverage=0.80, upper=0.25, lower=0.10)))
+        self.assertFalse(band_gate_eligible(_metrics(coverage=0.80, nominal_coverage=0.80, upper=0.10, lower=0.30)))
+        self.assertFalse(band_gate_eligible(_metrics(coverage=0.80, nominal_coverage=0.80, upper=0.10, lower=0.10, avg_band_width=0.0)))
 
     def test_combined_gate_pass_fail(self):
         self.assertTrue(combined_gate_eligible(_metrics()))
@@ -72,7 +79,7 @@ class CheckpointSelectionTest(unittest.TestCase):
     def test_band_gate_passes_even_when_ic_is_negative(self):
         model = torch.nn.Linear(1, 1)
         selector = CheckpointSelector("band_gate")
-        selector.update(epoch=1, metrics=_metrics(coverage=0.84, upper=0.07, lower=0.10, ic=-0.03), model=model)
+        selector.update(epoch=1, metrics=_metrics(coverage=0.80, upper=0.10, lower=0.10, ic=-0.03), model=model)
 
         selected = selector.select()
         self.assertEqual(selected.candidate.epoch, 1)
@@ -97,6 +104,46 @@ class CheckpointSelectionTest(unittest.TestCase):
         self.assertFalse(selected.band_gate_pass)
         self.assertFalse(selected.combined_gate_pass)
 
+    def test_line_gate_uses_line_metrics_not_band_metrics(self):
+        metrics = _metrics(ic=-0.99, spread=-0.99, coverage=0.99)
+        metrics["line_metrics"] = {
+            "spearman_ic": 0.03,
+            "long_short_spread": 0.004,
+            "mae": 0.04,
+            "smape": 1.1,
+        }
+        metrics["band_metrics"] = {
+            "empirical_coverage": 0.99,
+            "upper_breach_rate": 0.30,
+            "lower_breach_rate": 0.30,
+            "avg_band_width": 0.0,
+        }
+
+        self.assertTrue(line_gate_eligible(metrics))
+        self.assertFalse(band_gate_eligible(metrics))
+
+    def test_band_gate_uses_band_metrics_not_line_metrics(self):
+        metrics = _metrics(ic=0.99, spread=0.99, coverage=0.40, upper=0.40, lower=0.40)
+        metrics["line_metrics"] = {
+            "spearman_ic": -0.03,
+            "long_short_spread": -0.004,
+            "mae": 0.04,
+            "smape": 1.1,
+        }
+        metrics["band_metrics"] = {
+            "nominal_coverage": 0.80,
+            "empirical_coverage": 0.80,
+            "coverage_abs_error": 0.0,
+            "upper_breach_rate": 0.10,
+            "lower_breach_rate": 0.10,
+            "upper_breach_abs_error": 0.0,
+            "lower_breach_abs_error": 0.0,
+            "avg_band_width": 0.08,
+        }
+
+        self.assertFalse(line_gate_eligible(metrics))
+        self.assertTrue(band_gate_eligible(metrics))
+
     def test_combined_gate_prefers_legacy_sort_order(self):
         model = torch.nn.Linear(1, 1)
         selector = CheckpointSelector("combined_gate")
@@ -109,13 +156,13 @@ class CheckpointSelectionTest(unittest.TestCase):
         self.assertEqual(selected.selected_reason, "combined_gate_eligible")
         self.assertFalse(selected.gate_failed)
 
-    def test_band_gate_sorts_by_target_coverage_then_breach_width_loss(self):
+    def test_band_gate_sorts_by_nominal_coverage_then_breach_width_loss(self):
         model = torch.nn.Linear(1, 1)
         selector = CheckpointSelector("band_gate")
 
-        selector.update(epoch=1, metrics=_metrics(coverage=0.80, upper=0.04, lower=0.08, avg_band_width=0.05), model=model)
-        selector.update(epoch=2, metrics=_metrics(coverage=0.85, upper=0.10, lower=0.08, avg_band_width=0.09), model=model)
-        selector.update(epoch=3, metrics=_metrics(coverage=0.88, upper=0.02, lower=0.08, avg_band_width=0.04), model=model)
+        selector.update(epoch=1, metrics=_metrics(coverage=0.78, nominal_coverage=0.80, upper=0.11, lower=0.11, avg_band_width=0.05), model=model)
+        selector.update(epoch=2, metrics=_metrics(coverage=0.80, nominal_coverage=0.80, upper=0.10, lower=0.10, avg_band_width=0.09), model=model)
+        selector.update(epoch=3, metrics=_metrics(coverage=0.82, nominal_coverage=0.80, upper=0.09, lower=0.09, avg_band_width=0.04), model=model)
 
         selected = selector.select()
         self.assertEqual(selected.candidate.epoch, 2)

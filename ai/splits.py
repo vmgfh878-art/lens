@@ -9,6 +9,11 @@ SPLIT_RATIO = (0.7, 0.15, 0.15)
 MAX_HORIZON_BY_TIMEFRAME = {
     "1D": 20,
     "1W": 12,
+    "1M": 3,
+}
+TIMEFRAME_ABSOLUTE_MIN_ROWS = {
+    "1D": 450,
+    "1W": 78,
 }
 FUNDAMENTAL_INSUFFICIENT_TICKERS = {
     "AMP",
@@ -67,6 +72,18 @@ def _resolved_sample_count(row_count: int, seq_len: int, h_max: int) -> int:
     return max(row_count - seq_len - h_max + 1, 0)
 
 
+def absolute_min_rows_for_timeframe(timeframe: str) -> int | None:
+    return TIMEFRAME_ABSOLUTE_MIN_ROWS.get(str(timeframe).upper())
+
+
+def required_history_rows(timeframe: str, seq_len: int, h_max: int) -> int:
+    absolute_min_rows = absolute_min_rows_for_timeframe(timeframe)
+    base_required_rows = seq_len + h_max
+    if absolute_min_rows is None:
+        return base_required_rows
+    return max(base_required_rows, absolute_min_rows)
+
+
 def _effective_sample_count(sample_count: int, h_max: int) -> int:
     # train-val, val-test 경계에 각각 h_max 만큼 gap을 비워 두기 위해 사용 가능한 샘플 수를 줄인다.
     return max(sample_count - (2 * h_max), 0)
@@ -82,6 +99,15 @@ def make_splits(
 ) -> TickerSplitSpec:
     frame = ticker_frame.sort_values("date").reset_index(drop=True)
     row_count = len(frame)
+    base_required_rows = seq_len + h_max
+    if row_count < base_required_rows:
+        raise ValueError("Gate A")
+
+    absolute_min_rows = absolute_min_rows_for_timeframe(timeframe)
+    if absolute_min_rows is not None and row_count < absolute_min_rows:
+        normalized_timeframe = str(timeframe).upper()
+        raise ValueError(f"insufficient_absolute_history_{normalized_timeframe}_min_{absolute_min_rows}")
+
     sample_count = _resolved_sample_count(row_count, seq_len, h_max)
     if sample_count < 1:
         raise ValueError("Gate A")
