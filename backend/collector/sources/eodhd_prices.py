@@ -3,12 +3,8 @@
 import numpy as np
 import pandas as pd
 import requests
-import yfinance as yf
 
 from backend.collector.errors import SourceLimitReachedError
-from backend.collector.sources.yf_common import prepare_yfinance
-
-prepare_yfinance()
 
 
 def _to_eodhd_symbol(ticker: str) -> str:
@@ -82,34 +78,16 @@ def fetch_ohlcv(
     allow_yahoo_fallback: bool = False,
 ) -> pd.DataFrame:
     """醫낅ぉ蹂?OHLCV瑜??쎈뒗?? 湲곕낯 ?뚯뒪??EODHD??"""
-    if eodhd_api_key:
-        frame = _fetch_eodhd_ohlcv(ticker, start_date, eodhd_api_key)
-        if not frame.empty:
-            return frame
+    from backend.collector.sources.market_data_providers import fetch_market_data
 
-    if not allow_yahoo_fallback:
-        return pd.DataFrame()
-
-    frame = yf.download(
+    result = fetch_market_data(
         ticker,
-        start=start_date,
-        progress=False,
-        auto_adjust=False,
-        threads=False,
+        start_date=start_date,
+        provider_name="eodhd",
+        fallback_provider_name="yfinance" if allow_yahoo_fallback else None,
+        eodhd_api_key=eodhd_api_key,
     )
-    if frame.empty:
-        return pd.DataFrame()
-
-    if isinstance(frame.columns, pd.MultiIndex):
-        frame.columns = frame.columns.get_level_values(0)
-
-    if "Close" in frame.columns and "Volume" in frame.columns:
-        frame["Amount"] = frame["Close"] * frame["Volume"]
-    else:
-        frame["Amount"] = 0
-
-    frame.replace([np.inf, -np.inf], None, inplace=True)
-    return frame.where(pd.notnull(frame), None)
+    return result.frame
 
 
 def attach_trailing_valuation(price_frame: pd.DataFrame, fundamentals_frame: pd.DataFrame) -> pd.DataFrame:

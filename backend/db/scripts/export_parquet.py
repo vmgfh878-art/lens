@@ -53,6 +53,11 @@ def parse_args() -> argparse.Namespace:
         help="parquet 저장 폴더",
     )
     parser.add_argument("--page-size", type=int, default=1000, help="REST 페이지 크기")
+    parser.add_argument(
+        "--confirm-egress-export",
+        action="store_true",
+        help="Supabase 대량 export egress 비용을 확인했을 때만 사용",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +106,14 @@ def export_table(table_name: str, output_dir: Path, page_size: int) -> None:
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
+    guarded_tables = {"price_data", "indicators"}
+    requested_guarded = guarded_tables.intersection(set(args.tables))
+    if requested_guarded and not args.confirm_egress_export:
+        raise SystemExit(
+            "[Error] price_data/indicators parquet export는 Supabase egress를 크게 사용할 수 있습니다. "
+            "이번 사고 대응 중에는 기존 로컬 snapshot을 우선 사용하고, 정말 필요한 경우에만 "
+            "--confirm-egress-export를 명시하세요."
+        )
 
     for table_name in args.tables:
         if table_name not in TABLE_CONFIG:

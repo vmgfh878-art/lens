@@ -17,6 +17,49 @@ load_dotenv(ROOT_DIR / ".env")
 
 RUNTIME_SCHEMA_STATEMENTS = [
     """
+    ALTER TABLE public.price_data
+    ADD COLUMN IF NOT EXISTS source VARCHAR(30);
+    """,
+    """
+    ALTER TABLE public.price_data
+    ADD COLUMN IF NOT EXISTS provider VARCHAR(30);
+    """,
+    """
+    ALTER TABLE public.price_data
+    ADD COLUMN IF NOT EXISTS provider_adjustment_policy VARCHAR(120);
+    """,
+    """
+    ALTER TABLE public.price_data
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    """,
+    """
+    ALTER TABLE public.price_data
+    ALTER COLUMN source SET DEFAULT 'eodhd';
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_price_data_source_ticker_date
+        ON public.price_data (source, ticker, date DESC);
+    """,
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'price_data_ticker_date_source_key'
+              AND conrelid = 'public.price_data'::regclass
+        ) THEN
+            ALTER TABLE public.price_data
+                ADD CONSTRAINT price_data_ticker_date_source_key
+                UNIQUE (ticker, date, source);
+        END IF;
+    END $$;
+    """,
+    """
+    ALTER TABLE public.price_data
+    DROP CONSTRAINT IF EXISTS price_data_ticker_date_key;
+    """,
+    """
     ALTER TABLE public.predictions
     ADD COLUMN IF NOT EXISTS line_series JSONB NOT NULL DEFAULT '[]'::jsonb;
     """,
@@ -54,6 +97,45 @@ RUNTIME_SCHEMA_STATEMENTS = [
     """
     ALTER TABLE public.indicators
     ADD COLUMN IF NOT EXISTS atr_ratio DOUBLE PRECISION;
+    """,
+    """
+    ALTER TABLE public.indicators
+    ADD COLUMN IF NOT EXISTS source VARCHAR(30);
+    """,
+    """
+    ALTER TABLE public.indicators
+    ADD COLUMN IF NOT EXISTS provider VARCHAR(30);
+    """,
+    """
+    ALTER TABLE public.indicators
+    ALTER COLUMN source SET DEFAULT 'eodhd';
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_indicators_source_ticker_timeframe_date
+        ON public.indicators (source, ticker, timeframe, date DESC);
+    """,
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'indicators_ticker_timeframe_date_source_key'
+              AND conrelid = 'public.indicators'::regclass
+        ) THEN
+            ALTER TABLE public.indicators
+                ADD CONSTRAINT indicators_ticker_timeframe_date_source_key
+                UNIQUE (ticker, timeframe, date, source);
+        END IF;
+    END $$;
+    """,
+    """
+    ALTER TABLE public.indicators
+    DROP CONSTRAINT IF EXISTS indicators_ticker_timeframe_date_key;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_indicators_ticker_timeframe_date
+        ON public.indicators (ticker, timeframe, date DESC);
     """,
     """
     ALTER TABLE public.indicators

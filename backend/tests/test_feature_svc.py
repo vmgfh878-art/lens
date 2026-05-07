@@ -113,6 +113,57 @@ class FeatureServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(float(weekly.iloc[0]["low"]), 49.0)
         self.assertAlmostEqual(float(weekly.iloc[0]["close"]), 50.0)
 
+    def test_resample_price_frame_drops_incomplete_week(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 8,
+                "date": pd.bdate_range("2026-04-06", periods=8),
+                "open": [100.0] * 8,
+                "high": [102.0] * 8,
+                "low": [98.0] * 8,
+                "close": [100.0] * 8,
+                "adjusted_close": [100.0] * 8,
+                "volume": [1000] * 8,
+            }
+        )
+
+        weekly = resample_price_frame(price_df, "1W")
+
+        self.assertEqual(weekly["date"].dt.strftime("%Y-%m-%d").tolist(), ["2026-04-10"])
+
+    def test_resample_price_frame_drops_incomplete_month(self):
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL"] * 12,
+                "date": pd.to_datetime(
+                    [
+                        "2026-03-20",
+                        "2026-03-23",
+                        "2026-03-24",
+                        "2026-03-25",
+                        "2026-03-26",
+                        "2026-03-27",
+                        "2026-03-30",
+                        "2026-03-31",
+                        "2026-04-01",
+                        "2026-04-02",
+                        "2026-04-03",
+                        "2026-04-06",
+                    ]
+                ),
+                "open": [100.0] * 12,
+                "high": [102.0] * 12,
+                "low": [98.0] * 12,
+                "close": [100.0] * 12,
+                "adjusted_close": [100.0] * 12,
+                "volume": [1000] * 12,
+            }
+        )
+
+        monthly = resample_price_frame(price_df, "1M")
+
+        self.assertEqual(monthly["date"].dt.strftime("%Y-%m-%d").tolist(), ["2026-03-31"])
+
     def test_resample_price_frame_rejects_invalid_adjusted_high_low(self):
         price_df = pd.DataFrame(
             {

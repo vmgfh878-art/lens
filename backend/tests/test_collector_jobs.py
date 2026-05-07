@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -13,6 +14,7 @@ from backend.collector.jobs.compute_market_breadth import _calculate_stats
 from backend.collector.jobs.compute_indicators import run as run_compute_indicators
 from backend.collector.jobs.sync_macro import resolve_macro_start_date
 from backend.collector.jobs.sync_prices import _validate_price_frame
+from backend.collector.pipelines.daily_market_sync import _build_price_coverage
 from backend.collector.readiness import summarize_indicator_counts
 
 
@@ -265,6 +267,207 @@ class CollectorJobTestCase(unittest.TestCase):
         self.assertEqual(list(result["timeframes"].keys()), ["1D"])
         build_features_mock.assert_called_once()
 
+    def test_compute_indicators_prunes_full_backfill_rows_before_upsert(self):
+        class FakeDeleteQuery:
+            def __init__(self, calls, table):
+                self.calls = calls
+                self.table = table
+                self.filters = []
+
+            def delete(self):
+                return self
+
+            def eq(self, column, value):
+                self.filters.append(("eq", column, value))
+                return self
+
+            def gte(self, column, value):
+                self.filters.append(("gte", column, value))
+                return self
+
+            def lt(self, column, value):
+                self.filters.append(("lt", column, value))
+                return self
+
+            def gt(self, column, value):
+                self.filters.append(("gt", column, value))
+                return self
+
+            def execute(self):
+                self.calls.append({"table": self.table, "filters": list(self.filters)})
+                return Mock(data=[])
+
+        class FakeClient:
+            def __init__(self):
+                self.delete_calls = []
+
+            def table(self, table):
+                return FakeDeleteQuery(self.delete_calls, table)
+
+        fake_client = FakeClient()
+        features = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL"],
+                "date": pd.to_datetime(["2024-02-01", "2024-02-02"]),
+                "timeframe": ["1D", "1D"],
+                "open_ratio": [0.01, 0.02],
+            }
+        )
+
+        def fake_fetch_frame(table, **kwargs):
+            if table == "price_data":
+                return pd.DataFrame(
+                    {
+                        "ticker": ["AAPL"],
+                        "date": ["2024-02-02"],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.0],
+                        "adjusted_close": [100.0],
+                        "volume": [1000],
+                        "amount": [100000.0],
+                        "per": [10.0],
+                        "pbr": [2.0],
+                    }
+                )
+            return pd.DataFrame()
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame), patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            return_value=features,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value={},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_client",
+            return_value=fake_client,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_records",
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            run_compute_indicators(
+                lookback_days=14,
+                tickers=["AAPL"],
+                force_full_backfill=True,
+                full_start_date="2024-01-01",
+                timeframes=["1D"],
+            )
+
+        self.assertEqual(len(fake_client.delete_calls), 1)
+        self.assertIn(("gte", "date", "2024-01-01"), fake_client.delete_calls[0]["filters"])
+        self.assertIn(("eq", "source", "eodhd"), fake_client.delete_calls[0]["filters"])
+
+    def test_compute_indicators_filters_yfinance_price_source_and_stores_source(self):
+        mixed_price_frame = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL", "AAPL"],
+                "date": ["2026-04-22", "2026-04-23", "2026-04-24"],
+                "open": [100.0, 101.0, 102.0],
+                "high": [101.0, 102.0, 103.0],
+                "low": [99.0, 100.0, 101.0],
+                "close": [100.0, 101.0, 102.0],
+                "adjusted_close": [100.0, 101.0, 102.0],
+                "volume": [1000, 1000, 1000],
+                "amount": [100000.0, 101000.0, 102000.0],
+                "per": [10.0, 10.0, 10.0],
+                "pbr": [2.0, 2.0, 2.0],
+                "source": ["eodhd", "yfinance", "yfinance"],
+                "provider": ["eodhd", "yfinance", "yfinance"],
+            }
+        )
+
+        def fake_fetch_frame(table, **kwargs):
+            if table == "price_data":
+                return mixed_price_frame.copy()
+            return pd.DataFrame()
+
+        def fake_build_features(price_df, **kwargs):
+            self.assertEqual(set(price_df["source"].dropna().tolist()), {"yfinance"})
+            return pd.DataFrame(
+                {
+                    "ticker": ["AAPL"],
+                    "date": [pd.Timestamp("2026-04-24")],
+                    "timeframe": ["1D"],
+                    "open_ratio": [0.01],
+                }
+            )
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame), patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            side_effect=fake_build_features,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value={},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_records",
+        ) as upsert_mock, patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            run_compute_indicators(
+                lookback_days=14,
+                tickers=["AAPL"],
+                timeframes=["1D"],
+                provider="yfinance",
+            )
+
+        upsert_mock.assert_called_once()
+        self.assertEqual(upsert_mock.call_args.kwargs["on_conflict"], "ticker,timeframe,date,source")
+        records = upsert_mock.call_args.args[1]
+        self.assertEqual(records[0]["source"], "yfinance")
+        self.assertEqual(records[0]["provider"], "yfinance")
+
+    def test_compute_indicators_keeps_eodhd_legacy_boundary_for_weekly_monthly(self):
+        observed_sources: list[set[object]] = []
+        mixed_price_frame = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL", "AAPL"],
+                "date": ["2026-04-10", "2026-04-17", "2026-04-24"],
+                "open": [100.0, 101.0, 102.0],
+                "high": [101.0, 102.0, 103.0],
+                "low": [99.0, 100.0, 101.0],
+                "close": [100.0, 101.0, 102.0],
+                "adjusted_close": [100.0, 101.0, 102.0],
+                "volume": [1000, 1000, 1000],
+                "amount": [100000.0, 101000.0, 102000.0],
+                "per": [10.0, 10.0, 10.0],
+                "pbr": [2.0, 2.0, 2.0],
+                "source": [None, "eodhd", "yfinance"],
+                "provider": [None, "eodhd", "yfinance"],
+            }
+        )
+
+        def fake_fetch_frame(table, **kwargs):
+            if table == "price_data":
+                return mixed_price_frame.copy()
+            return pd.DataFrame()
+
+        def fake_build_features(price_df, **kwargs):
+            observed_sources.append(set(price_df["source"].tolist()))
+            return pd.DataFrame()
+
+        with patch("backend.collector.jobs.compute_indicators.fetch_frame", side_effect=fake_fetch_frame), patch(
+            "backend.collector.jobs.compute_indicators.build_features",
+            side_effect=fake_build_features,
+        ), patch(
+            "backend.collector.jobs.compute_indicators.get_job_state_map",
+            return_value={},
+        ), patch(
+            "backend.collector.jobs.compute_indicators.upsert_job_state",
+        ):
+            run_compute_indicators(
+                lookback_days=14,
+                tickers=["AAPL"],
+                timeframes=["1W", "1M"],
+                provider="eodhd",
+            )
+
+        self.assertEqual(len(observed_sources), 2)
+        for sources in observed_sources:
+            self.assertNotIn("yfinance", sources)
+            self.assertIn("eodhd", sources)
+
     def test_compute_indicators_splits_large_ticker_queries_into_batches(self):
         observed_batches: list[list[str]] = []
 
@@ -309,6 +512,29 @@ class CollectorJobTestCase(unittest.TestCase):
             )
 
         self.assertEqual(observed_batches, [["AAPL", "MSFT"], ["NVDA"]])
+
+    def test_daily_market_sync_coverage_uses_provider_source(self):
+        def fake_get_latest_date(table, filters=None, **kwargs):
+            self.assertEqual(table, "price_data")
+            if ("eq", "source", "yfinance") in (filters or []):
+                return date(2026, 4, 24)
+            return None
+
+        def fake_fetch_frame(table, **kwargs):
+            self.assertEqual(table, "price_data")
+            filters = kwargs.get("filters") or []
+            self.assertIn(("eq", "source", "yfinance"), filters)
+            return pd.DataFrame({"ticker": ["AAPL"], "date": ["2026-04-24"], "source": ["yfinance"]})
+
+        with patch("backend.collector.pipelines.daily_market_sync.get_latest_date", side_effect=fake_get_latest_date), patch(
+            "backend.collector.pipelines.daily_market_sync.fetch_frame",
+            side_effect=fake_fetch_frame,
+        ):
+            coverage = _build_price_coverage(["AAPL", "MSFT"], provider="yfinance")
+
+        self.assertEqual(coverage["provider"], "yfinance")
+        self.assertEqual(coverage["covered"], 1)
+        self.assertEqual(coverage["missing_tickers"], ["MSFT"])
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from backend.collector.jobs.sync_sector_returns import run as run_sector_returns
 from backend.collector.pipelines.preflight import run_preflight
 from backend.collector.repositories.base import fetch_frame, get_latest_date, list_known_tickers
 from backend.collector.repositories.sync_state_repo import upsert_job_state
+from backend.collector.sources.market_data_providers import normalize_provider_name
 from backend.collector.universe import load_tickers_from_csv
 from backend.collector.utils.logging import log
 from backend.collector.utils.network import sanitize_proxy_env
@@ -45,11 +46,53 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_price_coverage(target_tickers: list[str]) -> dict:
-    latest_date = get_latest_date("price_data")
+def _latest_price_date_for_provider(provider: str):
+    provider = normalize_provider_name(provider)
+    if provider != "eodhd":
+        return get_latest_date("price_data", filters=[("eq", "source", provider)])
+    source_dates = [
+        get_latest_date("price_data", filters=[("eq", "source", "eodhd")]),
+        get_latest_date("price_data", filters=[("is", "source", "null")]),
+    ]
+    source_dates = [source_date for source_date in source_dates if source_date is not None]
+    return max(source_dates) if source_dates else None
+
+
+def _price_coverage_frames_for_provider(target_tickers: list[str], latest_date: str, provider: str) -> pd.DataFrame:
+    provider = normalize_provider_name(provider)
+    base_filters = [("eq", "date", latest_date), ("in", "ticker", target_tickers)]
+    if provider != "eodhd":
+        return fetch_frame(
+            "price_data",
+            columns="ticker,date,source",
+            filters=[*base_filters, ("eq", "source", provider)],
+            order_by="ticker",
+        )
+    frames = [
+        fetch_frame(
+            "price_data",
+            columns="ticker,date,source",
+            filters=[*base_filters, ("eq", "source", "eodhd")],
+            order_by="ticker",
+        ),
+        fetch_frame(
+            "price_data",
+            columns="ticker,date,source",
+            filters=[*base_filters, ("is", "source", "null")],
+            order_by="ticker",
+        ),
+    ]
+    frames = [frame for frame in frames if not frame.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _build_price_coverage(target_tickers: list[str], provider: str | None = None) -> dict:
+    provider_name = normalize_provider_name(provider or "eodhd")
+    latest_date = _latest_price_date_for_provider(provider_name)
     if latest_date is None:
         return {
             "latest_date": None,
+            "provider": provider_name,
             "covered": 0,
             "target_count": len(target_tickers),
             "coverage_pct": 0.0,
@@ -57,18 +100,14 @@ def _build_price_coverage(target_tickers: list[str]) -> dict:
             "missing_tickers": target_tickers[:20],
         }
 
-    frame = fetch_frame(
-        "price_data",
-        columns="ticker,date",
-        filters=[("eq", "date", latest_date.isoformat()), ("in", "ticker", target_tickers)],
-        order_by="ticker",
-    )
+    frame = _price_coverage_frames_for_provider(target_tickers, latest_date.isoformat(), provider_name)
     covered_tickers = sorted(frame["ticker"].dropna().astype(str).unique().tolist()) if not frame.empty else []
     covered_set = set(covered_tickers)
     target_set = set(target_tickers)
     coverage_pct = (len(covered_set) / len(target_tickers)) if target_tickers else 0.0
     return {
         "latest_date": latest_date.isoformat(),
+        "provider": provider_name,
         "covered": len(covered_set),
         "target_count": len(target_tickers),
         "coverage_pct": coverage_pct,
@@ -101,7 +140,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
                 raise SystemExit(f"[preflight] {preflight.message}")
             log("사전 점검 완료", event="preflight_ok", job="daily_market_sync", message_text=preflight.message)
 
-        if not settings.eodhd_api_key:
+        if settings.market_data_provider == "eodhd" and not settings.eodhd_api_key:
             raise SystemExit("EODHD_API_KEY가 없어 일일 가격 동기화를 시작할 수 없습니다.")
 
         universe_tickers = load_tickers_from_csv(settings.universe_file)
@@ -143,9 +182,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
             sleep_seconds=settings.price_sleep_seconds,
             allow_yahoo_fallback=settings.allow_yahoo_fallback,
             require_fundamentals=False,
+            provider=settings.market_data_provider,
+            fallback_provider=settings.market_data_fallback_provider,
         )
 
-        coverage = _build_price_coverage(target_tickers)
+        coverage = _build_price_coverage(target_tickers, provider=settings.market_data_provider)
         required_count = args.min_covered_tickers or math.ceil(len(target_tickers) * args.min_coverage_pct)
         coverage_ok = coverage["covered"] >= required_count
         results["coverage"] = {
@@ -181,6 +222,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, dict]:
                 run_indicators,
                 args.indicator_lookback_days,
                 target_tickers,
+                provider=settings.market_data_provider,
             )
 
         upsert_job_state(

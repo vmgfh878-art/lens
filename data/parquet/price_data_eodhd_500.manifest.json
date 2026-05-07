@@ -1,0 +1,35 @@
+{
+  "columns": [
+    "ticker",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "adjusted_close",
+    "volume",
+    "amount",
+    "source",
+    "provider",
+    "provider_adjustment_policy",
+    "updated_at"
+  ],
+  "created_at": "2026-05-06T13:57:52.508990Z",
+  "date_max": "2026-05-05",
+  "date_min": "2015-01-02",
+  "forbidden_mix_policy": "EODHD와 yfinance는 같은 parquet series에 섞지 않는다.",
+  "parquet_sha256": "ec2a134d13f840be29f4511c1c411ae51451b9317644b6db194ad18cc66fc535",
+  "provider": "eodhd",
+  "provider_adjustment_policy": "eodhd_raw_ohlc_adjusted_close_factor_v3_adjusted_ohlc",
+  "proxy_policy": {
+    "env_proxy_present": true,
+    "policy": "EODHD session에서 환경 프록시를 사용하지 않는다.",
+    "use_env_proxy": false
+  },
+  "row_count": 1387834,
+  "source": "eodhd",
+  "source_data_hash": "80dde8302f9e87befb0e60b0d666f13f863c0529a7f361a5d2d8119c50ffb9ce",
+  "ticker_count": 503,
+  "universe_path": "backend\\data\\universe\\sp500.csv",
+  "universe_ticker_count": 503
+}

@@ -67,3 +67,36 @@ class PredictionData(BaseModel):
     band_quantile_low: float | None = None
     band_quantile_high: float | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProductLineHistoryPoint(BaseModel):
+    asof_date: str
+    display_horizon: int
+    value: float
+    run_id: str
+
+
+class ProductBandHistoryPoint(BaseModel):
+    asof_date: str
+    display_horizon: int
+    lower: float
+    upper: float
+    run_id: str
+
+
+class ProductPredictionHistoryManifestSummary(BaseModel):
+    line_run_id: str | None = None
+    band_run_id: str | None = None
+    date_range: dict[str, str | None]
+    row_count: int
+
+
+class ProductPredictionHistoryResponseData(BaseModel):
+    ticker: str
+    timeframe: str
+    latest_asof_date: str | None = None
+    source: str
+    line_history: list[ProductLineHistoryPoint]
+    band_history: list[ProductBandHistoryPoint]
+    manifest_summary: ProductPredictionHistoryManifestSummary
+    empty_reason: str | None = None

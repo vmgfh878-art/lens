@@ -20,6 +20,13 @@ class RunSummary(BaseModel):
     best_val_total: float | None = None
     line_target_type: str | None = None
     band_target_type: str | None = None
+    role: str | None = None
+    feature_set: str | None = None
+    checkpoint_selection: str | None = None
+    wandb_status: str | None = None
+    deprecated_for_phase1_product_contract: bool | str | None = None
+    indicator_layer_replacement: str | None = None
+    is_legacy: bool = False
 
 
 class RunDetail(RunSummary):

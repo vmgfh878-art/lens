@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 
 import pandas as pd
 
 from backend.collector.repositories.base import fetch_frame
+from backend.collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame
 
 
 MINIMUM_ROWS_BY_TIMEFRAME = {
@@ -15,6 +17,7 @@ MINIMUM_ROWS_BY_TIMEFRAME = {
 }
 
 REQUIRED_MACRO_COLUMNS = ("us10y", "yield_spread", "vix_close", "credit_spread_hy")
+READINESS_DB_ROW_LIMIT = int(os.environ.get("LENS_READINESS_DB_ROW_LIMIT", "5000"))
 
 
 def summarize_indicator_counts(
@@ -60,22 +63,46 @@ def summarize_indicator_counts(
 
 def get_indicator_readiness(target_tickers: list[str]) -> dict:
     """DB에서 indicators 상태를 읽어 학습 준비 상태를 계산한다."""
-    frame = fetch_frame(
+    filters = [("in", "ticker", target_tickers)] if target_tickers else None
+    frame = read_snapshot_frame(
         "indicators",
         columns="ticker,timeframe,date",
-        filters=[("in", "ticker", target_tickers)] if target_tickers else None,
+        filters=filters,
         order_by="date",
     )
+    if frame is None:
+        if local_snapshots_required():
+            raise RuntimeError("로컬 snapshot 모드에서는 readiness가 Supabase indicators 대량 조회를 실행하지 않습니다.")
+        frame = fetch_frame(
+            "indicators",
+            columns="ticker,timeframe,date",
+            filters=filters,
+            order_by="date",
+            ascending=False,
+            limit=READINESS_DB_ROW_LIMIT,
+            page_size=min(READINESS_DB_ROW_LIMIT, 1000),
+        )
     return summarize_indicator_counts(frame, target_tickers)
 
 
 def get_macro_readiness() -> dict:
     """필수 거시 컬럼별 적재 범위를 요약한다."""
-    frame = fetch_frame(
+    frame = read_snapshot_frame(
         "macroeconomic_indicators",
         columns="date,us10y,yield_spread,vix_close,credit_spread_hy",
         order_by="date",
     )
+    if frame is None:
+        if local_snapshots_required():
+            raise RuntimeError("로컬 snapshot 모드에서는 readiness가 Supabase macro 대량 조회를 실행하지 않습니다.")
+        frame = fetch_frame(
+            "macroeconomic_indicators",
+            columns="date,us10y,yield_spread,vix_close,credit_spread_hy",
+            order_by="date",
+            ascending=False,
+            limit=READINESS_DB_ROW_LIMIT,
+            page_size=min(READINESS_DB_ROW_LIMIT, 1000),
+        )
     summary: dict[str, dict[str, object]] = {}
     if frame.empty:
         for column in REQUIRED_MACRO_COLUMNS:

@@ -120,7 +120,7 @@ def main() -> None:
                 settings.use_yahoo_fundamentals_baseline,
             )
         if not args.skip_prices:
-            if not settings.eodhd_api_key:
+            if settings.market_data_provider == "eodhd" and not settings.eodhd_api_key:
                 raise SystemExit("EODHD_API_KEY가 없어 가격 동기화를 시작할 수 없습니다.")
             results["prices"] = _run_step(
                 "sync_prices",
@@ -133,6 +133,8 @@ def main() -> None:
                 batch_limit=settings.price_batch_limit,
                 sleep_seconds=settings.price_sleep_seconds,
                 allow_yahoo_fallback=settings.allow_yahoo_fallback,
+                provider=settings.market_data_provider,
+                fallback_provider=settings.market_data_fallback_provider,
             )
         if not args.skip_sector:
             results["sector_returns"] = _run_step(
@@ -153,6 +155,7 @@ def main() -> None:
                 run_indicators,
                 settings.indicator_lookback_days,
                 target_tickers,
+                provider=settings.market_data_provider,
             )
 
         upsert_job_state(

@@ -29,11 +29,32 @@ CREATE TABLE IF NOT EXISTS public.price_data (
     amount          DOUBLE PRECISION,
     per             DOUBLE PRECISION,
     pbr             DOUBLE PRECISION,
+    source          VARCHAR(30) DEFAULT 'eodhd',
+    provider        VARCHAR(30),
+    provider_adjustment_policy VARCHAR(120),
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (ticker, date)
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (ticker, date, source)
 );
 CREATE INDEX IF NOT EXISTS idx_price_data_ticker_date
     ON public.price_data (ticker, date DESC);
+CREATE INDEX IF NOT EXISTS idx_price_data_source_ticker_date
+    ON public.price_data (source, ticker, date DESC);
+ALTER TABLE public.price_data ALTER COLUMN source SET DEFAULT 'eodhd';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'price_data_ticker_date_source_key'
+          AND conrelid = 'public.price_data'::regclass
+    ) THEN
+        ALTER TABLE public.price_data
+            ADD CONSTRAINT price_data_ticker_date_source_key
+            UNIQUE (ticker, date, source);
+    END IF;
+END $$;
+ALTER TABLE public.price_data DROP CONSTRAINT IF EXISTS price_data_ticker_date_key;
 
 CREATE TABLE IF NOT EXISTS public.macroeconomic_indicators (
     date                DATE PRIMARY KEY,
@@ -128,6 +149,8 @@ CREATE TABLE IF NOT EXISTS public.indicators (
     ticker           VARCHAR(20) NOT NULL REFERENCES public.stock_info(ticker),
     timeframe        VARCHAR(4) NOT NULL DEFAULT '1D' CHECK (timeframe IN ('1D', '1W', '1M')),
     date             DATE NOT NULL,
+    source           VARCHAR(30) DEFAULT 'eodhd',
+    provider         VARCHAR(30),
     log_return       DOUBLE PRECISION,
     open_ratio       DOUBLE PRECISION,
     high_ratio       DOUBLE PRECISION,
@@ -161,10 +184,29 @@ CREATE TABLE IF NOT EXISTS public.indicators (
     has_fundamentals BOOLEAN NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (ticker, timeframe, date)
+    UNIQUE (ticker, timeframe, date, source)
 );
 CREATE INDEX IF NOT EXISTS idx_indicators_ticker_timeframe_date
     ON public.indicators (ticker, timeframe, date DESC);
+CREATE INDEX IF NOT EXISTS idx_indicators_source_ticker_timeframe_date
+    ON public.indicators (source, ticker, timeframe, date DESC);
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS source VARCHAR(30);
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS provider VARCHAR(30);
+ALTER TABLE public.indicators ALTER COLUMN source SET DEFAULT 'eodhd';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'indicators_ticker_timeframe_date_source_key'
+          AND conrelid = 'public.indicators'::regclass
+    ) THEN
+        ALTER TABLE public.indicators
+            ADD CONSTRAINT indicators_ticker_timeframe_date_source_key
+            UNIQUE (ticker, timeframe, date, source);
+    END IF;
+END $$;
+ALTER TABLE public.indicators DROP CONSTRAINT IF EXISTS indicators_ticker_timeframe_date_key;
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS atr_ratio DOUBLE PRECISION;
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_label VARCHAR(20);
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS regime_calm DOUBLE PRECISION;

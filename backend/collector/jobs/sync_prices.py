@@ -8,7 +8,9 @@ import pandas as pd
 from backend.collector.errors import SourceLimitReachedError
 from backend.collector.repositories.base import fetch_frame, get_latest_date, upsert_records
 from backend.collector.repositories.sync_state_repo import get_job_state_map, upsert_job_state
-from backend.collector.sources.eodhd_prices import attach_trailing_valuation, fetch_ohlcv
+from backend.collector.sources.eodhd_prices import attach_trailing_valuation
+from backend.collector.sources.market_data_providers import fetch_market_data, normalize_provider_name, provider_adjustment_policy
+from backend.collector.sources.price_contract import validate_adjusted_ohlc_contract
 from backend.collector.utils.logging import log
 
 
@@ -16,13 +18,66 @@ EXTREME_RETURN_THRESHOLD = 0.40
 DEFAULT_DAILY_LOOKBACK_DAYS = 7
 
 
-def _get_ticker_start_date(ticker: str, default_start: str, lookback_days: int, repair_mode: bool) -> str:
+def _source_matches_provider(source: object, provider: str) -> bool:
+    if source is None or pd.isna(source):
+        return provider == "eodhd"
+    return str(source).strip().lower() == provider
+
+
+def _get_latest_date_and_source_for_provider(ticker: str, provider: str) -> tuple[date | None, object]:
+    if provider != "eodhd":
+        latest_date = get_latest_date("price_data", filters=[("eq", "ticker", ticker), ("eq", "source", provider)])
+        return latest_date, provider if latest_date is not None else None
+
+    try:
+        rows = fetch_frame(
+            "price_data",
+            columns="date,source",
+            filters=[("eq", "ticker", ticker)],
+            order_by="date",
+            ascending=False,
+            limit=1000,
+        )
+    except Exception:
+        return get_latest_date("price_data", filters=[("eq", "ticker", ticker)]), None
+
+    if rows.empty or "date" not in rows.columns:
+        return None, None
+    if "source" not in rows.columns:
+        return pd.to_datetime(rows["date"]).max().date(), None
+
+    rows = rows[rows["source"].apply(lambda value: _source_matches_provider(value, provider))]
+    if rows.empty:
+        return None, None
+    rows = rows.copy()
+    rows["date"] = pd.to_datetime(rows["date"])
+    latest_row = rows.sort_values("date", ascending=False).iloc[0]
+    return latest_row["date"].date(), latest_row.get("source")
+
+
+def _get_latest_date_for_provider(ticker: str, provider: str) -> date | None:
+    latest_date, _ = _get_latest_date_and_source_for_provider(ticker, provider)
+    return latest_date
+
+
+def _get_ticker_start_date(
+    ticker: str,
+    default_start: str,
+    lookback_days: int,
+    repair_mode: bool,
+    provider: str,
+) -> str:
     if repair_mode:
         return default_start
 
-    latest_date = get_latest_date("price_data", filters=[("eq", "ticker", ticker)])
+    latest_date, latest_source = _get_latest_date_and_source_for_provider(ticker, provider)
     if latest_date is None:
         return default_start
+
+    if provider == "eodhd" and (latest_source is None or pd.isna(latest_source)):
+        next_start = latest_date + timedelta(days=1)
+        default_start_date = date.fromisoformat(default_start)
+        return max(next_start, default_start_date).isoformat()
 
     buffered_start = latest_date - timedelta(days=lookback_days)
     default_start_date = date.fromisoformat(default_start)
@@ -103,7 +158,13 @@ def _validate_price_frame(ticker: str, frame: pd.DataFrame) -> tuple[pd.DataFram
     }
 
 
-def _build_price_records(ticker: str, frame: pd.DataFrame) -> list[dict]:
+def _build_price_records(
+    ticker: str,
+    frame: pd.DataFrame,
+    *,
+    source: str,
+    adjustment_policy: str,
+) -> list[dict]:
     records: list[dict] = []
     has_adjusted_close = "Adj Close" in frame.columns
 
@@ -129,6 +190,10 @@ def _build_price_records(ticker: str, frame: pd.DataFrame) -> list[dict]:
                 "amount": get_value("Amount", 0),
                 "per": get_value("per"),
                 "pbr": get_value("pbr"),
+                "source": source,
+                "provider": source,
+                "provider_adjustment_policy": adjustment_policy,
+                "updated_at": datetime.now().isoformat(),
             }
         )
     return records
@@ -144,9 +209,18 @@ def run(
     sleep_seconds: float = 0.3,
     allow_yahoo_fallback: bool = False,
     require_fundamentals: bool = False,
+    provider: str = "eodhd",
+    fallback_provider: str | None = None,
+    force_start_date: bool = False,
 ) -> dict:
     """일별 가격 데이터를 배치 단위로 동기화한다."""
     today = datetime.now().date().isoformat()
+    provider_name = normalize_provider_name(provider)
+    resolved_fallback_provider = (
+        normalize_provider_name(fallback_provider)
+        if fallback_provider
+        else ("yfinance" if allow_yahoo_fallback else None)
+    )
     stored_rows = 0
     skipped_tickers: list[str] = []
     processed_tickers: list[str] = []
@@ -183,25 +257,33 @@ def run(
         batch_size=len(pending_tickers),
         repair_mode=repair_mode,
         lookback_days=lookback_days,
+        provider=provider_name,
+        fallback_provider=resolved_fallback_provider,
     )
 
     for ticker in pending_tickers:
-        start_date = _get_ticker_start_date(ticker, default_start, lookback_days, repair_mode)
+        start_date = (
+            default_start
+            if force_start_date
+            else _get_ticker_start_date(ticker, default_start, lookback_days, repair_mode, provider_name)
+        )
         if not repair_mode and start_date > today:
             skipped_tickers.append(ticker)
             continue
 
         try:
-            price_frame = fetch_ohlcv(
+            fetch_result = fetch_market_data(
                 ticker,
-                start_date,
+                start_date=start_date,
                 eodhd_api_key=eodhd_api_key,
-                allow_yahoo_fallback=allow_yahoo_fallback,
+                provider_name=provider_name,
+                fallback_provider_name=resolved_fallback_provider,
             )
         except SourceLimitReachedError:
             quota_hit = True
             break
 
+        price_frame = fetch_result.frame
         if price_frame.empty:
             failed_tickers[ticker] = "source_empty"
             upsert_job_state(
@@ -209,6 +291,32 @@ def run(
                 target_key=ticker,
                 status="failed",
                 message="source_empty",
+                meta={
+                    "provider": provider_name,
+                    "fallback_provider": resolved_fallback_provider,
+                    "source_errors": fetch_result.errors,
+                },
+            )
+            continue
+
+        contract_result = validate_adjusted_ohlc_contract(ticker, price_frame)
+        if not contract_result.passed:
+            failed_tickers[ticker] = "adjusted_ohlc_contract_failed"
+            validation_issues[ticker] = {
+                "adjusted_ohlc_contract": contract_result.metrics,
+                "violations": contract_result.violations,
+            }
+            upsert_job_state(
+                job_name="sync_prices",
+                target_key=ticker,
+                status="failed",
+                message="adjusted_ohlc_contract_failed",
+                meta={
+                    "provider": fetch_result.provider,
+                    "fallback_used": fetch_result.fallback_used,
+                    "quality_gate": contract_result.metrics,
+                    "violations": contract_result.violations,
+                },
             )
             continue
 
@@ -222,7 +330,10 @@ def run(
         price_frame = attach_trailing_valuation(price_frame, fundamentals_frame)
         validated_frame, issue_summary = _validate_price_frame(ticker, price_frame)
         if any(issue_summary.values()):
-            validation_issues[ticker] = issue_summary
+            validation_issues[ticker] = {
+                "price_frame": issue_summary,
+                "adjusted_ohlc_contract": contract_result.metrics,
+            }
 
         if validated_frame.empty:
             failed_tickers[ticker] = "all_rows_rejected_by_quality_gate"
@@ -231,12 +342,23 @@ def run(
                 target_key=ticker,
                 status="failed",
                 message="all_rows_rejected_by_quality_gate",
-                meta=issue_summary,
+                meta={
+                    "provider": fetch_result.provider,
+                    "fallback_used": fetch_result.fallback_used,
+                    "price_frame": issue_summary,
+                    "adjusted_ohlc_contract": contract_result.metrics,
+                },
             )
             continue
 
-        records = _build_price_records(ticker, validated_frame)
-        upsert_records("price_data", records, on_conflict="ticker,date")
+        record_source = fetch_result.provider or provider_name
+        records = _build_price_records(
+            ticker,
+            validated_frame,
+            source=record_source,
+            adjustment_policy=provider_adjustment_policy(record_source),
+        )
+        upsert_records("price_data", records, on_conflict="ticker,date,source")
         stored_rows += len(records)
         processed_tickers.append(ticker)
 
@@ -247,7 +369,14 @@ def run(
             status="success",
             last_cursor_date=date.fromisoformat(last_date) if last_date else None,
             message=f"stored={len(records)}",
-            meta={"quality_gate": issue_summary},
+            meta={
+                "provider": fetch_result.provider,
+                "requested_provider": provider_name,
+                "fallback_provider": resolved_fallback_provider,
+                "fallback_used": fetch_result.fallback_used,
+                "quality_gate": issue_summary,
+                "adjusted_ohlc_contract": contract_result.metrics,
+            },
         )
         time.sleep(sleep_seconds)
 
@@ -263,6 +392,8 @@ def run(
             "processed": processed_tickers[:20],
             "failed": failed_tickers,
             "validation_issues": validation_issues,
+            "provider": provider_name,
+            "fallback_provider": resolved_fallback_provider,
         },
     )
     return {
@@ -274,4 +405,6 @@ def run(
         "quota_hit": quota_hit,
         "pending_batch": len(pending_tickers),
         "eligible_fundamentals": len(available_fundamentals),
+        "provider": provider_name,
+        "fallback_provider": resolved_fallback_provider,
     }

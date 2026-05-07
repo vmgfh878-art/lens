@@ -1,0 +1,33 @@
+{
+  "asof_end": "2026-05-04",
+  "asof_start": "2025-05-05",
+  "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+  "contract": "docs/product_prediction_history_contract.md",
+  "created_at": "2026-05-06T04:45:50.017134Z",
+  "display_horizon": 5,
+  "feature_version": "v3_adjusted_ohlc",
+  "input_indicator_hash": "ffce024591d57c5a2730101757ac03d2110352097e1242e8195556309db3f871",
+  "input_price_hash": "6f6527c791a2db96c5c8bc52c07be4ac7900374d8a2c0c47ac018eb9399efad7",
+  "line_run_id": "patchtst-1D-efad3c29d803",
+  "model_feature_hash": "f1a00036",
+  "output_parquet": "data\\parquet\\product_prediction_history_1D.parquet",
+  "provider": "yfinance",
+  "provider_adjustment_policy": "yfinance_auto_adjust_false_adj_close_factor_v3_adjusted_ohlc",
+  "role_counts": {
+    "band": 1255,
+    "line": 1255
+  },
+  "row_count": 2510,
+  "schema_version": "product_prediction_history_manifest_v1",
+  "source": "rolling_replay",
+  "source_data_hash": "f1a00036",
+  "ticker_count": 5,
+  "tickers": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "TSLA",
+    "NFLX"
+  ],
+  "timeframe": "1D"
+}

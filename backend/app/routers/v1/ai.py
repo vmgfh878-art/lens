@@ -12,6 +12,7 @@ from app.repositories.ai_repo import (
     fetch_model_runs,
     fetch_run_backtests,
     fetch_run_evaluations,
+    is_legacy_composite_run,
 )
 from app.schemas.ai import BacktestSummary, EvaluationSummary, RunDetail, RunSummary
 from app.schemas.common import ApiResponse, ErrorResponse
@@ -23,6 +24,7 @@ CONFIG_SUMMARY_KEYS = (
     "seq_len",
     "patch_len",
     "stride",
+    "patch_stride",
     "d_model",
     "n_heads",
     "n_layers",
@@ -32,6 +34,12 @@ CONFIG_SUMMARY_KEYS = (
     "batch_size",
     "epochs",
     "seed",
+    "feature_set",
+    "checkpoint_selection",
+    "q_low",
+    "q_high",
+    "lambda_band",
+    "wandb_status",
     "ci_aggregate",
     "ci_target_fast",
     "band_mode",
@@ -41,6 +49,11 @@ CONFIG_SUMMARY_KEYS = (
     "band_calibration_method",
     "band_calibration_params",
     "prediction_composition_version",
+    "role",
+    "deprecated_for_phase1_product_contract",
+    "indicator_layer_replacement",
+    "line_model_name",
+    "band_model_name",
 )
 
 
@@ -71,6 +84,15 @@ def _first_value(row: dict[str, Any], key: str, *fallbacks: dict[str, Any]) -> A
     return None
 
 
+def _normalize_wandb_status(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        status = value.get("status")
+        return str(status) if status is not None else None
+    return None
+
+
 def _build_run_summary(row: dict[str, Any]) -> dict[str, Any]:
     config = _as_dict(row.get("config"))
     val_metrics = _as_dict(row.get("val_metrics"))
@@ -91,11 +113,20 @@ def _build_run_summary(row: dict[str, Any]) -> dict[str, Any]:
         "best_val_total": best_val_total if best_val_total is not None else _first_value(row, "best_val_loss", config),
         "line_target_type": _first_value(row, "line_target_type", config),
         "band_target_type": _first_value(row, "band_target_type", config),
+        "role": _first_value(row, "role", config),
+        "feature_set": _first_value(row, "feature_set", config),
+        "checkpoint_selection": _first_value(row, "checkpoint_selection", config),
+        "wandb_status": _normalize_wandb_status(_first_value(row, "wandb_status", config)),
+        "deprecated_for_phase1_product_contract": _first_value(row, "deprecated_for_phase1_product_contract", config),
+        "indicator_layer_replacement": _first_value(row, "indicator_layer_replacement", config),
+        "is_legacy": is_legacy_composite_run(row),
     }
 
 
 def _build_config_summary(config: dict[str, Any]) -> dict[str, Any]:
-    return {key: _json_safe(config.get(key)) for key in CONFIG_SUMMARY_KEYS}
+    summary = {key: _json_safe(config.get(key)) for key in CONFIG_SUMMARY_KEYS}
+    summary["wandb_status"] = _normalize_wandb_status(config.get("wandb_status"))
+    return summary
 
 
 def _build_run_detail(row: dict[str, Any], *, include_config: bool) -> dict[str, Any]:
@@ -170,6 +201,7 @@ def list_ai_runs(
     model_name: str | None = Query(default="patchtst", description="모델 이름"),
     timeframe: str | None = Query(default=None, description="타임프레임"),
     status: str | None = Query(default="completed", description="run 상태"),
+    include_legacy: bool = Query(default=False, description="legacy composite run 포함 여부"),
     limit: int = Query(default=20, ge=1, le=100, description="반환할 최대 run 수"),
     offset: int = Query(default=0, ge=0, description="조회 시작 위치"),
 ):
@@ -178,9 +210,12 @@ def list_ai_runs(
         model_name=model_name,
         timeframe=timeframe,
         status=resolved_status,
+        include_legacy=include_legacy,
         limit=limit,
         offset=offset,
     )
+    if not include_legacy:
+        rows = [row for row in rows if not is_legacy_composite_run(row)]
     return success_response(request, [_build_run_summary(row) for row in rows], total=len(rows))
 
 
