@@ -3,7 +3,8 @@ param(
     [string]$CurrentDate = (Get-Date).ToString("yyyy-MM-dd"),
     [int]$LookbackDays = 10,
     [string]$MetricsPath = "docs/cp134_local_daily_update_pipeline_metrics.json",
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Apply
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +17,7 @@ $env:LENS_REQUIRE_LOCAL_SNAPSHOTS = "1"
 $env:LENS_LOCAL_SNAPSHOT_DIR = "C:\Users\user\lens\data\parquet"
 $env:WANDB_MODE = "disabled"
 
-# yfinance 호출이 로컬 차단용 프록시로 빠지지 않도록 daily wrapper에서도 정리한다.
+# 로컬 차단 프록시가 yfinance 호출을 빈 응답으로 오인하게 만들지 않도록 제거한다.
 foreach ($proxyKey in @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")) {
     $proxyValue = [Environment]::GetEnvironmentVariable($proxyKey)
     if ($proxyValue -and $proxyValue.Contains("127.0.0.1:9")) {
@@ -24,9 +25,8 @@ foreach ($proxyKey in @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", 
     }
 }
 
-if (-not $DryRun) {
-    Write-Host "CP134 기준으로 이 wrapper는 아직 dry-run 전용입니다. 실제 append/upload는 별도 승인 CP에서만 실행하세요."
-    Write-Host "dry-run 실행으로 전환합니다."
+if ($Apply -and $DryRun) {
+    throw "-Apply와 -DryRun은 동시에 사용할 수 없습니다."
 }
 
 $argsList = @(
@@ -37,5 +37,13 @@ $argsList = @(
     "--tickers"
 )
 $argsList += $Tickers
+
+if ($Apply) {
+    Write-Host "명시적 -Apply가 감지되어 yfinance local parquet actual append gate를 엽니다."
+    $argsList += "--apply"
+} else {
+    Write-Host "기본값은 dry-run입니다. 실제 append는 .\scripts\run_local_daily_update.ps1 -Apply 로만 실행됩니다."
+    $argsList += "--dry-run"
+}
 
 .\.venv\Scripts\python.exe @argsList

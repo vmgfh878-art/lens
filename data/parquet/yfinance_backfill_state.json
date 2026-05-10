@@ -1,0 +1,148 @@
+{
+  "provider": "yfinance",
+  "runs": [
+    {
+      "apply_requested": false,
+      "completed_append_candidate_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "completed_append_candidate_rows": 20,
+      "created_at": "2026-05-10T13:37:46.636166Z",
+      "current_date": "2026-05-10",
+      "daily_update_state": "append_ready_but_apply_required",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "BLOCKED_ACTUAL_APPEND_NOT_ENABLED",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
+    },
+    {
+      "apply_requested": true,
+      "completed_append_candidate_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "completed_append_candidate_rows": 20,
+      "created_at": "2026-05-10T13:39:39.955548Z",
+      "current_date": "2026-05-10",
+      "daily_update_state": "append_done",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "PASS_APPEND_DONE",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
+    },
+    {
+      "apply_requested": false,
+      "completed_append_candidate_dates": [],
+      "completed_append_candidate_rows": 0,
+      "created_at": "2026-05-10T13:42:06.940151Z",
+      "current_date": "2026-05-10",
+      "daily_update_state": "no_new_rows",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "PASS_WITH_NO_NEW_DAY",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
+    }
+  ],
+  "source": "yfinance",
+  "tickers": {
+    "AAPL": {
+      "completed_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "consecutive_fail_count": 0,
+      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_error_type": null,
+      "last_success_at": "2026-05-10T13:42:06.940151Z",
+      "latest_local_date": "2026-05-08",
+      "next_retry_after": null,
+      "remaining_dates": []
+    },
+    "MSFT": {
+      "completed_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "consecutive_fail_count": 0,
+      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_error_type": null,
+      "last_success_at": "2026-05-10T13:42:06.940151Z",
+      "latest_local_date": "2026-05-08",
+      "next_retry_after": null,
+      "remaining_dates": []
+    },
+    "NFLX": {
+      "completed_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "consecutive_fail_count": 0,
+      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_error_type": null,
+      "last_success_at": "2026-05-10T13:42:06.940151Z",
+      "latest_local_date": "2026-05-08",
+      "next_retry_after": null,
+      "remaining_dates": []
+    },
+    "NVDA": {
+      "completed_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "consecutive_fail_count": 0,
+      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_error_type": null,
+      "last_success_at": "2026-05-10T13:42:06.940151Z",
+      "latest_local_date": "2026-05-08",
+      "next_retry_after": null,
+      "remaining_dates": []
+    },
+    "TSLA": {
+      "completed_dates": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08"
+      ],
+      "consecutive_fail_count": 0,
+      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_error_type": null,
+      "last_success_at": "2026-05-10T13:42:06.940151Z",
+      "latest_local_date": "2026-05-08",
+      "next_retry_after": null,
+      "remaining_dates": []
+    }
+  },
+  "updated_at": "2026-05-10T13:42:06.940151Z"
+}

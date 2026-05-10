@@ -16,9 +16,108 @@ from backend.collector.jobs.sync_macro import resolve_macro_start_date
 from backend.collector.jobs.sync_prices import _validate_price_frame
 from backend.collector.pipelines.daily_market_sync import _build_price_coverage
 from backend.collector.readiness import summarize_indicator_counts
+from backend.collector.sources.market_data_providers import MarketDataFetchResult
+from scripts.cp134_local_daily_update_rehearsal import (
+    classify_fetch_errors,
+    completed_price_update_dry_run,
+    validate_yfinance_price_snapshot,
+)
 
 
 class CollectorJobTestCase(unittest.TestCase):
+    def test_daily_append_gate_classifies_yahoo_429(self):
+        state = classify_fetch_errors(["yfinance:Exception:HTTP 429 Too Many Requests"])
+
+        self.assertEqual(state, "BLOCKED_YAHOO_429")
+
+    def test_daily_append_gate_validates_yfinance_source_contract(self):
+        frame = pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "date": pd.to_datetime(["2026-05-04"]),
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "adjusted_close": [101.0],
+                "volume": [1000],
+                "source": ["yfinance"],
+                "provider": ["yfinance"],
+            }
+        )
+
+        result = validate_yfinance_price_snapshot(frame)
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["duplicate_ticker_date_source"], 0)
+        self.assertEqual(result["adjusted_ohlc_violation_count"], 0)
+
+    def test_daily_append_gate_blocks_duplicate_ticker_date_source(self):
+        frame = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL"],
+                "date": pd.to_datetime(["2026-05-04", "2026-05-04"]),
+                "open": [100.0, 100.0],
+                "high": [102.0, 102.0],
+                "low": [99.0, 99.0],
+                "close": [101.0, 101.0],
+                "adjusted_close": [101.0, 101.0],
+                "volume": [1000, 1000],
+                "source": ["yfinance", "yfinance"],
+                "provider": ["yfinance", "yfinance"],
+            }
+        )
+
+        result = validate_yfinance_price_snapshot(frame)
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["duplicate_ticker_date_source"], 1)
+
+    def test_daily_append_gate_allows_partial_append_ready(self):
+        local_price = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "MSFT"],
+                "date": pd.to_datetime(["2026-05-04", "2026-05-04"]),
+                "open": [100.0, 200.0],
+                "high": [101.0, 201.0],
+                "low": [99.0, 199.0],
+                "close": [100.0, 200.0],
+                "adjusted_close": [100.0, 200.0],
+                "volume": [1000, 1000],
+                "source": ["yfinance", "yfinance"],
+                "provider": ["yfinance", "yfinance"],
+            }
+        )
+        provider_frame = pd.DataFrame(
+            {
+                "Open": [101.0],
+                "High": [102.0],
+                "Low": [100.0],
+                "Close": [101.5],
+                "Adj Close": [101.5],
+                "Volume": [1200],
+                "Amount": [121800.0],
+            },
+            index=pd.to_datetime(["2026-05-05"]),
+        )
+        provider_frame.attrs["fetch_method"] = "yahoo_chart"
+
+        def fake_fetch_market_data(ticker, **kwargs):
+            if ticker == "AAPL":
+                return MarketDataFetchResult("AAPL", "yfinance", "yfinance", provider_frame)
+            return MarketDataFetchResult("MSFT", "yfinance", None, pd.DataFrame(), errors=["yfinance:empty"])
+
+        with patch("scripts.cp134_local_daily_update_rehearsal.load_parquet", return_value=local_price), patch(
+            "scripts.cp134_local_daily_update_rehearsal.fetch_market_data",
+            side_effect=fake_fetch_market_data,
+        ):
+            completed_rows, metrics = completed_price_update_dry_run(["AAPL", "MSFT"], date(2026, 5, 6), 2)
+
+        self.assertEqual(metrics["status"], "APPEND_READY_PARTIAL")
+        self.assertEqual(metrics["append_candidate_tickers"], ["AAPL"])
+        self.assertEqual(metrics["failed_tickers"], ["MSFT"])
+        self.assertEqual(len(completed_rows), 1)
+
     def test_validate_price_frame_rejects_invalid_ohlc_and_zero_volume(self):
         frame = pd.DataFrame(
             [

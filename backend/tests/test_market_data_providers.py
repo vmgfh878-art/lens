@@ -15,7 +15,12 @@ from backend.collector.config import get_settings
 from backend.collector.jobs import sync_prices
 from backend.collector.jobs.sync_prices import _build_price_records
 from backend.collector.pipelines.yfinance_price_sync import load_baseline_price_frame, run_dry_run_compare
-from backend.collector.sources.market_data_providers import MarketDataFetchResult, YFinancePriceProvider, provider_adjustment_policy
+from backend.collector.sources.market_data_providers import (
+    MarketDataFetchResult,
+    YFinancePriceProvider,
+    fetch_market_data,
+    provider_adjustment_policy,
+)
 from backend.collector.sources.price_contract import validate_adjusted_ohlc_contract
 
 
@@ -36,7 +41,7 @@ class MarketDataProviderTestCase(unittest.TestCase):
     def test_yfinance_provider_uses_raw_ohlc_and_adjusted_close(self):
         source_frame = self._sample_provider_frame()
         with patch("backend.collector.sources.market_data_providers.yf.download", return_value=source_frame) as mock_download:
-            frame = YFinancePriceProvider().fetch_daily(
+            frame = YFinancePriceProvider(enable_direct_chart_fallback=False).fetch_daily(
                 "AAPL",
                 start_date="2026-01-01",
                 end_date="2026-01-06",
@@ -49,6 +54,70 @@ class MarketDataProviderTestCase(unittest.TestCase):
         self.assertFalse(kwargs["auto_adjust"])
         self.assertFalse(kwargs["actions"])
         self.assertFalse(kwargs["threads"])
+
+    def test_yfinance_provider_retries_empty_response(self):
+        source_frame = self._sample_provider_frame()
+        with patch(
+            "backend.collector.sources.market_data_providers.yf.download",
+            side_effect=[pd.DataFrame(), source_frame],
+        ) as mock_download, patch("backend.collector.sources.market_data_providers.time.sleep") as sleep_mock:
+            frame = YFinancePriceProvider(max_retries=1, retry_sleep_seconds=0, enable_direct_chart_fallback=False).fetch_daily(
+                "AAPL",
+                start_date="2026-01-01",
+                end_date="2026-01-06",
+            )
+
+        self.assertFalse(frame.empty)
+        self.assertEqual(mock_download.call_count, 2)
+        sleep_mock.assert_called_once()
+
+    def test_yfinance_provider_uses_direct_chart_when_download_empty(self):
+        source_frame = self._sample_provider_frame()
+        with patch(
+            "backend.collector.sources.market_data_providers.yf.download",
+            return_value=pd.DataFrame(),
+        ), patch(
+            "backend.collector.sources.market_data_providers.fetch_yahoo_chart_frame",
+            return_value=source_frame.assign(Amount=source_frame["Close"] * source_frame["Volume"]),
+        ) as direct_mock, patch("backend.collector.sources.market_data_providers.time.sleep"):
+            frame = YFinancePriceProvider(max_retries=0).fetch_daily(
+                "AAPL",
+                start_date="2026-01-01",
+                end_date="2026-01-06",
+            )
+
+        self.assertFalse(frame.empty)
+        direct_mock.assert_called_once()
+        self.assertEqual(frame.attrs["fetch_method"], "yahoo_chart")
+        self.assertEqual(frame.attrs["market_data_provider"], "yfinance")
+
+    def test_yfinance_direct_chart_frame_satisfies_adjusted_contract(self):
+        source_frame = self._sample_provider_frame()
+        source_frame.attrs["fetch_method"] = "yahoo_chart"
+
+        result = validate_adjusted_ohlc_contract("AAPL", source_frame)
+
+        self.assertTrue(result.passed)
+
+    def test_yfinance_fetch_without_fallback_keeps_eodhd_unused(self):
+        source_frame = self._sample_provider_frame()
+        source_frame.attrs["fetch_method"] = "yahoo_chart"
+        with patch(
+            "backend.collector.sources.market_data_providers.YFinancePriceProvider.fetch_daily",
+            return_value=source_frame,
+        ), patch("backend.collector.sources.market_data_providers.EodhdPriceProvider.fetch_daily") as eodhd_mock:
+            result = fetch_market_data(
+                "AAPL",
+                start_date="2026-01-01",
+                end_date="2026-01-06",
+                provider_name="yfinance",
+                fallback_provider_name=None,
+                eodhd_api_key=None,
+            )
+
+        self.assertFalse(result.frame.empty)
+        self.assertFalse(result.fallback_used)
+        eodhd_mock.assert_not_called()
 
     def test_adjusted_ohlc_contract_accepts_split_like_raw_move(self):
         result = validate_adjusted_ohlc_contract("AAPL", self._sample_provider_frame())

@@ -1,0 +1,15 @@
+{
+  "checksum": "12b33723c6c3ccba",
+  "created_at": "2026-05-10T13:39:33.141980Z",
+  "date_max": "2026-05-08",
+  "date_min": "2015-03-30",
+  "kind": "indicators",
+  "last_refresh_rows": 20,
+  "path": "data\\parquet\\indicators_yfinance_1D.parquet",
+  "provider": "yfinance",
+  "provider_adjustment_policy": "yfinance_auto_adjust_false_adj_close_factor_v3_adjusted_ohlc",
+  "row_count": 279025,
+  "source": "yfinance",
+  "ticker_count": 100,
+  "timeframe": "1D"
+}

@@ -1,0 +1,533 @@
+{
+  "actual_append": {
+    "apply_requested": false,
+    "indicator_refresh": {
+      "executed": false,
+      "reason": "dry_run_default"
+    },
+    "price_append": {
+      "executed": false,
+      "reason": "dry_run_default"
+    }
+  },
+  "backfill_state_update": {
+    "apply_requested": false,
+    "completed_append_candidate_dates": [
+      "2026-05-05",
+      "2026-05-06",
+      "2026-05-07",
+      "2026-05-08"
+    ],
+    "completed_append_candidate_rows": 20,
+    "created_at": "2026-05-10T13:37:46.636166Z",
+    "current_date": "2026-05-10",
+    "daily_update_state": "append_ready_but_apply_required",
+    "failed_tickers": [],
+    "fallback_used_count": 0,
+    "status": "BLOCKED_ACTUAL_APPEND_NOT_ENABLED",
+    "successful_tickers": [
+      "AAPL",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ]
+  },
+  "context_update_dry_run": {
+    "fundamentals": {
+      "date_max": "2026-03-31",
+      "date_min": "2017-10-29",
+      "empty_ticker_count": 0,
+      "new_rows_vs_local_context_for_rehearsal_tickers": 0,
+      "requested_tickers": 5,
+      "row_count": 60,
+      "status": "PASS",
+      "success_ticker_count": 5,
+      "ticker_metrics_sample": {
+        "AAPL": {
+          "elapsed_seconds": 0.771,
+          "rows": 12,
+          "status": "PASS"
+        },
+        "MSFT": {
+          "elapsed_seconds": 0.555,
+          "rows": 12,
+          "status": "PASS"
+        },
+        "NFLX": {
+          "elapsed_seconds": 0.477,
+          "rows": 12,
+          "status": "PASS"
+        },
+        "NVDA": {
+          "elapsed_seconds": 0.575,
+          "rows": 12,
+          "status": "PASS"
+        },
+        "TSLA": {
+          "elapsed_seconds": 0.464,
+          "rows": 12,
+          "status": "PASS"
+        }
+      },
+      "update_policy": "daily lightweight check for target tickers; weekly or filing-alert based broader SEC refresh"
+    },
+    "macro": {
+      "existing_latest_date": "2026-05-04",
+      "fetch_status": "PASS",
+      "fetched_date_max": "2026-05-07",
+      "fetched_date_min": "1976-06-01",
+      "fetched_rows": 13039,
+      "new_dates_not_in_local_context": [
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07"
+      ],
+      "update_policy": "append/update local context parquet only when FRED observation changes"
+    },
+    "market_breadth": {
+      "candidate_checksum": "c6070a2692ab9c01",
+      "date_max": "2026-05-01",
+      "date_min": "2015-10-16",
+      "existing_checksum": "c6070a2692ab9c01",
+      "min_ticker_count": 50,
+      "non_zero_rate": {
+        "ma200_pct": 1.0,
+        "nh_nl_index": 0.9184905660377358
+      },
+      "rows": 2650,
+      "source_policy": "100 ticker local yfinance universe breadth, not full-market breadth",
+      "status": "PASS",
+      "update_policy": "recompute from local yfinance price universe after price append"
+    },
+    "sector_returns": {
+      "candidate_checksum": "a25c94afc48ed1c8",
+      "date_max": "2026-05-08",
+      "date_min": "2015-01-05",
+      "existing_checksum": "f911566bf2107a42",
+      "model_feature_inclusion": false,
+      "note": "현재 MODEL_FEATURE_COLUMNS에는 sector_returns가 포함되지 않음",
+      "rows": 31338,
+      "sector_count": 11,
+      "status": "PASS",
+      "update_policy": "recompute from local yfinance price universe after price append"
+    }
+  },
+  "cp": "CP134-DG",
+  "created_at": "2026-05-10T13:37:44.396609Z",
+  "environment": {
+    "EODHD_API_KEY_SET": false,
+    "LENS_DATA_BACKEND": "local",
+    "LENS_LOCAL_SNAPSHOT_DIR": "C:\\Users\\user\\lens\\data\\parquet",
+    "LENS_REQUIRE_LOCAL_SNAPSHOTS": "1",
+    "MARKET_DATA_FALLBACK_PROVIDER": "",
+    "MARKET_DATA_PROVIDER": "yfinance"
+  },
+  "final_decision": {
+    "failures": [],
+    "status": "BLOCKED_ACTUAL_APPEND_NOT_ENABLED",
+    "summary": "신규 완료 거래일 후보가 있지만 -Apply가 없어 actual append를 막았다. 실제 실행은 .\\scripts\\run_local_daily_update.ps1 -Apply 로만 가능하다.",
+    "warnings": [
+      "actual append candidate exists but -Apply was not specified",
+      "no new SEC filing rows for rehearsal tickers",
+      "product inference/thin upload left as dry-run boundary"
+    ]
+  },
+  "forbidden_actions_observed": {
+    "db_row_delete_update": false,
+    "eodhd_call": false,
+    "frontend_modify": false,
+    "full_inference_save": false,
+    "model_training": false,
+    "supabase_bulk_read": false,
+    "supabase_price_data_indicators_context_bulk_write": false
+  },
+  "indicator_refresh_dry_run": {
+    "1D": {
+      "candidate_checksum": "1f5385b2964e2874",
+      "candidate_date_max": "2026-05-08",
+      "candidate_rows": 279025,
+      "checksum_would_change": true,
+      "current_checksum": "08158c217c672a6e",
+      "current_date_max": "2026-05-04",
+      "current_rows": 279005,
+      "feature_non_finite_count": 0,
+      "timeframe": "1D"
+    },
+    "1M": {
+      "policy": "skip in CP134 daily pipeline; price-only or separate monthly completed-period refresh"
+    },
+    "1W": {
+      "candidate_checksum": "4c8b82b181d4d11b",
+      "candidate_date_max": "2026-05-08",
+      "candidate_rows": 53305,
+      "checksum_would_change": true,
+      "current_checksum": "b83cb84767f8c357",
+      "current_date_max": "2026-05-01",
+      "current_rows": 53300,
+      "feature_non_finite_count": 0,
+      "latest_complete_week_end": "2026-05-08",
+      "partial_week_rows": 0,
+      "timeframe": "1W"
+    },
+    "dry_run_only": true
+  },
+  "price_update_dry_run": {
+    "append_candidate_tickers": [
+      "AAPL",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ],
+    "apply_blocked_candidate_status": "APPEND_READY",
+    "candidate_duplicate_count": 0,
+    "completed_append_candidate_dates": [
+      "2026-05-05",
+      "2026-05-06",
+      "2026-05-07",
+      "2026-05-08"
+    ],
+    "completed_append_candidate_rows": 20,
+    "contract_failures": [],
+    "current_date_gate": "2026-05-10",
+    "daily_update_state": "append_ready_but_apply_required",
+    "dry_run_only": true,
+    "empty_fetch_count": 0,
+    "empty_fetch_tickers": [],
+    "failed_tickers": [],
+    "fallback_used_count": 0,
+    "fetch_end_date": "2026-05-10",
+    "fetch_failed_tickers": [],
+    "fetch_start_date": "2026-04-27",
+    "partial_append_ready": false,
+    "remaining_business_dates_estimate": [
+      "2026-05-05",
+      "2026-05-06",
+      "2026-05-07",
+      "2026-05-08"
+    ],
+    "snapshot_latest_date": "2026-05-04",
+    "status": "BLOCKED_ACTUAL_APPEND_NOT_ENABLED",
+    "successful_fetch_tickers": [
+      "AAPL",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ],
+    "ticker_metrics": {
+      "AAPL": {
+        "adjusted_ohlc_contract_passed": true,
+        "adjusted_ohlc_violations": [],
+        "completed_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "completed_rows": 4,
+        "fallback_used": false,
+        "fetch_method": "yahoo_chart",
+        "fetched_date_max": "2026-05-08",
+        "fetched_date_min": "2026-04-27",
+        "fetched_rows": 10,
+        "new_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "new_rows": 4,
+        "partial_excluded_dates": [],
+        "partial_excluded_rows": 0,
+        "provider": "yfinance",
+        "status": "PASS",
+        "yahoo_chart_host": "query1.finance.yahoo.com"
+      },
+      "MSFT": {
+        "adjusted_ohlc_contract_passed": true,
+        "adjusted_ohlc_violations": [],
+        "completed_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "completed_rows": 4,
+        "fallback_used": false,
+        "fetch_method": "yahoo_chart",
+        "fetched_date_max": "2026-05-08",
+        "fetched_date_min": "2026-04-27",
+        "fetched_rows": 10,
+        "new_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "new_rows": 4,
+        "partial_excluded_dates": [],
+        "partial_excluded_rows": 0,
+        "provider": "yfinance",
+        "status": "PASS",
+        "yahoo_chart_host": "query1.finance.yahoo.com"
+      },
+      "NFLX": {
+        "adjusted_ohlc_contract_passed": true,
+        "adjusted_ohlc_violations": [],
+        "completed_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "completed_rows": 4,
+        "fallback_used": false,
+        "fetch_method": "yahoo_chart",
+        "fetched_date_max": "2026-05-08",
+        "fetched_date_min": "2026-04-27",
+        "fetched_rows": 10,
+        "new_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "new_rows": 4,
+        "partial_excluded_dates": [],
+        "partial_excluded_rows": 0,
+        "provider": "yfinance",
+        "status": "PASS",
+        "yahoo_chart_host": "query1.finance.yahoo.com"
+      },
+      "NVDA": {
+        "adjusted_ohlc_contract_passed": true,
+        "adjusted_ohlc_violations": [],
+        "completed_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "completed_rows": 4,
+        "fallback_used": false,
+        "fetch_method": "yahoo_chart",
+        "fetched_date_max": "2026-05-08",
+        "fetched_date_min": "2026-04-27",
+        "fetched_rows": 10,
+        "new_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "new_rows": 4,
+        "partial_excluded_dates": [],
+        "partial_excluded_rows": 0,
+        "provider": "yfinance",
+        "status": "PASS",
+        "yahoo_chart_host": "query1.finance.yahoo.com"
+      },
+      "TSLA": {
+        "adjusted_ohlc_contract_passed": true,
+        "adjusted_ohlc_violations": [],
+        "completed_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "completed_rows": 4,
+        "fallback_used": false,
+        "fetch_method": "yahoo_chart",
+        "fetched_date_max": "2026-05-08",
+        "fetched_date_min": "2026-04-27",
+        "fetched_rows": 10,
+        "new_dates": [
+          "2026-05-05",
+          "2026-05-06",
+          "2026-05-07",
+          "2026-05-08"
+        ],
+        "new_rows": 4,
+        "partial_excluded_dates": [],
+        "partial_excluded_rows": 0,
+        "provider": "yfinance",
+        "status": "PASS",
+        "yahoo_chart_host": "query1.finance.yahoo.com"
+      }
+    },
+    "tickers": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "TSLA",
+      "NFLX"
+    ],
+    "total_fetched_rows": 50,
+    "total_new_rows": 20,
+    "total_partial_excluded_rows": 0,
+    "yahoo_429_tickers": []
+  },
+  "product_and_scanner_plan": {
+    "product_inference": {
+      "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+      "execution_in_cp134": "SKIPPED_DRY_RUN_ONLY",
+      "forbidden": [
+        "ai.inference --save bulk",
+        "composite save",
+        "prediction history bulk upload"
+      ],
+      "line_run_id": "patchtst-1D-efad3c29d803",
+      "required_storage_contract": "product_latest_only",
+      "required_storage_helper": "save_product_latest_predictions",
+      "thin_upload_target_rows_for_5_tickers": {
+        "prediction_evaluations": 10,
+        "predictions": 10
+      }
+    },
+    "rolling_history": {
+      "current_snapshot": {
+        "bytes": 40394,
+        "date_max": null,
+        "date_min": null,
+        "duplicate_count": 0,
+        "exists": true,
+        "path": "data\\parquet\\product_prediction_history_1D.parquet",
+        "rows": 2510,
+        "source_values": [
+          "rolling_replay"
+        ],
+        "ticker_count": 5
+      },
+      "daily_policy": "latest product forecast와 별개로 rolling replay는 별도 주기 또는 별도 CP에서 갱신",
+      "manifest": {
+        "asof_end": "2026-05-04",
+        "asof_start": "2025-05-05",
+        "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+        "contract": "docs/product_prediction_history_contract.md",
+        "created_at": "2026-05-06T04:45:50.017134Z",
+        "display_horizon": 5,
+        "feature_version": "v3_adjusted_ohlc",
+        "input_indicator_hash": "ffce024591d57c5a2730101757ac03d2110352097e1242e8195556309db3f871",
+        "input_price_hash": "6f6527c791a2db96c5c8bc52c07be4ac7900374d8a2c0c47ac018eb9399efad7",
+        "line_run_id": "patchtst-1D-efad3c29d803",
+        "model_feature_hash": "f1a00036",
+        "output_parquet": "data\\parquet\\product_prediction_history_1D.parquet",
+        "provider": "yfinance",
+        "provider_adjustment_policy": "yfinance_auto_adjust_false_adj_close_factor_v3_adjusted_ohlc",
+        "role_counts": {
+          "band": 1255,
+          "line": 1255
+        },
+        "row_count": 2510,
+        "schema_version": "product_prediction_history_manifest_v1",
+        "source": "rolling_replay",
+        "source_data_hash": "f1a00036",
+        "ticker_count": 5,
+        "tickers": [
+          "AAPL",
+          "MSFT",
+          "NVDA",
+          "TSLA",
+          "NFLX"
+        ],
+        "timeframe": "1D"
+      }
+    },
+    "scanner": {
+      "execution_in_cp134": "SKIPPED",
+      "future_hook": "500티커 forward-only inference 이후 top-k scanner summary만 Supabase thin upload"
+    }
+  },
+  "readiness": {
+    "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+    "context_latest_dates": {
+      "company_fundamentals": "2026-04-03",
+      "company_fundamentals_filing_date": "2026-05-05",
+      "macroeconomic_indicators": "2026-05-04",
+      "market_breadth": "2026-05-01",
+      "sector_returns": "2026-05-04"
+    },
+    "eodhd_fallback_used": false,
+    "line_run_id": "patchtst-1D-efad3c29d803",
+    "local_indicator_1D_latest_date": "2026-05-04",
+    "local_indicator_1W_latest_date": "2026-05-01",
+    "local_price_latest_date": "2026-05-04",
+    "product_history_latest_asof_date": "2026-05-04",
+    "supabase_bulk_read_write": false
+  },
+  "snapshots": {
+    "indicators_1D": {
+      "bytes": 31366137,
+      "context_hash_values": [
+        "f4432d1be7e762d0"
+      ],
+      "date_max": "2026-05-04",
+      "date_min": "2015-03-30",
+      "duplicate_count": 0,
+      "exists": true,
+      "path": "data\\parquet\\indicators_yfinance_1D.parquet",
+      "provider_values": [
+        "yfinance"
+      ],
+      "rows": 279005,
+      "source_values": [
+        "yfinance"
+      ],
+      "ticker_count": 100
+    },
+    "indicators_1W": {
+      "bytes": 6504078,
+      "context_hash_values": [
+        "f4432d1be7e762d0"
+      ],
+      "date_max": "2026-05-01",
+      "date_min": "2016-02-19",
+      "duplicate_count": 0,
+      "exists": true,
+      "path": "data\\parquet\\indicators_yfinance_1W.parquet",
+      "provider_values": [
+        "yfinance"
+      ],
+      "rows": 53300,
+      "source_values": [
+        "yfinance"
+      ],
+      "ticker_count": 100
+    },
+    "price_1D": {
+      "bytes": 10783676,
+      "date_max": "2026-05-04",
+      "date_min": "2015-01-02",
+      "duplicate_count": 0,
+      "exists": true,
+      "path": "data\\parquet\\price_data_yfinance.parquet",
+      "provider_values": [
+        "yfinance"
+      ],
+      "rows": 284905,
+      "source_values": [
+        "yfinance"
+      ],
+      "ticker_count": 100
+    },
+    "price_1W": {
+      "bytes": 3717582,
+      "date_max": "2026-05-01",
+      "date_min": "2015-01-02",
+      "duplicate_count": 0,
+      "exists": true,
+      "path": "data\\parquet\\price_data_yfinance_1W.parquet",
+      "provider_values": [
+        "yfinance"
+      ],
+      "rows": 59200,
+      "source_values": [
+        "yfinance"
+      ],
+      "ticker_count": 100
+    }
+  }
+}
