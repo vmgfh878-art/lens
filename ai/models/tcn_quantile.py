@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ai.models.blocks import init_weights
-from ai.models.common import ForecastOutput, MultiHeadForecastModel
+from ai.models.common import BandOutput, ForecastOutput, LineRegimeOutput, LineV2Output, LineWarningOutput, MultiHeadForecastModel
 
 
 class _CausalConv1d(nn.Module):
@@ -67,6 +67,7 @@ class TCNQuantile(MultiHeadForecastModel):
         band_mode: str = "direct",
         num_tickers: int = 0,
         ticker_emb_dim: int = 32,
+        output_role: str = "legacy",
     ) -> None:
         self.seq_len = seq_len
         self.n_features = n_features
@@ -75,7 +76,14 @@ class TCNQuantile(MultiHeadForecastModel):
         self.receptive_field = 1 + (2 * (kernel_size - 1) * sum(self.dilations))
         self.use_ticker_embedding = num_tickers > 0
         ticker_extra = ticker_emb_dim if self.use_ticker_embedding else 0
-        super().__init__(hidden_dim=tcn_channels + ticker_extra, horizon=horizon, band_mode=band_mode)
+        if output_role in ("line_v2", "line_regime", "line_warning", "line_distributional_mono"):
+            raise ValueError("TCNQuantile은 현재 band 전용 후보로만 사용합니다.")
+        super().__init__(
+            hidden_dim=tcn_channels + ticker_extra,
+            horizon=horizon,
+            band_mode=band_mode,
+            output_role=output_role,
+        )
         self.input_proj = nn.Conv1d(n_features, tcn_channels, kernel_size=1)
         self.blocks = nn.Sequential(
             *[
@@ -88,7 +96,7 @@ class TCNQuantile(MultiHeadForecastModel):
         self.ticker_embedding = nn.Embedding(num_tickers + 1, ticker_emb_dim) if self.use_ticker_embedding else None
         self.apply(init_weights)
 
-    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput:
+    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | BandOutput:
         hidden = self.input_proj(x.permute(0, 2, 1))
         hidden = self.blocks(hidden)
         pooled = hidden.mean(dim=-1)

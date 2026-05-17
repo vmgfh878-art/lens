@@ -1,0 +1,209 @@
+{
+  "commands": [
+    {
+      "args": [
+        "C:\\Users\\user\\lens\\.venv\\Scripts\\python.exe",
+        "scripts/cp151_yfinance_500_backfill.py",
+        "--start-date",
+        "2015-01-01",
+        "--end-date",
+        "2026-05-08",
+        "--chunk-size",
+        "1",
+        "--max-chunks-per-run",
+        "0",
+        "--sleep-seconds-between-tickers",
+        "0.0",
+        "--sleep-seconds-between-chunks",
+        "0.0",
+        "--fetch-mode",
+        "incremental",
+        "--incremental-lookback-days",
+        "10",
+        "--indicator-mode",
+        "auto",
+        "--metrics-path",
+        "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_metrics.json",
+        "--report-path",
+        "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_report.md",
+        "--failed-tickers-csv",
+        "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_failed_tickers.csv",
+        "--latest-distribution-csv",
+        "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_latest_distribution.csv",
+        "--dry-run"
+      ],
+      "elapsed_seconds": 17.49,
+      "exit_code": 0,
+      "name": "01_price_append",
+      "stderr": "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\01_price_append.stderr.log",
+      "stdout": "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\01_price_append.stdout.log"
+    }
+  ],
+  "context_refresh": {
+    "errors": [],
+    "mode": "dry_run_validate_only",
+    "status": "validated_existing"
+  },
+  "context_validation": {
+    "cp186_future_event": {
+      "column_count": 25,
+      "date_max": "2026-05-08",
+      "date_min": "2015-03-30",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\cp186_future_event\\future_event_context_features_1D.parquet",
+      "row_count": 1351677,
+      "ticker_count": 501
+    },
+    "cp187_future_event_v2": {
+      "column_count": 89,
+      "date_max": "2026-05-08",
+      "date_min": "2015-03-30",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\cp187_future_event\\future_event_context_features_1D_v2.parquet",
+      "row_count": 1351677,
+      "ticker_count": 501
+    },
+    "cp187b_vix_short_context": {
+      "column_count": 19,
+      "date_max": "2026-05-08",
+      "date_min": "2015-01-02",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\cp187b_vix_short_context\\vix_short_context_features_1D.parquet",
+      "row_count": 1383438,
+      "ticker_count": 501
+    },
+    "indicators_yfinance_1D_500": {
+      "column_count": 38,
+      "date_max": "2026-05-08",
+      "date_min": "2015-03-30",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\indicators_yfinance_1D_500.parquet",
+      "row_count": 1351677,
+      "ticker_count": 501
+    },
+    "indicators_yfinance_1W_500": {
+      "column_count": 38,
+      "date_max": "2026-05-08",
+      "date_min": "2016-02-19",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\indicators_yfinance_1W_500.parquet",
+      "row_count": 257802,
+      "ticker_count": 500
+    },
+    "price_yfinance_500": {
+      "column_count": 15,
+      "date_max": "2026-05-08",
+      "date_min": "2015-01-02",
+      "duplicate_count": 0,
+      "exists": true,
+      "nonfinite_count": 0,
+      "path": "C:\\Users\\user\\lens\\data\\parquet\\price_data_yfinance_500.parquet",
+      "row_count": 1383438,
+      "ticker_count": 501
+    }
+  },
+  "cp": "CP189-DG",
+  "forbidden_actions_observed": {
+    "checkpoint_modify": false,
+    "db_write": false,
+    "eodhd_fallback": false,
+    "frontend_backend_runtime_modify": false,
+    "inference_save": false,
+    "model_training": false,
+    "product_save_run": false,
+    "supabase_bulk_read_write": false
+  },
+  "lock_status": "lock_acquired",
+  "mode": "dry_run",
+  "price_append": {
+    "apply": false,
+    "chunk_size": 1,
+    "cp": "CP151-DG",
+    "created_at": "2026-05-16T13:18:12.614489Z",
+    "end_date": "2026-05-08",
+    "failed_tickers_csv": "docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_failed_tickers.csv",
+    "fetch_mode": "incremental",
+    "fetch_start_dates": {},
+    "final_status": "DRY_RUN_FETCH_BLOCKED",
+    "final_summary": "dry-run이므로 parquet/state를 쓰지 않았다.",
+    "forbidden_actions_observed": {
+      "db_write": false,
+      "eodhd_fallback": false,
+      "frontend_modify": false,
+      "inference_save": false,
+      "model_training": false,
+      "product_save_run": false,
+      "supabase_bulk_read_write": false
+    },
+    "incremental_lookback_days": 10,
+    "indicator_mode": "auto",
+    "indicators": {},
+    "latest_distribution": {
+      "complete_ratio": 0.9960238568588469,
+      "complete_ticker_count": 501,
+      "date_max": "2026-05-08",
+      "distribution_csv": "docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755\\price_append_latest_distribution.csv"
+    },
+    "max_chunks_per_run": 0,
+    "price_backfill": {
+      "avg_seconds_per_selected_ticker": null,
+      "failed_ticker_count": 0,
+      "fallback_used_count": 0,
+      "fetch_elapsed_seconds": 0.0,
+      "manifest": {
+        "date_max": "2026-05-08",
+        "row_count": 1383438,
+        "source_data_hash": "90666b44cbfb8e5c",
+        "ticker_count": 501
+      },
+      "merge": {
+        "appended_rows": 0,
+        "appended_tickers": [],
+        "incoming_rows": 0,
+        "skipped_existing_rows": 0
+      },
+      "selected_ticker_count": 0,
+      "success_ticker_count": 0,
+      "ticker_results": {},
+      "validation": {
+        "adjusted_ohlc_violation_count": 0,
+        "duplicate_count": 0,
+        "missing_source_provider_count": 0,
+        "passed": true,
+        "price_finite_count": 6917190,
+        "price_value_count": 6917190,
+        "provider_values": [
+          "yfinance"
+        ],
+        "row_count": 1383438,
+        "source_values": [
+          "yfinance"
+        ],
+        "violations": [],
+        "volume_negative_count": 0,
+        "volume_null_count": 0
+      }
+    },
+    "resume": true,
+    "selected_tickers": [],
+    "start_date": "2015-01-01",
+    "state_path": "data\\parquet\\yfinance_500_backfill_state.json",
+    "universe_source": "yfinance_state",
+    "universe_ticker_count": 503
+  },
+  "price_gate_status": "PASS_WITH_NO_NEW_DAY",
+  "run_at": "2026-05-16T22:17:55.235345",
+  "run_date": "2026-05-08",
+  "run_dir": "C:\\Users\\user\\lens\\docs\\daily_yfinance_500_context_runs\\20260508_20260516_221755",
+  "status": "WARN_MANUAL_TRIGGER_ONLY"
+}

@@ -173,6 +173,81 @@ class ServiceTestCase(unittest.TestCase):
         fetch_by_run.assert_called_once_with("AAPL", run_id="run-2")
         fetch_latest.assert_not_called()
 
+    def test_line_run_prediction_drops_band_arrays(self):
+        completed_run = {
+            "run_id": "line-run",
+            "status": "completed",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "config": {"model_role": "line_v2"},
+        }
+        prediction = {
+            "ticker": "AAPL",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-04-18",
+            "decision_time": "2026-04-18T00:00:00Z",
+            "run_id": "line-run",
+            "model_ver": "v1",
+            "signal": "BUY",
+            "forecast_dates": ["2026-04-19"],
+            "line_series": [104.0],
+            "upper_band_series": [110.0],
+            "lower_band_series": [100.0],
+            "conservative_series": [],
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=completed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run",
+            return_value=prediction,
+        ):
+            payload = get_latest_prediction_data("AAPL", run_id="line-run")
+
+        self.assertEqual(payload["meta"]["layer"], "line")
+        self.assertEqual(payload["line_series"], [104.0])
+        self.assertEqual(payload["upper_band_series"], [])
+        self.assertEqual(payload["lower_band_series"], [])
+
+    def test_band_run_prediction_drops_line_arrays(self):
+        completed_run = {
+            "run_id": "band-run",
+            "status": "completed",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "config": {"model_role": "band"},
+        }
+        prediction = {
+            "ticker": "AAPL",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-04-18",
+            "decision_time": "2026-04-18T00:00:00Z",
+            "run_id": "band-run",
+            "model_ver": "v1",
+            "signal": "HOLD",
+            "forecast_dates": ["2026-04-19"],
+            "line_series": [104.0],
+            "upper_band_series": [110.0],
+            "lower_band_series": [100.0],
+            "conservative_series": [104.0],
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=completed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run",
+            return_value=prediction,
+        ):
+            payload = get_latest_prediction_data("AAPL", run_id="band-run")
+
+        self.assertEqual(payload["meta"]["layer"], "band")
+        self.assertEqual(payload["line_series"], [])
+        self.assertEqual(payload["conservative_series"], [])
+        self.assertEqual(payload["upper_band_series"], [110.0])
+        self.assertEqual(payload["lower_band_series"], [100.0])
+
     def test_prediction_latest_with_composite_run_id_preserves_meta(self):
         completed_run = {
             "run_id": "composite-1D-demo",

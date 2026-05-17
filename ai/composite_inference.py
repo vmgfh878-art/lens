@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 from typing import Any
+import warnings
 from uuid import uuid4
 
 
@@ -20,6 +21,7 @@ torch = bootstrap_torch()
 import pandas as pd
 
 from ai.evaluation import build_single_sample_evaluation, summarize_forecast_metrics
+from ai.inference_contract import resolve_execution_market_data_provider, select_bundle_features_for_checkpoint
 from ai.inference import (
     decode_return_forecasts,
     load_checkpoint,
@@ -44,7 +46,8 @@ COMPOSITION_POLICIES = ("raw_composite", "include_line_clamp", "risk_first_lower
 COMPOSITION_TOOL_STATUS = "legacy_experimental_utility"
 COMPOSITION_PHASE1_NOTICE = (
     "이 스크립트는 Phase 1 기본 제품 계약이 아니라, 과거 composite demo와 연구용 조합 실험을 위한 legacy tool입니다. "
-    "Phase 1 본류에서는 AI line layer와 AI band layer를 독립 저장·평가하고 화면에서만 overlay합니다."
+    "Phase 1 본류에서는 AI line layer와 AI band layer를 독립 저장·평가하고 화면에서만 overlay합니다. "
+    "신규 제품 inference/save 경로에서는 이 파일을 사용하면 안 됩니다."
 )
 from ai.train import autocast_context, forward_model, make_loader, resolve_device
 LEGACY_REASON = "line_and_band_layers_are_product-separated"
@@ -79,6 +82,7 @@ class CollectedPredictions:
     raw_future_returns: torch.Tensor
     anchor_closes: torch.Tensor
     metadata: pd.DataFrame
+    contract_report: dict[str, Any]
 
 
 def _repo_path(path: Path) -> str:
@@ -124,7 +128,8 @@ def _load_bundle_for_checkpoint(
     split: str,
     tickers: list[str] | None,
     limit_tickers: int | None,
-) -> SequenceDatasetBundle | SequenceDataset:
+) -> tuple[SequenceDatasetBundle | SequenceDataset, dict[str, Any]]:
+    provider, provider_contract = resolve_execution_market_data_provider(config)
     ticker_registry = resolve_checkpoint_ticker_registry(config, str(config["timeframe"]))
     train_bundle, val_bundle, test_bundle, _, _, _ = prepare_dataset_splits(
         timeframe=str(config["timeframe"]),
@@ -137,8 +142,12 @@ def _load_bundle_for_checkpoint(
         band_target_type=str(config.get("band_target_type", "raw_future_return")),
         ticker_registry=ticker_registry,
         ticker_registry_path=config.get("ticker_registry_path"),
+        market_data_provider=provider,
     )
-    return {"train": train_bundle, "val": val_bundle, "test": test_bundle}[split]
+    bundle = {"train": train_bundle, "val": val_bundle, "test": test_bundle}[split]
+    feature_subset = select_bundle_features_for_checkpoint(bundle, config)
+    feature_subset.report.update(provider_contract)
+    return feature_subset.bundle, feature_subset.report
 
 
 def collect_predictions(
@@ -153,7 +162,7 @@ def collect_predictions(
 ) -> CollectedPredictions:
     model, checkpoint = load_checkpoint(checkpoint_path)
     config = dict(checkpoint["config"])
-    bundle = _load_bundle_for_checkpoint(
+    bundle, contract_report = _load_bundle_for_checkpoint(
         config=config,
         split=split,
         tickers=tickers,
@@ -206,10 +215,18 @@ def collect_predictions(
         raw_future_returns=torch.cat(raw_target_chunks, dim=0),
         anchor_closes=torch.cat(anchor_chunks, dim=0),
         metadata=bundle.metadata.reset_index(drop=True),
+        contract_report=contract_report,
     )
 
 
 def _assert_compatible(line_config: dict[str, Any], band_config: dict[str, Any]) -> None:
+    line_provider, line_provider_contract = resolve_execution_market_data_provider(line_config)
+    band_provider, band_provider_contract = resolve_execution_market_data_provider(band_config)
+    if line_provider != band_provider:
+        raise ValueError(
+            "line/band checkpoint provider 계약 불일치: "
+            f"line={line_provider_contract}, band={band_provider_contract}"
+        )
     required_equal = ("timeframe", "horizon", "line_target_type", "band_target_type")
     mismatches = {
         key: (line_config.get(key), band_config.get(key))
@@ -619,6 +636,7 @@ def build_composite_contract(
                 "horizon": int(line_config["horizon"]),
                 "line_target_type": str(line_config["line_target_type"]),
                 "band_target_type": str(line_config["band_target_type"]),
+                "market_data_provider": line_predictions.contract_report.get("train_market_data_provider"),
             },
             "validation": {
                 "lower_le_upper": lower_le_upper,
@@ -722,6 +740,8 @@ def build_composite_contract(
             line_inside_band_flags=line_inside_band_flags,
             expected_horizon=int(line_config["horizon"]),
         ),
+        "line_contract_metrics": line_predictions.contract_report,
+        "band_contract_metrics": band_predictions.contract_report,
         "calibration": {
             "method": "scalar_width",
             "params": calibration_params,
@@ -769,6 +789,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    warnings.warn(
+        "ai/composite_inference.py는 legacy 연구용 도구입니다. 제품 기본 inference/save 경로에서 사용하지 마세요.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
     validate_legacy_save_allowed(save=args.save, allow_legacy_composite_save=args.allow_legacy_composite_save)
     if not args.line_checkpoint and not args.line_run_id:
         raise ValueError("--line-checkpoint 또는 --line-run-id 중 하나가 필요합니다.")

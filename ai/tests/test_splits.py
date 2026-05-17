@@ -2,7 +2,14 @@ import unittest
 
 import pandas as pd
 
-from ai.splits import TIMEFRAME_ABSOLUTE_MIN_ROWS, build_split_specs, eligible_tickers, make_splits, required_history_rows
+from ai.splits import (
+    TIMEFRAME_ABSOLUTE_MIN_ROWS,
+    build_split_specs,
+    eligible_tickers,
+    make_calendar_split_date_plan,
+    make_splits,
+    required_history_rows,
+)
 
 
 def _ticker_frame(ticker: str, timeframe: str, row_count: int) -> pd.DataFrame:
@@ -13,6 +20,48 @@ def _ticker_frame(ticker: str, timeframe: str, row_count: int) -> pd.DataFrame:
             "timeframe": [timeframe] * row_count,
             "date": dates,
         }
+    )
+
+
+def _sample_metadata(tickers: list[str], date_count: int = 90) -> pd.DataFrame:
+    dates = pd.bdate_range("2025-01-02", periods=date_count).strftime("%Y-%m-%d").tolist()
+    rows = []
+    for ticker in tickers:
+        for index, date in enumerate(dates):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "asof_date": date,
+                    "sample_index": index,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _legacy_split_dates(ticker: str, start: str) -> tuple[set[str], set[str], set[str]]:
+    seq_len = 5
+    h_max = 2
+    row_count = 500
+    frame = pd.DataFrame(
+        {
+            "ticker": [ticker] * row_count,
+            "timeframe": ["1D"] * row_count,
+            "date": pd.date_range(start, periods=row_count, freq="D"),
+        }
+    )
+    spec = make_splits(frame, timeframe="1D", seq_len=seq_len, h_max=h_max, min_fold_samples=1)
+    date_strings = frame["date"].dt.strftime("%Y-%m-%d").tolist()
+
+    def _dates_for_slice(start_index: int, end_index: int) -> set[str]:
+        return {
+            date_strings[seq_len - 1 + sample_index]
+            for sample_index in range(start_index, end_index)
+        }
+
+    return (
+        _dates_for_slice(spec.train.start, spec.train.end),
+        _dates_for_slice(spec.val.start, spec.val.end),
+        _dates_for_slice(spec.test.start, spec.test.end),
     )
 
 
@@ -109,6 +158,85 @@ class SplitLogicTestCase(unittest.TestCase):
         self.assertEqual(eligible_1d, ["AAPL", "MSFT"])
         self.assertEqual(eligible_1w, ["AAPL", "GOOG"])
         self.assertEqual(eligible_1m, ["AAPL"])
+
+    def test_calendar_split_no_cross_ticker_overlap(self):
+        metadata = _sample_metadata(["A", "B", "C"], date_count=90)
+        plan = make_calendar_split_date_plan(
+            metadata,
+            purge_gap_trading_days=3,
+            min_fold_samples=1,
+        )
+
+        train_dates = set(plan.train_dates)
+        validation_dates = set(plan.validation_dates)
+        test_dates = set(plan.test_dates)
+
+        self.assertFalse(train_dates & validation_dates)
+        self.assertFalse(train_dates & test_dates)
+        self.assertFalse(validation_dates & test_dates)
+        self.assertEqual(plan.cross_split_date_overlap_count, 0)
+
+    def test_calendar_split_order(self):
+        metadata = _sample_metadata(["A", "B", "C"], date_count=90)
+        plan = make_calendar_split_date_plan(
+            metadata,
+            purge_gap_trading_days=3,
+            min_fold_samples=1,
+        )
+
+        self.assertLess(plan.train_end_date, plan.validation_start_date)
+        self.assertLess(plan.validation_end_date, plan.test_start_date)
+
+    def test_calendar_purge_gap(self):
+        metadata = _sample_metadata(["A", "B", "C"], date_count=90)
+        plan = make_calendar_split_date_plan(
+            metadata,
+            purge_gap_trading_days=4,
+            min_fold_samples=1,
+        )
+
+        self.assertEqual(plan.train_validation_gap_trading_days, 4)
+        self.assertEqual(plan.validation_test_gap_trading_days, 4)
+        self.assertEqual(plan.purge_gap_trading_days, 4)
+
+    def test_ticker_index_split_regression_guard(self):
+        a_train, a_val, a_test = _legacy_split_dates("A", "2020-01-01")
+        b_train, b_val, b_test = _legacy_split_dates("B", "2020-02-01")
+        legacy_train_dates = a_train | b_train
+        legacy_val_dates = a_val | b_val
+        legacy_test_dates = a_test | b_test
+        legacy_overlap = (
+            (legacy_train_dates & legacy_val_dates)
+            | (legacy_train_dates & legacy_test_dates)
+            | (legacy_val_dates & legacy_test_dates)
+        )
+        self.assertGreater(len(legacy_overlap), 0)
+
+        metadata = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "ticker": ["A"] * 494,
+                        "asof_date": pd.date_range("2020-01-05", periods=494, freq="D").strftime("%Y-%m-%d"),
+                        "sample_index": list(range(494)),
+                    }
+                ),
+                pd.DataFrame(
+                    {
+                        "ticker": ["B"] * 494,
+                        "asof_date": pd.date_range("2020-02-05", periods=494, freq="D").strftime("%Y-%m-%d"),
+                        "sample_index": list(range(494)),
+                    }
+                ),
+            ],
+            ignore_index=True,
+        )
+        calendar_plan = make_calendar_split_date_plan(
+            metadata,
+            purge_gap_trading_days=2,
+            min_fold_samples=1,
+        )
+        self.assertEqual(calendar_plan.cross_split_date_overlap_count, 0)
 
 
 if __name__ == "__main__":

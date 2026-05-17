@@ -84,6 +84,49 @@ LINE_METRIC_NAMES = (
     "fee_adjusted_turnover",
 )
 
+RISK_METRIC_NAMES = (
+    "risk_threshold",
+    "risk_decision_threshold",
+    "risk_prevalence",
+    "risk_recall",
+    "risk_precision",
+    "risk_false_alarm_rate",
+    "risk_accuracy",
+    "risk_roc_auc",
+    "risk_pr_auc",
+    "risk_calibration_error",
+    "dual_head_false_safe_rate",
+    "line_positive_risk_low_tail_rate",
+    "line_positive_risk_high_tail_rate",
+    "risk_separation_gap",
+)
+
+REGIME_METRIC_NAMES = (
+    "regime_accuracy",
+    "regime_adjacent_accuracy",
+    "regime_ordinal_mae",
+    "regime_ordinal_mse",
+    "regime_macro_f1",
+    "strong_down_recall",
+    "strong_down_precision",
+    "strong_up_precision",
+    "regime_return_monotonicity",
+    "regime_return_monotonic_non_decreasing",
+    "line_positive_false_safe_rate",
+    "line_top_decile_false_safe_rate",
+    "regime_filtered_false_safe_reduction",
+    "spread_retention",
+    "line_positive_regime_safe_actual_down_rate",
+    "line_positive_regime_risky_actual_down_rate",
+    "regime_risk_line_corr_pearson",
+    "regime_risk_line_corr_spearman",
+    "regime_expected_class_line_corr_pearson",
+    "regime_expected_class_line_corr_spearman",
+    "regime_risk_residual_severe_auc",
+    "top_false_safe_date_max_share",
+    "top_false_safe_ticker_max_share",
+)
+
 LEGACY_OVERLAY_DIAGNOSTIC_NAMES = (
     "line_inside_band_ratio",
     "line_inside_band_point_ratio",
@@ -124,6 +167,8 @@ def _attach_metric_layers(
             summary.pop(key, None)
     summary["line_metrics"] = _metric_layer_payload(summary, LINE_METRIC_NAMES, kind="line")
     summary["band_metrics"] = _metric_layer_payload(summary, BAND_METRIC_NAMES, kind="band")
+    summary["risk_metrics"] = {key: summary.get(key) for key in RISK_METRIC_NAMES if key in summary}
+    summary["regime_metrics"] = {key: summary.get(key) for key in REGIME_METRIC_NAMES if key in summary}
     if include_legacy_overlay_diagnostics:
         summary["legacy_overlay_diagnostics"] = legacy
     return summary
@@ -402,6 +447,39 @@ def _spearman_corr(left: torch.Tensor, right: torch.Tensor) -> float | None:
         return None
     value = frame["left"].corr(frame["right"], method="spearman")
     return float(value) if pd.notna(value) else None
+
+
+def _pearson_corr(left: torch.Tensor, right: torch.Tensor) -> float | None:
+    left = left.detach().cpu().to(torch.float32).reshape(-1)
+    right = right.detach().cpu().to(torch.float32).reshape(-1)
+    finite = torch.isfinite(left) & torch.isfinite(right)
+    if int(finite.sum().item()) < 2:
+        return None
+    frame = pd.DataFrame({"left": left[finite].numpy(), "right": right[finite].numpy()})
+    if frame["left"].nunique() < 2 or frame["right"].nunique() < 2:
+        return None
+    value = frame["left"].corr(frame["right"], method="pearson")
+    return float(value) if pd.notna(value) else None
+
+
+def _linear_residual_auc(score: torch.Tensor, control: torch.Tensor, target: torch.Tensor) -> float | None:
+    score = score.detach().cpu().to(torch.float32).reshape(-1)
+    control = control.detach().cpu().to(torch.float32).reshape(-1)
+    target = target.detach().cpu().to(torch.float32).reshape(-1)
+    finite = torch.isfinite(score) & torch.isfinite(control) & torch.isfinite(target)
+    if int(finite.sum().item()) < 10:
+        return None
+    x = control[finite]
+    y = score[finite]
+    x_centered = x - x.mean()
+    denom = torch.sum(x_centered * x_centered)
+    if float(denom.item()) <= 1e-12:
+        residual = y - y.mean()
+    else:
+        slope = torch.sum(x_centered * (y - y.mean())) / denom
+        intercept = y.mean() - slope * x.mean()
+        residual = y - ((slope * x) + intercept)
+    return _binary_roc_auc(residual, target[finite])
 
 
 def _safe_tensor_mean(values: torch.Tensor, mask: torch.Tensor) -> float | None:
@@ -854,6 +932,604 @@ def summarize_forecast_metrics(
         summary,
         include_legacy_overlay_diagnostics=include_legacy_overlay_diagnostics,
     )
+
+
+def _binary_roc_auc(score: torch.Tensor, target: torch.Tensor) -> float | None:
+    finite = torch.isfinite(score) & torch.isfinite(target)
+    if not bool(finite.any()):
+        return None
+    score = score[finite]
+    target = (target[finite] > 0.5).to(torch.float32)
+    pos_count = int(target.sum().item())
+    neg_count = int((target <= 0.5).sum().item())
+    if pos_count == 0 or neg_count == 0:
+        return None
+    order = torch.argsort(score)
+    ranks = torch.empty_like(score, dtype=torch.float32)
+    ranks[order] = torch.arange(1, score.numel() + 1, dtype=torch.float32, device=score.device)
+    pos_rank_sum = ranks[target > 0.5].sum()
+    auc = (pos_rank_sum - (pos_count * (pos_count + 1) / 2.0)) / (pos_count * neg_count)
+    return float(auc.item())
+
+
+def _binary_average_precision(score: torch.Tensor, target: torch.Tensor) -> float | None:
+    finite = torch.isfinite(score) & torch.isfinite(target)
+    if not bool(finite.any()):
+        return None
+    score = score[finite]
+    target = (target[finite] > 0.5).to(torch.float32)
+    pos_count = float(target.sum().item())
+    if pos_count <= 0:
+        return None
+    order = torch.argsort(score, descending=True)
+    sorted_target = target[order]
+    cumulative_tp = torch.cumsum(sorted_target, dim=0)
+    ranks = torch.arange(1, sorted_target.numel() + 1, dtype=torch.float32, device=score.device)
+    precision_at_k = cumulative_tp / ranks
+    return float((precision_at_k * sorted_target).sum().item() / pos_count)
+
+
+def _risk_calibration_error(probability: torch.Tensor, target: torch.Tensor, *, bins: int = 10) -> float | None:
+    finite = torch.isfinite(probability) & torch.isfinite(target)
+    if not bool(finite.any()):
+        return None
+    probability = probability[finite].clamp(0.0, 1.0)
+    target = (target[finite] > 0.5).to(torch.float32)
+    total = float(probability.numel())
+    error = 0.0
+    for bin_index in range(bins):
+        low = bin_index / bins
+        high = (bin_index + 1) / bins
+        if bin_index == bins - 1:
+            mask = (probability >= low) & (probability <= high)
+        else:
+            mask = (probability >= low) & (probability < high)
+        count = int(mask.sum().item())
+        if count == 0:
+            continue
+        error += (count / total) * abs(float(probability[mask].mean().item()) - float(target[mask].mean().item()))
+    return float(error)
+
+
+def _line_v2_risk_metrics(
+    *,
+    line_pred: torch.Tensor,
+    risk_prob: torch.Tensor,
+    raw_actual: torch.Tensor,
+    risk_threshold: float,
+    risk_decision_threshold: float,
+) -> dict[str, float | None]:
+    score = line_pred.detach().cpu().to(torch.float32).reshape(-1)
+    prob = risk_prob.detach().cpu().to(torch.float32).reshape(-1)
+    actual = raw_actual.detach().cpu().to(torch.float32).reshape(-1)
+    finite = torch.isfinite(score) & torch.isfinite(prob) & torch.isfinite(actual)
+    if not bool(finite.any()):
+        return {name: None for name in RISK_METRIC_NAMES}
+
+    score = score[finite]
+    prob = prob[finite]
+    actual = actual[finite]
+    risk_target = (actual <= float(risk_threshold)).to(torch.float32)
+    risky_pred = prob >= float(risk_decision_threshold)
+    tail = risk_target > 0.5
+    non_tail = ~tail
+    line_positive = score > 0.0
+    risk_low = prob < float(risk_decision_threshold)
+    risk_high = prob >= float(risk_decision_threshold)
+    separation_gap = None
+    if bool(tail.any()) and bool(non_tail.any()):
+        separation_gap = float(prob[tail].mean().item() - prob[non_tail].mean().item())
+
+    return {
+        "risk_threshold": float(risk_threshold),
+        "risk_decision_threshold": float(risk_decision_threshold),
+        "risk_prevalence": float(tail.to(torch.float32).mean().item()),
+        "risk_recall": _safe_rate(risky_pred, tail),
+        "risk_precision": _safe_rate(tail, risky_pred),
+        "risk_false_alarm_rate": _safe_rate(risky_pred, non_tail),
+        "risk_accuracy": float((risky_pred == tail).to(torch.float32).mean().item()),
+        "risk_roc_auc": _binary_roc_auc(prob, risk_target),
+        "risk_pr_auc": _binary_average_precision(prob, risk_target),
+        "risk_calibration_error": _risk_calibration_error(prob, risk_target),
+        "dual_head_false_safe_rate": _safe_rate(line_positive & risk_low, tail),
+        "line_positive_risk_low_tail_rate": _safe_rate(line_positive & risk_low, tail),
+        "line_positive_risk_high_tail_rate": _safe_rate(line_positive & risk_high, tail),
+        "risk_separation_gap": separation_gap,
+    }
+
+
+def summarize_line_v2_metrics(
+    *,
+    metadata: pd.DataFrame | None,
+    line_predictions: torch.Tensor,
+    risk_logits: torch.Tensor,
+    line_targets: torch.Tensor,
+    raw_future_returns: torch.Tensor,
+    line_target_type: str = "raw_future_return",
+    severe_downside_threshold: float | None = None,
+    risk_decision_threshold: float = 0.5,
+    top_k_frac: float = 0.1,
+    fee_bps: float = 10.0,
+) -> dict[str, float | None]:
+    line_pred = line_predictions.detach().cpu().to(torch.float32)
+    risk_prob = torch.sigmoid(risk_logits.detach().cpu().to(torch.float32))
+    line_actual = line_targets.detach().cpu().to(torch.float32)
+    raw_actual = raw_future_returns.detach().cpu().to(torch.float32)
+    absolute_error = torch.abs(line_pred - line_actual)
+    smape = 2.0 * absolute_error / (line_pred.abs() + line_actual.abs() + 1e-6)
+    direction_threshold = 0.5 if line_target_type == "direction_label" else 0.0
+    risk_threshold = (
+        float(severe_downside_threshold)
+        if severe_downside_threshold is not None
+        else -abs(_severe_downside_threshold(0, int(line_pred.shape[1])))
+    )
+
+    summary: dict[str, float | None] = {
+        "mae": float(absolute_error.mean().item()),
+        "smape": float(smape.mean().item()),
+        "direction_accuracy": float(
+            ((line_pred[:, -1] >= direction_threshold) == (line_actual[:, -1] >= direction_threshold)).float().mean().item()
+        ),
+    }
+    if line_target_type == "raw_future_return":
+        conservative = _conservative_line_metrics(
+            score=line_pred,
+            actual=raw_actual,
+            severe_threshold=risk_threshold,
+            metadata=None,
+        )
+        summary["mean_signed_error"] = conservative["conservative_bias"]
+        summary.update(conservative)
+
+    summary.update(
+        _line_segment_metrics(
+            prefix="all_horizon",
+            start=0,
+            end=int(line_pred.shape[1]),
+            metadata=metadata,
+            line_pred=line_pred,
+            line_actual=line_actual,
+            raw_actual=raw_actual,
+            severe_downside_threshold=risk_threshold,
+            top_k_frac=top_k_frac,
+            fee_bps=fee_bps,
+        )
+    )
+    for prefix, start, end in (
+        ("h1_h5", 0, 5),
+        ("h6_h10", 5, 10),
+        ("h11_h20", 10, 20),
+    ):
+        summary.update(
+            _line_segment_metrics(
+                prefix=prefix,
+                start=start,
+                end=end,
+                metadata=metadata,
+                line_pred=line_pred,
+                line_actual=line_actual,
+                raw_actual=raw_actual,
+                severe_downside_threshold=risk_threshold,
+                top_k_frac=top_k_frac,
+                fee_bps=fee_bps,
+            )
+        )
+
+    if metadata is None or metadata.empty:
+        summary.update(
+            {
+                "spearman_ic": None,
+                "ic_mean": None,
+                "ic_std": None,
+                "ic_ir": None,
+                "ic_t_stat": None,
+                "top_k_long_spread": None,
+                "top_k_short_spread": None,
+                "long_short_spread": None,
+                "spread_mean": None,
+                "spread_std": None,
+                "spread_ir": None,
+                "spread_t_stat": None,
+                "fee_adjusted_return": None,
+                "fee_adjusted_sharpe": None,
+                "fee_adjusted_turnover": None,
+            }
+        )
+    else:
+        summary.update(
+            _investment_metrics_for_score(
+                metadata=metadata,
+                score=line_pred[:, -1],
+                actual_return=raw_actual[:, -1],
+                top_k_frac=top_k_frac,
+                fee_bps=fee_bps,
+            )
+        )
+
+    summary.update(
+        _line_v2_risk_metrics(
+            line_pred=line_pred,
+            risk_prob=risk_prob,
+            raw_actual=raw_actual,
+            risk_threshold=risk_threshold,
+            risk_decision_threshold=risk_decision_threshold,
+        )
+    )
+    return _attach_metric_layers(summary, include_legacy_overlay_diagnostics=False)
+
+
+def _regime_targets_from_thresholds(raw_actual: torch.Tensor, thresholds: tuple[float, float, float, float] | list[float]) -> torch.Tensor:
+    h5_actual = raw_actual.detach().cpu().to(torch.float32)[:, -1]
+    q = h5_actual.new_tensor([float(value) for value in thresholds])
+    target = torch.zeros_like(h5_actual, dtype=torch.long)
+    target = target + (h5_actual > q[0]).to(torch.long)
+    target = target + (h5_actual > q[1]).to(torch.long)
+    target = target + (h5_actual > q[2]).to(torch.long)
+    target = target + (h5_actual > q[3]).to(torch.long)
+    return target
+
+
+def _macro_f1(predicted: torch.Tensor, target: torch.Tensor, class_count: int = 5) -> tuple[float | None, dict[str, float | None], dict[str, float | None]]:
+    f1_values: list[float] = []
+    precision_by_class: dict[str, float | None] = {}
+    recall_by_class: dict[str, float | None] = {}
+    for class_index in range(class_count):
+        pred_mask = predicted == class_index
+        target_mask = target == class_index
+        tp = float((pred_mask & target_mask).sum().item())
+        fp = float((pred_mask & ~target_mask).sum().item())
+        fn = float((~pred_mask & target_mask).sum().item())
+        precision = tp / (tp + fp) if tp + fp > 0 else None
+        recall = tp / (tp + fn) if tp + fn > 0 else None
+        precision_by_class[f"class_{class_index}_precision"] = precision
+        recall_by_class[f"class_{class_index}_recall"] = recall
+        if precision is not None and recall is not None and precision + recall > 0:
+            f1_values.append(2.0 * precision * recall / (precision + recall))
+    return (_safe_mean(f1_values), precision_by_class, recall_by_class)
+
+
+def _line_regime_filter_metrics(
+    *,
+    metadata: pd.DataFrame | None,
+    line_score: torch.Tensor,
+    actual: torch.Tensor,
+    predicted_class: torch.Tensor,
+    target_class: torch.Tensor,
+    top_k_frac: float,
+) -> dict[str, float | None]:
+    line_np = line_score.detach().cpu().to(torch.float32).numpy()
+    actual_np = actual.detach().cpu().to(torch.float32).numpy()
+    pred_np = predicted_class.detach().cpu().numpy()
+    target_np = target_class.detach().cpu().numpy()
+    strong_down = target_np == 0
+    line_positive = line_np > 0.0
+    risky_regime = pred_np <= 1
+    safe_regime = pred_np >= 2
+    positive_strong_down = line_positive & strong_down
+    positive_count = int(line_positive.sum())
+    line_positive_false_safe_rate = (
+        float(positive_strong_down.sum() / positive_count) if positive_count else None
+    )
+    safe_positive = line_positive & safe_regime
+    risky_positive = line_positive & risky_regime
+    safe_down_rate = float((actual_np[safe_positive] < 0.0).mean()) if safe_positive.any() else None
+    risky_down_rate = float((actual_np[risky_positive] < 0.0).mean()) if risky_positive.any() else None
+
+    if metadata is None or metadata.empty:
+        return {
+            "line_positive_false_safe_rate": line_positive_false_safe_rate,
+            "line_top_decile_false_safe_rate": None,
+            "regime_filtered_false_safe_reduction": None,
+            "spread_retention": None,
+            "line_positive_regime_safe_actual_down_rate": safe_down_rate,
+            "line_positive_regime_risky_actual_down_rate": risky_down_rate,
+        }
+
+    frame = metadata.reset_index(drop=True).copy()
+    frame["line_score"] = line_np
+    frame["actual"] = actual_np
+    frame["predicted_class"] = pred_np
+    frame["target_class"] = target_np
+    base_tail_rates: list[float] = []
+    filtered_tail_rates: list[float] = []
+    base_spreads: list[float] = []
+    filtered_spreads: list[float] = []
+    for _, group in frame.groupby("asof_date", sort=True):
+        if len(group) < 4:
+            continue
+        top_k = max(int(math.ceil(len(group) * top_k_frac)), 1)
+        ranked = group.sort_values("line_score", ascending=False).reset_index(drop=True)
+        top = ranked.head(top_k)
+        bottom = ranked.tail(top_k)
+        base_tail_rates.append(float((top["target_class"] == 0).mean()))
+        base_spread = float(top["actual"].mean() - bottom["actual"].mean())
+        base_spreads.append(base_spread)
+        filtered_top = top[top["predicted_class"] >= 2]
+        if not filtered_top.empty:
+            filtered_tail_rates.append(float((filtered_top["target_class"] == 0).mean()))
+            filtered_spreads.append(float(filtered_top["actual"].mean() - bottom["actual"].mean()))
+    base_tail = _safe_mean(base_tail_rates)
+    filtered_tail = _safe_mean(filtered_tail_rates)
+    base_spread_mean = _safe_mean(base_spreads)
+    filtered_spread_mean = _safe_mean(filtered_spreads)
+    return {
+        "line_positive_false_safe_rate": line_positive_false_safe_rate,
+        "line_top_decile_false_safe_rate": base_tail,
+        "regime_filtered_false_safe_reduction": (
+            (base_tail - filtered_tail) / base_tail
+            if base_tail is not None and filtered_tail is not None and base_tail > 0
+            else None
+        ),
+        "spread_retention": (
+            filtered_spread_mean / base_spread_mean
+            if base_spread_mean is not None and filtered_spread_mean is not None and abs(base_spread_mean) > 1e-12
+            else None
+        ),
+        "line_positive_regime_safe_actual_down_rate": safe_down_rate,
+        "line_positive_regime_risky_actual_down_rate": risky_down_rate,
+    }
+
+
+def summarize_line_regime_metrics(
+    *,
+    metadata: pd.DataFrame | None,
+    line_predictions: torch.Tensor,
+    regime_logits: torch.Tensor,
+    line_targets: torch.Tensor,
+    raw_future_returns: torch.Tensor,
+    line_target_type: str = "raw_future_return",
+    regime_thresholds: tuple[float, float, float, float] | list[float] | None = None,
+    top_k_frac: float = 0.1,
+    fee_bps: float = 10.0,
+) -> dict[str, float | None]:
+    line_pred = line_predictions.detach().cpu().to(torch.float32)
+    logits = regime_logits.detach().cpu().to(torch.float32)
+    line_actual = line_targets.detach().cpu().to(torch.float32)
+    raw_actual = raw_future_returns.detach().cpu().to(torch.float32)
+    if regime_thresholds is None:
+        h5 = raw_actual[:, -1]
+        regime_thresholds = tuple(float(torch.quantile(h5, q).item()) for q in (0.10, 0.35, 0.65, 0.90))
+    regime_thresholds = tuple(float(value) for value in regime_thresholds)
+    absolute_error = torch.abs(line_pred - line_actual)
+    smape = 2.0 * absolute_error / (line_pred.abs() + line_actual.abs() + 1e-6)
+    direction_threshold = 0.5 if line_target_type == "direction_label" else 0.0
+    h5_line = line_pred[:, -1]
+    h5_actual = raw_actual[:, -1]
+    target_class = _regime_targets_from_thresholds(raw_actual, regime_thresholds)
+    predicted_class = torch.argmax(logits, dim=-1).to(torch.long)
+    probability = torch.softmax(logits, dim=-1)
+    class_axis = torch.arange(5, dtype=probability.dtype, device=probability.device).view(1, 5)
+    regime_risk_score = probability[:, 0] + probability[:, 1]
+    regime_expected_class = (probability * class_axis).sum(dim=-1)
+    severe_target = (target_class == 0).to(torch.float32)
+    class_error = (predicted_class - target_class).abs().to(torch.float32)
+    macro_f1, precision_by_class, recall_by_class = _macro_f1(predicted_class, target_class)
+    mean_return_by_predicted_class: dict[str, float | None] = {}
+    class_indices: list[float] = []
+    class_returns: list[float] = []
+    for class_index in range(5):
+        mask = predicted_class == class_index
+        value = float(h5_actual[mask].mean().item()) if bool(mask.any()) else None
+        mean_return_by_predicted_class[f"predicted_class_{class_index}_mean_return"] = value
+        if value is not None:
+            class_indices.append(float(class_index))
+            class_returns.append(value)
+    monotonicity = None
+    if len(class_indices) >= 2:
+        monotonicity = float(pd.Series(class_indices).corr(pd.Series(class_returns), method="spearman"))
+    non_decreasing = None
+    ordered_values = [mean_return_by_predicted_class[f"predicted_class_{idx}_mean_return"] for idx in range(5)]
+    present_values = [value for value in ordered_values if value is not None]
+    if len(present_values) >= 2:
+        non_decreasing = float(all(left <= right for left, right in zip(present_values, present_values[1:])))
+
+    conservative = _conservative_line_metrics(
+        score=line_pred,
+        actual=raw_actual,
+        severe_threshold=regime_thresholds[0],
+        metadata=None,
+    )
+    summary: dict[str, float | None] = {
+        "mae": float(absolute_error.mean().item()),
+        "smape": float(smape.mean().item()),
+        "direction_accuracy": float(
+            ((line_pred[:, -1] >= direction_threshold) == (line_actual[:, -1] >= direction_threshold)).float().mean().item()
+        ),
+        "mean_signed_error": conservative["conservative_bias"],
+        **conservative,
+    }
+    summary.update(
+        _line_segment_metrics(
+            prefix="all_horizon",
+            start=0,
+            end=int(line_pred.shape[1]),
+            metadata=metadata,
+            line_pred=line_pred,
+            line_actual=line_actual,
+            raw_actual=raw_actual,
+            severe_downside_threshold=regime_thresholds[0],
+            top_k_frac=top_k_frac,
+            fee_bps=fee_bps,
+        )
+    )
+    summary.update(
+        _line_segment_metrics(
+            prefix="h1_h5",
+            start=0,
+            end=min(5, int(line_pred.shape[1])),
+            metadata=metadata,
+            line_pred=line_pred,
+            line_actual=line_actual,
+            raw_actual=raw_actual,
+            severe_downside_threshold=regime_thresholds[0],
+            top_k_frac=top_k_frac,
+            fee_bps=fee_bps,
+        )
+    )
+    if metadata is None or metadata.empty:
+        summary.update(
+            {
+                "spearman_ic": None,
+                "ic_mean": None,
+                "ic_std": None,
+                "ic_ir": None,
+                "ic_t_stat": None,
+                "top_k_long_spread": None,
+                "top_k_short_spread": None,
+                "long_short_spread": None,
+                "spread_mean": None,
+                "spread_std": None,
+                "spread_ir": None,
+                "spread_t_stat": None,
+                "fee_adjusted_return": None,
+                "fee_adjusted_sharpe": None,
+                "fee_adjusted_turnover": None,
+            }
+        )
+    else:
+        summary.update(
+            _investment_metrics_for_score(
+                metadata=metadata,
+                score=h5_line,
+                actual_return=h5_actual,
+                top_k_frac=top_k_frac,
+                fee_bps=fee_bps,
+            )
+        )
+
+    summary.update(
+        {
+            "regime_threshold_q10": regime_thresholds[0],
+            "regime_threshold_q35": regime_thresholds[1],
+            "regime_threshold_q65": regime_thresholds[2],
+            "regime_threshold_q90": regime_thresholds[3],
+            "regime_accuracy": float((predicted_class == target_class).to(torch.float32).mean().item()),
+            "regime_adjacent_accuracy": float((class_error <= 1.0).to(torch.float32).mean().item()),
+            "regime_ordinal_mae": float(class_error.mean().item()),
+            "regime_ordinal_mse": float(class_error.pow(2).mean().item()),
+            "regime_macro_f1": macro_f1,
+            "strong_down_recall": recall_by_class.get("class_0_recall"),
+            "strong_down_precision": precision_by_class.get("class_0_precision"),
+            "strong_up_precision": precision_by_class.get("class_4_precision"),
+            "regime_return_monotonicity": monotonicity,
+            "regime_return_monotonic_non_decreasing": non_decreasing,
+            **precision_by_class,
+            **recall_by_class,
+            **mean_return_by_predicted_class,
+        }
+    )
+    summary.update(
+        _line_regime_filter_metrics(
+            metadata=metadata,
+            line_score=h5_line,
+            actual=h5_actual,
+            predicted_class=predicted_class,
+            target_class=target_class,
+            top_k_frac=top_k_frac,
+        )
+    )
+    false_safe_mask = (h5_line >= 0) & (target_class == 0)
+    top_date_share = None
+    top_ticker_share = None
+    if metadata is not None and not metadata.empty and bool(false_safe_mask.any()):
+        false_safe_meta = metadata.reset_index(drop=True).loc[false_safe_mask.detach().cpu().numpy()].copy()
+        if "asof_date" in false_safe_meta.columns and len(false_safe_meta) > 0:
+            date_counts = false_safe_meta["asof_date"].astype(str).value_counts()
+            top_date_share = float(date_counts.iloc[0] / len(false_safe_meta)) if len(date_counts) else None
+        if "ticker" in false_safe_meta.columns and len(false_safe_meta) > 0:
+            ticker_counts = false_safe_meta["ticker"].astype(str).value_counts()
+            top_ticker_share = float(ticker_counts.iloc[0] / len(false_safe_meta)) if len(ticker_counts) else None
+    summary.update(
+        {
+            "regime_risk_line_corr_pearson": _pearson_corr(regime_risk_score, h5_line),
+            "regime_risk_line_corr_spearman": _spearman_corr(regime_risk_score, h5_line),
+            "regime_expected_class_line_corr_pearson": _pearson_corr(regime_expected_class, h5_line),
+            "regime_expected_class_line_corr_spearman": _spearman_corr(regime_expected_class, h5_line),
+            "regime_risk_residual_severe_auc": _linear_residual_auc(regime_risk_score, h5_line, severe_target),
+            "top_false_safe_date_max_share": top_date_share,
+            "top_false_safe_ticker_max_share": top_ticker_share,
+        }
+    )
+    return _attach_metric_layers(summary, include_legacy_overlay_diagnostics=False)
+
+
+def summarize_band_metrics(
+    *,
+    lower_predictions: torch.Tensor,
+    upper_predictions: torch.Tensor,
+    band_targets: torch.Tensor,
+    raw_future_returns: torch.Tensor,
+    q_low: float = 0.1,
+    q_high: float = 0.9,
+    interval_lower_penalty_weight: float = 2.0,
+    interval_upper_penalty_weight: float = 1.0,
+    squeeze_breakout_threshold: float | None = None,
+) -> dict[str, float | None]:
+    lower = lower_predictions.detach().cpu().to(torch.float32)
+    upper = upper_predictions.detach().cpu().to(torch.float32)
+    band_actual = band_targets.detach().cpu().to(torch.float32)
+    raw_actual = raw_future_returns.detach().cpu().to(torch.float32)
+    midpoint = (lower + upper) / 2.0
+    summary: dict[str, float | None] = {
+        "coverage": float(((band_actual >= lower) & (band_actual <= upper)).float().mean().item()),
+        "lower_breach_rate": float((band_actual < lower).float().mean().item()),
+        "upper_breach_rate": float((band_actual > upper).float().mean().item()),
+        "avg_band_width": float((upper - lower).mean().item()),
+    }
+    summary.update(
+        _band_interval_metrics(
+            line_pred=midpoint,
+            lower=lower,
+            upper=upper,
+            band_actual=band_actual,
+            raw_actual=raw_actual,
+            q_low=q_low,
+            q_high=q_high,
+            lower_penalty_weight=interval_lower_penalty_weight,
+            upper_penalty_weight=interval_upper_penalty_weight,
+            squeeze_breakout_threshold=squeeze_breakout_threshold,
+        )
+    )
+    summary.update(
+        _band_segment_metrics(
+            prefix="all_horizon_band",
+            start=0,
+            end=int(lower.shape[1]),
+            line_pred=midpoint,
+            lower=lower,
+            upper=upper,
+            band_actual=band_actual,
+            raw_actual=raw_actual,
+            q_low=q_low,
+            q_high=q_high,
+            lower_penalty_weight=interval_lower_penalty_weight,
+            upper_penalty_weight=interval_upper_penalty_weight,
+            squeeze_breakout_threshold=squeeze_breakout_threshold,
+        )
+    )
+    for prefix, start, end in (
+        ("h1_h5_band", 0, 5),
+        ("h6_h10_band", 5, 10),
+        ("h11_h20_band", 10, 20),
+    ):
+        summary.update(
+            _band_segment_metrics(
+                prefix=prefix,
+                start=start,
+                end=end,
+                line_pred=midpoint,
+                lower=lower,
+                upper=upper,
+                band_actual=band_actual,
+                raw_actual=raw_actual,
+                q_low=q_low,
+                q_high=q_high,
+                lower_penalty_weight=interval_lower_penalty_weight,
+                upper_penalty_weight=interval_upper_penalty_weight,
+                squeeze_breakout_threshold=squeeze_breakout_threshold,
+            )
+        )
+    return _attach_metric_layers(summary, include_legacy_overlay_diagnostics=False)
 
 
 def build_single_sample_evaluation(

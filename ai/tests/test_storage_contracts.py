@@ -82,6 +82,10 @@ class StorageContractsTestCase(unittest.TestCase):
             "timeframe": "1D",
             "horizon": 5,
             "asof_date": "2026-05-01",
+            "line_series": [101.0, 102.0],
+            "lower_band_series": [],
+            "upper_band_series": [],
+            "conservative_series": [],
             "meta": {"layer": "line", "composite": False},
         }
         evaluation = {
@@ -115,11 +119,69 @@ class StorageContractsTestCase(unittest.TestCase):
             "timeframe": "1D",
             "horizon": 5,
             "asof_date": "2026-05-01",
+            "line_series": [101.0],
+            "lower_band_series": [],
+            "upper_band_series": [],
+            "conservative_series": [],
             "meta": {"layer": "line", "composite": False},
         }
         second = {**first, "ticker": "MSFT", "asof_date": "2026-05-04"}
         with self.assertRaises(ValueError):
             save_product_latest_predictions([first, second], [])
+
+    def test_product_latest_line_layer_rejects_band_payload(self):
+        prediction = {
+            "run_id": "line-run",
+            "ticker": "AAPL",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-05-01",
+            "line_series": [101.0],
+            "lower_band_series": [95.0],
+            "upper_band_series": [],
+            "conservative_series": [],
+            "meta": {"layer": "line", "composite": False},
+        }
+
+        with self.assertRaisesRegex(ValueError, "lower_band_series"):
+            save_product_latest_predictions([prediction], [])
+
+    def test_product_latest_band_layer_rejects_line_payload(self):
+        prediction = {
+            "run_id": "band-run",
+            "ticker": "AAPL",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-05-01",
+            "line_series": [101.0],
+            "conservative_series": [],
+            "lower_band_series": [95.0],
+            "upper_band_series": [105.0],
+            "meta": {"layer": "band", "composite": False},
+        }
+
+        with self.assertRaisesRegex(ValueError, "line_series"):
+            save_product_latest_predictions([prediction], [])
+
+    def test_product_latest_band_layer_requires_bands(self):
+        prediction = {
+            "run_id": "band-run",
+            "ticker": "AAPL",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-05-01",
+            "line_series": [],
+            "conservative_series": [],
+            "lower_band_series": [95.0],
+            "upper_band_series": [],
+            "meta": {"layer": "band", "composite": False},
+        }
+
+        with self.assertRaisesRegex(ValueError, "upper_band_series"):
+            save_product_latest_predictions([prediction], [])
 
     def test_with_prediction_storage_contract_does_not_mutate_input(self):
         records = [{"ticker": "AAPL", "meta": {"layer": "line"}}]

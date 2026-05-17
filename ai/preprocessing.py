@@ -29,7 +29,17 @@ from backend.collector.repositories.base import fetch_frame  # noqa: E402
 from backend.collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame  # noqa: E402
 from backend.collector.sources.market_data_providers import normalize_provider_name, provider_adjustment_policy  # noqa: E402
 from ai.targets import build_target_array, normalize_target_type  # noqa: E402
-from ai.splits import MAX_HORIZON_BY_TIMEFRAME, absolute_min_rows_for_timeframe, build_split_specs, required_history_rows  # noqa: E402
+from ai.splits import (  # noqa: E402
+    CalendarSplitDatePlan,
+    MAX_HORIZON_BY_TIMEFRAME,
+    SPLIT_MODE_CALENDAR_ALIGNED,
+    SPLIT_MODE_LEGACY_TICKER_INDEX,
+    absolute_min_rows_for_timeframe,
+    build_split_specs,
+    make_calendar_split_date_plan,
+    normalize_split_mode,
+    required_history_rows,
+)
 from ai.ticker_registry import build_registry, lookup_id, registry_path_for_tickers, save_registry  # noqa: E402
 
 SPLIT_RATIO = (0.7, 0.15, 0.15)
@@ -236,6 +246,20 @@ class DatasetPlan:
     split_specs: dict[str, Any]
     ticker_registry_path: str
     num_tickers: int
+    split_mode: str = SPLIT_MODE_CALENDAR_ALIGNED
+    split_train_start_date: str | None = None
+    split_train_end_date: str | None = None
+    split_validation_start_date: str | None = None
+    split_validation_end_date: str | None = None
+    split_test_start_date: str | None = None
+    split_test_end_date: str | None = None
+    purge_gap_trading_days: int | None = None
+    split_train_validation_gap_trading_days: int | None = None
+    split_validation_test_gap_trading_days: int | None = None
+    split_unique_dates_train: int | None = None
+    split_unique_dates_validation: int | None = None
+    split_unique_dates_test: int | None = None
+    cross_split_date_overlap_count: int | None = None
 
 
 def _collect_nonfinite_feature_samples(
@@ -1625,9 +1649,11 @@ def resolve_prepared_splits_cache_key(
     band_target_type: str = "raw_future_return",
     ticker_registry: dict[str, Any] | None = None,
     market_data_provider: str | None = None,
+    split_mode: str = SPLIT_MODE_CALENDAR_ALIGNED,
 ) -> str:
     provider = resolved_market_data_provider(market_data_provider)
     normalized_timeframe = normalize_ai_timeframe(timeframe)
+    normalized_split_mode = normalize_split_mode(split_mode)
     data_hash = resolve_data_fingerprint(
         normalized_timeframe,
         tickers=tickers,
@@ -1657,6 +1683,7 @@ def resolve_prepared_splits_cache_key(
         "include_future_covariate": include_future_covariate,
         "line_target_type": normalize_target_type(line_target_type),
         "band_target_type": normalize_target_type(band_target_type),
+        "split_mode": normalized_split_mode,
         "source_feature_columns": SOURCE_FEATURE_COLUMNS,
         "calendar_feature_columns": CALENDAR_FEATURE_COLUMNS,
         "feature_contract_version": _FEATURE_CONTRACT_VERSION,
@@ -1936,9 +1963,11 @@ def build_dataset_plan(
     ticker_registry_path: str | None = None,
     market_data_provider: str | None = None,
     source_data_hash: str | None = None,
+    split_mode: str = SPLIT_MODE_CALENDAR_ALIGNED,
 ) -> DatasetPlan:
     normalized_timeframe = normalize_ai_timeframe(timeframe)
     provider = resolved_market_data_provider(market_data_provider)
+    normalized_split_mode = normalize_split_mode(split_mode)
     filtered = feature_df.copy()
     filtered["date"] = pd.to_datetime(filtered["date"])
     filtered = filtered[filtered["timeframe"] == normalized_timeframe].sort_values(["ticker", "date"])
@@ -1989,6 +2018,7 @@ def build_dataset_plan(
         split_specs=split_specs,
         ticker_registry_path=resolved_registry_path,
         num_tickers=registry["num_tickers"],
+        split_mode=normalized_split_mode,
     )
 
 
@@ -2011,6 +2041,141 @@ def split_sequence_dataset(
         dataset.subset(indices[:train_end]),
         dataset.subset(indices[train_end:val_end]),
         dataset.subset(indices[val_end:]),
+    )
+
+
+def apply_calendar_split_metadata(plan: DatasetPlan, calendar_plan: CalendarSplitDatePlan) -> None:
+    metadata = calendar_plan.to_metadata()
+    plan.split_mode = str(metadata["split_mode"])
+    plan.split_train_start_date = metadata["split_train_start_date"] if metadata["split_train_start_date"] else None
+    plan.split_train_end_date = metadata["split_train_end_date"] if metadata["split_train_end_date"] else None
+    plan.split_validation_start_date = metadata["split_validation_start_date"] if metadata["split_validation_start_date"] else None
+    plan.split_validation_end_date = metadata["split_validation_end_date"] if metadata["split_validation_end_date"] else None
+    plan.split_test_start_date = metadata["split_test_start_date"] if metadata["split_test_start_date"] else None
+    plan.split_test_end_date = metadata["split_test_end_date"] if metadata["split_test_end_date"] else None
+    plan.purge_gap_trading_days = int(metadata["purge_gap_trading_days"])
+    plan.split_train_validation_gap_trading_days = int(metadata["split_train_validation_gap_trading_days"])
+    plan.split_validation_test_gap_trading_days = int(metadata["split_validation_test_gap_trading_days"])
+    plan.split_unique_dates_train = int(metadata["split_unique_dates_train"])
+    plan.split_unique_dates_validation = int(metadata["split_unique_dates_validation"])
+    plan.split_unique_dates_test = int(metadata["split_unique_dates_test"])
+    plan.cross_split_date_overlap_count = int(metadata["cross_split_date_overlap_count"])
+
+
+def dataset_plan_split_metadata(plan: DatasetPlan) -> dict[str, Any]:
+    return {
+        "split_mode": plan.split_mode,
+        "split_train_start_date": plan.split_train_start_date,
+        "split_train_end_date": plan.split_train_end_date,
+        "split_validation_start_date": plan.split_validation_start_date,
+        "split_validation_end_date": plan.split_validation_end_date,
+        "split_test_start_date": plan.split_test_start_date,
+        "split_test_end_date": plan.split_test_end_date,
+        "purge_gap_trading_days": plan.purge_gap_trading_days,
+        "split_train_validation_gap_trading_days": plan.split_train_validation_gap_trading_days,
+        "split_validation_test_gap_trading_days": plan.split_validation_test_gap_trading_days,
+        "split_unique_dates_train": plan.split_unique_dates_train,
+        "split_unique_dates_validation": plan.split_unique_dates_validation,
+        "split_unique_dates_test": plan.split_unique_dates_test,
+        "cross_split_date_overlap_count": plan.cross_split_date_overlap_count,
+    }
+
+
+def _split_date_overlap_count(
+    train_bundle: SequenceDatasetBundle | SequenceDataset,
+    val_bundle: SequenceDatasetBundle | SequenceDataset,
+    test_bundle: SequenceDatasetBundle | SequenceDataset,
+) -> int:
+    train_dates = set(pd.to_datetime(train_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
+    val_dates = set(pd.to_datetime(val_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
+    test_dates = set(pd.to_datetime(test_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
+    return len((train_dates & val_dates) | (train_dates & test_dates) | (val_dates & test_dates))
+
+
+def apply_legacy_split_metadata(
+    plan: DatasetPlan,
+    train_bundle: SequenceDatasetBundle | SequenceDataset,
+    val_bundle: SequenceDatasetBundle | SequenceDataset,
+    test_bundle: SequenceDatasetBundle | SequenceDataset,
+) -> None:
+    def _date_min(bundle: SequenceDatasetBundle | SequenceDataset) -> str | None:
+        if bundle.metadata.empty:
+            return None
+        return pd.to_datetime(bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").min()
+
+    def _date_max(bundle: SequenceDatasetBundle | SequenceDataset) -> str | None:
+        if bundle.metadata.empty:
+            return None
+        return pd.to_datetime(bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").max()
+
+    def _unique_date_count(bundle: SequenceDatasetBundle | SequenceDataset) -> int:
+        if bundle.metadata.empty:
+            return 0
+        return int(pd.to_datetime(bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").nunique())
+
+    plan.split_mode = SPLIT_MODE_LEGACY_TICKER_INDEX
+    plan.split_train_start_date = _date_min(train_bundle)
+    plan.split_train_end_date = _date_max(train_bundle)
+    plan.split_validation_start_date = _date_min(val_bundle)
+    plan.split_validation_end_date = _date_max(val_bundle)
+    plan.split_test_start_date = _date_min(test_bundle)
+    plan.split_test_end_date = _date_max(test_bundle)
+    plan.purge_gap_trading_days = plan.h_max
+    plan.split_train_validation_gap_trading_days = None
+    plan.split_validation_test_gap_trading_days = None
+    plan.split_unique_dates_train = _unique_date_count(train_bundle)
+    plan.split_unique_dates_validation = _unique_date_count(val_bundle)
+    plan.split_unique_dates_test = _unique_date_count(test_bundle)
+    plan.cross_split_date_overlap_count = _split_date_overlap_count(train_bundle, val_bundle, test_bundle)
+
+
+def split_sequence_dataset_calendar_aligned(
+    dataset: SequenceDatasetBundle | SequenceDataset,
+    *,
+    purge_gap_trading_days: int,
+    min_fold_samples: int = 50,
+    diagnostics: dict[str, Any] | None = None,
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    CalendarSplitDatePlan,
+]:
+    calendar_plan = make_calendar_split_date_plan(
+        dataset.metadata,
+        purge_gap_trading_days=purge_gap_trading_days,
+        min_fold_samples=min_fold_samples,
+    )
+    metadata = dataset.metadata.copy()
+    metadata["order_idx"] = range(len(metadata))
+    metadata["asof_date_key"] = pd.to_datetime(metadata["asof_date"]).dt.strftime("%Y-%m-%d")
+    train_dates = set(calendar_plan.train_dates)
+    validation_dates = set(calendar_plan.validation_dates)
+    test_dates = set(calendar_plan.test_dates)
+    train_indices = metadata[metadata["asof_date_key"].isin(train_dates)]["order_idx"].tolist()
+    val_indices = metadata[metadata["asof_date_key"].isin(validation_dates)]["order_idx"].tolist()
+    test_indices = metadata[metadata["asof_date_key"].isin(test_dates)]["order_idx"].tolist()
+
+    if not train_indices or not val_indices or not test_indices:
+        payload = dict(diagnostics or {})
+        payload.update(
+            {
+                "error": "empty_calendar_split_result",
+                "split_mode": calendar_plan.split_mode,
+                "actual_train_samples": len(train_indices),
+                "actual_val_samples": len(val_indices),
+                "actual_test_samples": len(test_indices),
+                "actual_usable_sample_count": int(len(metadata)),
+                **calendar_plan.to_metadata(),
+            }
+        )
+        raise ValueError(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+    return (
+        dataset.subset(train_indices),
+        dataset.subset(val_indices),
+        dataset.subset(test_indices),
+        calendar_plan,
     )
 
 
@@ -2095,6 +2260,7 @@ def _dataset_plan_diagnostics(
         "limit_tickers": limit_tickers,
         "excluded_reasons": plan.excluded_reasons,
     }
+    payload.update(dataset_plan_split_metadata(plan))
     if dataset is not None:
         metadata = dataset.metadata
         payload["actual_usable_sample_count"] = int(len(metadata))
@@ -2184,10 +2350,12 @@ def prepare_dataset_splits(
     ticker_registry: dict[str, Any] | None = None,
     ticker_registry_path: str | None = None,
     market_data_provider: str | None = None,
+    split_mode: str = SPLIT_MODE_CALENDAR_ALIGNED,
 ) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, torch.Tensor, torch.Tensor, DatasetPlan]:
     """현재 DB 기준으로 학습용 시퀀스와 분할 계획을 한 번에 준비한다."""
     normalized_timeframe = normalize_ai_timeframe(timeframe)
     provider = resolved_market_data_provider(market_data_provider)
+    normalized_split_mode = normalize_split_mode(split_mode)
     cache_key = resolve_prepared_splits_cache_key(
         timeframe=normalized_timeframe,
         seq_len=seq_len,
@@ -2200,6 +2368,7 @@ def prepare_dataset_splits(
         band_target_type=band_target_type,
         ticker_registry=ticker_registry,
         market_data_provider=provider,
+        split_mode=normalized_split_mode,
     )
     if cache_key in _PREPARED_SPLITS_CACHE:
         return _PREPARED_SPLITS_CACHE[cache_key]
@@ -2226,6 +2395,7 @@ def prepare_dataset_splits(
         ticker_registry_path=ticker_registry_path,
         market_data_provider=provider,
         source_data_hash=data_hash,
+        split_mode=normalized_split_mode,
     )
     if not plan.eligible_tickers:
         payload = _dataset_plan_diagnostics(
@@ -2255,16 +2425,27 @@ def prepare_dataset_splits(
         line_target_type=line_target_type,
         band_target_type=band_target_type,
     )
-    train_bundle, val_bundle, test_bundle = split_sequence_dataset_by_plan(
-        dataset,
-        split_specs=plan.split_specs,
-        diagnostics=_dataset_plan_diagnostics(
-            plan=plan,
-            tickers=tickers,
-            limit_tickers=limit_tickers,
-            dataset=dataset,
-        ),
+    diagnostics = _dataset_plan_diagnostics(
+        plan=plan,
+        tickers=tickers,
+        limit_tickers=limit_tickers,
+        dataset=dataset,
     )
+    if normalized_split_mode == SPLIT_MODE_CALENDAR_ALIGNED:
+        train_bundle, val_bundle, test_bundle, calendar_plan = split_sequence_dataset_calendar_aligned(
+            dataset,
+            purge_gap_trading_days=plan.h_max,
+            min_fold_samples=plan.min_fold_samples,
+            diagnostics=diagnostics,
+        )
+        apply_calendar_split_metadata(plan, calendar_plan)
+    else:
+        train_bundle, val_bundle, test_bundle = split_sequence_dataset_by_plan(
+            dataset,
+            split_specs=plan.split_specs,
+            diagnostics=diagnostics,
+        )
+        apply_legacy_split_metadata(plan, train_bundle, val_bundle, test_bundle)
     normalized = normalize_sequence_splits(train_bundle, val_bundle, test_bundle)
     result = (*normalized, plan)
     _PREPARED_SPLITS_CACHE[cache_key] = result

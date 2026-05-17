@@ -94,6 +94,7 @@ def namespace_to_config(base_args: argparse.Namespace, *, lr: float, weight_deca
         delta=1.0,
         lambda_line=1.0,
         lambda_band=1.0,
+        # 레거시 checkpoint/config 호환용 값이다. 현재 ForecastCompositeLoss 계산에는 사용하지 않는다.
         lambda_width=0.1,
         lambda_cross=1.0,
         lambda_direction=0.1,

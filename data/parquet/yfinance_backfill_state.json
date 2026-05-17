@@ -64,6 +64,67 @@
         "NVDA",
         "TSLA"
       ]
+    },
+    {
+      "apply_requested": true,
+      "completed_append_candidate_dates": [
+        "2026-05-11"
+      ],
+      "completed_append_candidate_rows": 5,
+      "created_at": "2026-05-11T23:07:11.410228Z",
+      "current_date": "2026-05-12",
+      "daily_update_state": "append_done",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "PASS_APPEND_DONE",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
+    },
+    {
+      "apply_requested": true,
+      "completed_append_candidate_dates": [
+        "2026-05-12"
+      ],
+      "completed_append_candidate_rows": 5,
+      "created_at": "2026-05-12T23:07:02.226302Z",
+      "current_date": "2026-05-13",
+      "daily_update_state": "append_done",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "PASS_APPEND_DONE",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
+    },
+    {
+      "apply_requested": true,
+      "completed_append_candidate_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ],
+      "completed_append_candidate_rows": 10,
+      "created_at": "2026-05-14T16:54:55.473849Z",
+      "current_date": "2026-05-15",
+      "daily_update_state": "append_done",
+      "failed_tickers": [],
+      "fallback_used_count": 0,
+      "status": "PASS_APPEND_DONE",
+      "successful_tickers": [
+        "AAPL",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "TSLA"
+      ]
     }
   ],
   "source": "yfinance",
@@ -73,76 +134,111 @@
         "2026-05-05",
         "2026-05-06",
         "2026-05-07",
-        "2026-05-08"
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14"
       ],
       "consecutive_fail_count": 0,
-      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_attempt_at": "2026-05-14T16:54:55.473849Z",
       "last_error_type": null,
-      "last_success_at": "2026-05-10T13:42:06.940151Z",
-      "latest_local_date": "2026-05-08",
+      "last_success_at": "2026-05-14T16:54:55.473849Z",
+      "latest_local_date": "2026-05-14",
       "next_retry_after": null,
-      "remaining_dates": []
+      "remaining_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ]
     },
     "MSFT": {
       "completed_dates": [
         "2026-05-05",
         "2026-05-06",
         "2026-05-07",
-        "2026-05-08"
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14"
       ],
       "consecutive_fail_count": 0,
-      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_attempt_at": "2026-05-14T16:54:55.473849Z",
       "last_error_type": null,
-      "last_success_at": "2026-05-10T13:42:06.940151Z",
-      "latest_local_date": "2026-05-08",
+      "last_success_at": "2026-05-14T16:54:55.473849Z",
+      "latest_local_date": "2026-05-14",
       "next_retry_after": null,
-      "remaining_dates": []
+      "remaining_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ]
     },
     "NFLX": {
       "completed_dates": [
         "2026-05-05",
         "2026-05-06",
         "2026-05-07",
-        "2026-05-08"
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14"
       ],
       "consecutive_fail_count": 0,
-      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_attempt_at": "2026-05-14T16:54:55.473849Z",
       "last_error_type": null,
-      "last_success_at": "2026-05-10T13:42:06.940151Z",
-      "latest_local_date": "2026-05-08",
+      "last_success_at": "2026-05-14T16:54:55.473849Z",
+      "latest_local_date": "2026-05-14",
       "next_retry_after": null,
-      "remaining_dates": []
+      "remaining_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ]
     },
     "NVDA": {
       "completed_dates": [
         "2026-05-05",
         "2026-05-06",
         "2026-05-07",
-        "2026-05-08"
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14"
       ],
       "consecutive_fail_count": 0,
-      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_attempt_at": "2026-05-14T16:54:55.473849Z",
       "last_error_type": null,
-      "last_success_at": "2026-05-10T13:42:06.940151Z",
-      "latest_local_date": "2026-05-08",
+      "last_success_at": "2026-05-14T16:54:55.473849Z",
+      "latest_local_date": "2026-05-14",
       "next_retry_after": null,
-      "remaining_dates": []
+      "remaining_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ]
     },
     "TSLA": {
       "completed_dates": [
         "2026-05-05",
         "2026-05-06",
         "2026-05-07",
-        "2026-05-08"
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13",
+        "2026-05-14"
       ],
       "consecutive_fail_count": 0,
-      "last_attempt_at": "2026-05-10T13:42:06.940151Z",
+      "last_attempt_at": "2026-05-14T16:54:55.473849Z",
       "last_error_type": null,
-      "last_success_at": "2026-05-10T13:42:06.940151Z",
-      "latest_local_date": "2026-05-08",
+      "last_success_at": "2026-05-14T16:54:55.473849Z",
+      "latest_local_date": "2026-05-14",
       "next_retry_after": null,
-      "remaining_dates": []
+      "remaining_dates": [
+        "2026-05-13",
+        "2026-05-14"
+      ]
     }
   },
-  "updated_at": "2026-05-10T13:42:06.940151Z"
+  "updated_at": "2026-05-14T16:54:55.473849Z"
 }

@@ -35,13 +35,19 @@ from ai.finite import (
     tensor_finite_summary,
 )
 from ai.local_logging import LocalTrainingProgressLogger
-from ai.loss import ForecastCompositeLoss
+from ai.loss import BandOnlyLoss, ForecastCompositeLoss, LineRegimeLoss, LineV2Loss, LineWarningLoss
 from ai.models.cnn_lstm import CNNLSTM
+from ai.models.common import BandOutput, ForecastOutput, LineRegimeOutput, LineV2Output, LineWarningOutput
 from ai.models.patchtst import PatchTST
 from ai.models.tcn_quantile import TCNQuantile
 from ai.models.tide import TiDE
 from ai.postprocess import apply_band_postprocess
-from ai.evaluation import summarize_forecast_metrics
+from ai.evaluation import (
+    summarize_band_metrics,
+    summarize_forecast_metrics,
+    summarize_line_regime_metrics,
+    summarize_line_v2_metrics,
+)
 from ai.preprocessing import (
     DatasetPlan,
     FEATURE_CONTRACT_VERSION,
@@ -51,11 +57,13 @@ from ai.preprocessing import (
     SequenceDataset,
     SequenceDatasetBundle,
     build_dataset_plan,
+    dataset_plan_split_metadata,
     default_horizon,
     fetch_feature_index_frame,
     prepare_dataset_splits,
     resolve_data_fingerprint,
 )
+from ai.splits import SPLIT_MODE_CHOICES
 from ai.storage import save_model_run
 
 try:
@@ -88,6 +96,7 @@ RUN_STATUS_FAILED_QUALITY_GATE = "failed_quality_gate"
 NAN_STREAK_LIMIT = 3
 CLI_CUDA_CLEANUP_STATE: dict[str, Any] | None = None
 CHECKPOINT_SELECTION_CHOICES = ("val_total", "line_gate", "band_gate", "combined_gate", "coverage_gate")
+MODEL_ROLE_CHOICES = ("legacy", "line_v2", "line_regime", "line_warning", "band")
 FEATURE_SET_PLAN_PATH = PROJECT_ROOT / "docs" / "cp63_bm_feature_set_plan.json"
 DEFAULT_LOCAL_LOG_DIR = "logs/runs"
 WANDB_STATUS_ONLINE_OK = "online_ok"
@@ -180,8 +189,15 @@ class TrainConfig:
     feature_columns: list[str] | None = None
     n_features: int = MODEL_N_FEATURES
     market_data_provider: str | None = None
+    split_mode: str = "calendar_aligned"
     lower_band_loss_weight: float = 1.0
     upper_band_loss_weight: float = 1.0
+    model_role: str = "legacy"
+    lambda_risk: float = 0.5
+    lambda_regime: float = 0.5
+    lambda_ordinal: float = 0.1
+    risk_decision_threshold: float = 0.5
+    regime_thresholds: list[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -688,6 +704,12 @@ class CheckpointSelector:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Lens 멀티헤드 시계열 모델 학습")
     parser.add_argument("--model", choices=MODEL_REGISTRY.keys(), default="patchtst")
+    parser.add_argument(
+        "--model-role",
+        choices=MODEL_ROLE_CHOICES,
+        default="legacy",
+        help="모델 출력 역할입니다. legacy는 기존 line+band, line_v2는 line+risk, band는 lower/upper만 학습합니다.",
+    )
     parser.add_argument("--timeframe", choices=["1D", "1W"], default="1D")
     parser.add_argument("--horizon", type=int, default=None)
     parser.add_argument("--seq-len", type=int, default=60)
@@ -708,6 +730,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-width", type=float, default=0.1, help="레거시 호환용 인자이며 현재 손실 계산에는 사용하지 않습니다.")
     parser.add_argument("--lambda-cross", type=float, default=1.0)
     parser.add_argument("--lambda-direction", type=float, default=0.1)
+    parser.add_argument("--lambda-risk", type=float, default=0.5)
+    parser.add_argument("--lambda-regime", type=float, default=0.5)
+    parser.add_argument("--lambda-ordinal", type=float, default=0.1)
+    parser.add_argument("--risk-decision-threshold", type=float, default=0.5)
     parser.add_argument(
         "--lower-band-loss-weight",
         type=float,
@@ -728,6 +754,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--limit-tickers", type=int, default=None)
     parser.add_argument("--market-data-provider", default=None)
+    parser.add_argument(
+        "--split-mode",
+        choices=SPLIT_MODE_CHOICES,
+        default="calendar_aligned",
+        help="학습 split 방식입니다. calendar_aligned는 같은 asof_date를 모든 ticker에서 같은 split에 배정합니다.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--num-workers", default="auto")
@@ -794,6 +826,10 @@ def parse_args() -> argparse.Namespace:
 
 def build_model(config: TrainConfig):
     apply_feature_set_to_config(config)
+    if config.model_role not in MODEL_ROLE_CHOICES:
+        raise ValueError(f"지원하지 않는 model_role입니다: {config.model_role}")
+    if config.model == "tcn_quantile" and config.model_role in ("line_v2", "line_regime", "line_warning"):
+        raise ValueError("TCNQuantile은 CP155 이후 band 전용 후보로만 사용합니다.")
     model_cls = MODEL_REGISTRY[config.model]
     common_kwargs = {
         "n_features": config.n_features,
@@ -803,6 +839,7 @@ def build_model(config: TrainConfig):
         "band_mode": config.band_mode,
         "num_tickers": config.num_tickers,
         "ticker_emb_dim": config.ticker_emb_dim,
+        "output_role": config.model_role,
     }
     if config.model == "patchtst":
         common_kwargs["use_revin"] = config.use_revin
@@ -820,6 +857,147 @@ def build_model(config: TrainConfig):
     if config.model == "tide":
         common_kwargs["future_cov_dim"] = config.future_cov_dim if config.use_future_covariate else 0
     return model_cls(**common_kwargs)
+
+
+def build_criterion(
+    config: TrainConfig,
+    *,
+    severe_downside_threshold: float | None = None,
+) -> ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | LineWarningLoss | BandOnlyLoss:
+    if config.model_role == "line_v2":
+        return LineV2Loss(
+            alpha=config.alpha,
+            beta=config.beta,
+            delta=config.delta,
+            lambda_line=config.lambda_line,
+            lambda_risk=config.lambda_risk,
+            downside_threshold=(
+                float(severe_downside_threshold)
+                if severe_downside_threshold is not None
+                else -0.05
+            ),
+        )
+    if config.model_role == "line_regime":
+        return LineRegimeLoss(
+            alpha=config.alpha,
+            beta=config.beta,
+            delta=config.delta,
+            lambda_line=config.lambda_line,
+            lambda_regime=config.lambda_regime,
+            lambda_ordinal=config.lambda_ordinal,
+            regime_thresholds=getattr(config, "regime_thresholds", None),
+        )
+    if config.model_role == "line_warning":
+        return LineWarningLoss(
+            downside_threshold=(
+                float(severe_downside_threshold)
+                if severe_downside_threshold is not None
+                else -0.03
+            ),
+            positive_weight=5.0,
+            gamma=2.0,
+            use_focal=True,
+        )
+    if config.model_role == "band":
+        return BandOnlyLoss(
+            q_low=config.q_low,
+            q_high=config.q_high,
+            lambda_band=config.lambda_band,
+            lambda_cross=config.lambda_cross,
+            band_mode=config.band_mode,
+            lower_band_loss_weight=config.lower_band_loss_weight,
+            upper_band_loss_weight=config.upper_band_loss_weight,
+        )
+    return ForecastCompositeLoss(
+        q_low=config.q_low,
+        q_high=config.q_high,
+        alpha=config.alpha,
+        beta=config.beta,
+        delta=config.delta,
+        lambda_line=config.lambda_line,
+        lambda_band=config.lambda_band,
+        lambda_width=config.lambda_width,
+        lambda_cross=config.lambda_cross,
+        lambda_direction=config.lambda_direction,
+        band_mode=config.band_mode,
+        lower_band_loss_weight=config.lower_band_loss_weight,
+        upper_band_loss_weight=config.upper_band_loss_weight,
+    )
+
+
+def build_evaluation_criterion(
+    *,
+    model_role: str,
+    q_low: float = 0.1,
+    q_high: float = 0.9,
+    band_mode: str = "direct",
+    severe_downside_threshold: float | None = None,
+    risk_decision_threshold: float = 0.5,
+    regime_thresholds: tuple[float, float, float, float] | list[float] | None = None,
+) -> ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | LineWarningLoss | BandOnlyLoss:
+    """평가 루프용 criterion을 role 기준으로 한 번만 만든다."""
+    if model_role == "line_v2":
+        return LineV2Loss(
+            downside_threshold=(
+                float(severe_downside_threshold)
+                if severe_downside_threshold is not None
+                else -0.05
+            )
+        )
+    if model_role == "band":
+        return BandOnlyLoss(q_low=q_low, q_high=q_high, band_mode=band_mode)
+    if model_role == "line_regime":
+        return LineRegimeLoss(regime_thresholds=regime_thresholds)
+    if model_role == "line_warning":
+        return LineWarningLoss(
+            downside_threshold=(
+                float(severe_downside_threshold)
+                if severe_downside_threshold is not None
+                else -0.03
+            )
+        )
+    return ForecastCompositeLoss(q_low=q_low, q_high=q_high, band_mode=band_mode)
+
+
+def resolve_model_output_role(model) -> str:
+    """compile wrapper를 벗겨 실제 모델의 output_role을 확인한다."""
+    return str(getattr(unwrap_model(model), "output_role", "legacy") or "legacy")
+
+
+def assert_prediction_matches_criterion(
+    prediction: ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | BandOutput,
+    criterion: ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | LineWarningLoss | BandOnlyLoss,
+    *,
+    model_role: str,
+    phase: str,
+    run_id: str = "",
+    epoch: int = -1,
+    batch_index: int = -1,
+) -> None:
+    """출력 role과 loss role이 다르면 조용히 보정하지 않고 즉시 실패한다."""
+    if isinstance(criterion, LineV2Loss):
+        expected_type = LineV2Output
+        expected_role = "line_v2"
+    elif isinstance(criterion, LineRegimeLoss):
+        expected_type = LineRegimeOutput
+        expected_role = "line_regime"
+    elif isinstance(criterion, LineWarningLoss):
+        expected_type = LineWarningOutput
+        expected_role = "line_warning"
+    elif isinstance(criterion, BandOnlyLoss):
+        expected_type = BandOutput
+        expected_role = "band"
+    else:
+        expected_type = ForecastOutput
+        expected_role = "legacy"
+    if isinstance(prediction, expected_type):
+        return
+    raise TypeError(
+        "model_role/criterion/output mismatch: "
+        f"phase={phase} run_id={run_id} epoch={epoch} batch={batch_index} "
+        f"model_role={model_role} criterion_role={expected_role} "
+        f"prediction_type={type(prediction).__name__}"
+    )
 
 
 def set_seed(seed: int) -> None:
@@ -1142,7 +1320,7 @@ def run_epoch(
     *,
     model,
     loader: DataLoader,
-    criterion: ForecastCompositeLoss,
+    criterion: ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | BandOnlyLoss,
     device: torch.device,
     epoch: int = 0,
     debug_label: str = "",
@@ -1162,11 +1340,14 @@ def run_epoch(
         "band_loss": 0.0,
         "cross_loss": 0.0,
         "direction_loss": 0.0,
+        "risk_loss": 0.0,
+        "regime_loss": 0.0,
     }
     batch_count = 0
     grad_norm_total = 0.0
     nan_streak = 0
     diagnostic_dumped = False
+    model_role = resolve_model_output_role(model)
 
     for batch_index, (features, line_target, band_target, raw_future_returns, ticker_id, future_covariates) in enumerate(loader, start=1):
         features = features.to(device, non_blocking=True)
@@ -1181,6 +1362,15 @@ def run_epoch(
 
         with autocast_context(device, amp_dtype=amp_dtype):
             prediction = forward_model(model, features, ticker_id, future_covariates)
+            assert_prediction_matches_criterion(
+                prediction,
+                criterion,
+                model_role=model_role,
+                phase=phase_label,
+                run_id=run_id,
+                epoch=epoch,
+                batch_index=batch_index,
+            )
             losses = criterion(prediction, line_target, band_target, raw_future_returns)
 
         loss_dict = losses.to_log_dict()
@@ -1198,10 +1388,12 @@ def run_epoch(
                         "line_target": line_target,
                         "band_target": band_target,
                         "raw_future_returns": raw_future_returns,
-                        "prediction.line": prediction.line,
-                        "prediction.lower_band": prediction.lower_band,
-                        "prediction.upper_band": prediction.upper_band,
-                        "prediction.direction_logit": prediction.direction_logit,
+                        "prediction.line": getattr(prediction, "line", None),
+                        "prediction.lower_band": getattr(prediction, "lower_band", None),
+                        "prediction.upper_band": getattr(prediction, "upper_band", None),
+                        "prediction.direction_logit": getattr(prediction, "direction_logit", None),
+                        "prediction.downside_risk_logit": getattr(prediction, "downside_risk_logit", None),
+                        "prediction.regime_logits": getattr(prediction, "regime_logits", None),
                     },
                     losses_dict=loss_dict,
                 )
@@ -1242,6 +1434,7 @@ def run_epoch(
                 scheduler.step()
 
         for key, value in loss_dict.items():
+            totals.setdefault(key, 0.0)
             totals[key] += value
         batch_count += 1
 
@@ -1317,6 +1510,38 @@ def estimate_train_risk_thresholds(bundle: SequenceDatasetBundle | SequenceDatas
     }
 
 
+def estimate_train_regime_thresholds(bundle: SequenceDatasetBundle | SequenceDataset) -> dict[str, Any]:
+    """train split의 h5 raw_future_return 분위수로 line_regime class 경계를 고정한다."""
+    if isinstance(bundle, SequenceDatasetBundle):
+        raw_values = bundle.raw_future_returns.detach().cpu().to(torch.float32)
+        h5_values = raw_values[:, -1] if raw_values.ndim == 2 else raw_values.reshape(-1)
+    else:
+        chunks: list[float] = []
+        for ticker, end_idx in bundle.sample_refs:
+            ticker_array = bundle.ticker_arrays[ticker]
+            future_start = end_idx + 1
+            future_end = future_start + bundle.horizon
+            anchor_close = float(ticker_array["closes"][end_idx])
+            future_returns = (ticker_array["closes"][future_start:future_end] / anchor_close) - 1.0
+            if len(future_returns) > 0:
+                chunks.append(float(future_returns[-1]))
+        h5_values = torch.tensor(chunks, dtype=torch.float32) if chunks else torch.empty(0)
+
+    finite = h5_values[torch.isfinite(h5_values)]
+    if finite.numel() == 0:
+        thresholds = (-0.05, -0.01, 0.01, 0.05)
+    else:
+        thresholds = tuple(float(torch.quantile(finite, q).item()) for q in (0.10, 0.35, 0.65, 0.90))
+    return {
+        "regime_thresholds": list(thresholds),
+        "regime_threshold_q10": thresholds[0],
+        "regime_threshold_q35": thresholds[1],
+        "regime_threshold_q65": thresholds[2],
+        "regime_threshold_q90": thresholds[3],
+        "regime_threshold_source": "train_split_h5_quantile",
+    }
+
+
 def _find_first_nonfinite_tensor(
     named_tensors: dict[str, torch.Tensor | None],
 ) -> tuple[str | None, dict[str, dict[str, float | bool | int]]]:
@@ -1348,7 +1573,7 @@ def evaluate_loader(
     *,
     model,
     loader: DataLoader,
-    criterion: ForecastCompositeLoss,
+    criterion: ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | BandOnlyLoss,
     device: torch.device,
     metadata: Any | None = None,
     line_target_type: str = "raw_future_return",
@@ -1357,12 +1582,16 @@ def evaluate_loader(
     q_high: float = 0.9,
     severe_downside_threshold: float | None = None,
     squeeze_breakout_threshold: float | None = None,
+    risk_decision_threshold: float = 0.5,
+    regime_thresholds: tuple[float, float, float, float] | list[float] | None = None,
     amp_dtype: str = "bf16",
     phase: str = "val",
     run_id: str = "",
     epoch: int = -1,
+    model_role: str | None = None,
 ) -> dict[str, float]:
     model.eval()
+    resolved_model_role = model_role or resolve_model_output_role(model)
     totals = {
         "total_loss": 0.0,
         "forecast_loss": 0.0,
@@ -1370,6 +1599,8 @@ def evaluate_loader(
         "band_loss": 0.0,
         "cross_loss": 0.0,
         "direction_loss": 0.0,
+        "risk_loss": 0.0,
+        "regime_loss": 0.0,
     }
     batch_count = 0
     line_predictions: list[torch.Tensor] = []
@@ -1379,6 +1610,8 @@ def evaluate_loader(
     raw_lower_predictions: list[torch.Tensor] = []
     raw_upper_predictions: list[torch.Tensor] = []
     raw_direction_logits: list[torch.Tensor] = []
+    raw_downside_risk_logits: list[torch.Tensor] = []
+    raw_regime_logits: list[torch.Tensor] = []
     line_targets: list[torch.Tensor] = []
     band_targets: list[torch.Tensor] = []
     raw_targets: list[torch.Tensor] = []
@@ -1394,41 +1627,73 @@ def evaluate_loader(
 
             with autocast_context(device, amp_dtype=amp_dtype):
                 prediction = forward_model(model, features, ticker_id, future_covariates)
+                assert_prediction_matches_criterion(
+                    prediction,
+                    criterion,
+                    model_role=resolved_model_role,
+                    phase=phase,
+                    run_id=run_id,
+                    epoch=epoch,
+                    batch_index=batch_count + 1,
+                )
                 losses = criterion(prediction, line_target, band_target, raw_future_returns)
 
             for key, value in losses.to_log_dict().items():
+                totals.setdefault(key, 0.0)
                 totals[key] += value
             batch_count += 1
 
-            line_pred, lower, upper = apply_band_postprocess(
-                prediction.line.detach().cpu(),
-                prediction.lower_band.detach().cpu(),
-                prediction.upper_band.detach().cpu(),
-            )
-            raw_line_predictions.append(prediction.line.detach().cpu())
-            raw_lower_predictions.append(prediction.lower_band.detach().cpu())
-            raw_upper_predictions.append(prediction.upper_band.detach().cpu())
-            if prediction.direction_logit is not None:
-                raw_direction_logits.append(prediction.direction_logit.detach().cpu())
-            line_predictions.append(line_pred)
-            lower_predictions.append(lower)
-            upper_predictions.append(upper)
+            if isinstance(prediction, ForecastOutput):
+                line_pred, lower, upper = apply_band_postprocess(
+                    prediction.line.detach().cpu(),
+                    prediction.lower_band.detach().cpu(),
+                    prediction.upper_band.detach().cpu(),
+                )
+                raw_line_predictions.append(prediction.line.detach().cpu())
+                raw_lower_predictions.append(prediction.lower_band.detach().cpu())
+                raw_upper_predictions.append(prediction.upper_band.detach().cpu())
+                if prediction.direction_logit is not None:
+                    raw_direction_logits.append(prediction.direction_logit.detach().cpu())
+                line_predictions.append(line_pred)
+                lower_predictions.append(lower)
+                upper_predictions.append(upper)
+            elif isinstance(prediction, LineV2Output):
+                raw_line_predictions.append(prediction.line.detach().cpu())
+                raw_downside_risk_logits.append(prediction.downside_risk_logit.detach().cpu())
+                line_predictions.append(prediction.line.detach().cpu())
+            elif isinstance(prediction, LineRegimeOutput):
+                raw_line_predictions.append(prediction.line.detach().cpu())
+                raw_regime_logits.append(prediction.regime_logits.detach().cpu())
+                line_predictions.append(prediction.line.detach().cpu())
+            elif isinstance(prediction, BandOutput):
+                lower = torch.minimum(prediction.lower_band.detach().cpu(), prediction.upper_band.detach().cpu())
+                upper = torch.maximum(prediction.lower_band.detach().cpu(), prediction.upper_band.detach().cpu())
+                raw_lower_predictions.append(prediction.lower_band.detach().cpu())
+                raw_upper_predictions.append(prediction.upper_band.detach().cpu())
+                lower_predictions.append(lower)
+                upper_predictions.append(upper)
             line_targets.append(line_target.detach().cpu())
             band_targets.append(band_target.detach().cpu())
             raw_targets.append(raw_future_returns.detach().cpu())
 
     averaged = {key: value / max(batch_count, 1) for key, value in totals.items()}
     averaged["grad_norm_mean"] = 0.0
-    if line_predictions:
+    if line_predictions or lower_predictions:
         aggregate_tensors = {
-            "raw.line": torch.cat(raw_line_predictions, dim=0),
-            "raw.lower_band": torch.cat(raw_lower_predictions, dim=0),
-            "raw.upper_band": torch.cat(raw_upper_predictions, dim=0),
+            "raw.line": torch.cat(raw_line_predictions, dim=0) if raw_line_predictions else None,
+            "raw.lower_band": torch.cat(raw_lower_predictions, dim=0) if raw_lower_predictions else None,
+            "raw.upper_band": torch.cat(raw_upper_predictions, dim=0) if raw_upper_predictions else None,
             "raw.direction_logit": torch.cat(raw_direction_logits, dim=0) if raw_direction_logits else None,
-            "post.line": torch.cat(line_predictions, dim=0),
-            "post.lower_band": torch.cat(lower_predictions, dim=0),
-            "post.upper_band": torch.cat(upper_predictions, dim=0),
-            "post.band_width": torch.cat(upper_predictions, dim=0) - torch.cat(lower_predictions, dim=0),
+            "raw.downside_risk_logit": torch.cat(raw_downside_risk_logits, dim=0) if raw_downside_risk_logits else None,
+            "raw.regime_logits": torch.cat(raw_regime_logits, dim=0) if raw_regime_logits else None,
+            "post.line": torch.cat(line_predictions, dim=0) if line_predictions else None,
+            "post.lower_band": torch.cat(lower_predictions, dim=0) if lower_predictions else None,
+            "post.upper_band": torch.cat(upper_predictions, dim=0) if upper_predictions else None,
+            "post.band_width": (
+                torch.cat(upper_predictions, dim=0) - torch.cat(lower_predictions, dim=0)
+                if lower_predictions and upper_predictions
+                else None
+            ),
             "target.line": torch.cat(line_targets, dim=0),
             "target.band": torch.cat(band_targets, dim=0),
             "target.raw_future_returns": torch.cat(raw_targets, dim=0),
@@ -1444,23 +1709,61 @@ def evaluate_loader(
             raise RuntimeError(
                 f"[NaN-GATE phase={phase} run_id={run_id} epoch={epoch} metric=tensor:{tensor_name} value=nan]"
             )
-    averaged.update(
-        _summarize_predictions(
-            line_predictions=line_predictions,
-            lower_predictions=lower_predictions,
-            upper_predictions=upper_predictions,
-            line_targets=line_targets,
-            band_targets=band_targets,
-            raw_future_returns=raw_targets,
-            metadata=metadata,
-            line_target_type=line_target_type,
-            band_target_type=band_target_type,
-            q_low=q_low,
-            q_high=q_high,
-            severe_downside_threshold=severe_downside_threshold,
-            squeeze_breakout_threshold=squeeze_breakout_threshold,
+    if line_predictions and lower_predictions:
+        averaged.update(
+            _summarize_predictions(
+                line_predictions=line_predictions,
+                lower_predictions=lower_predictions,
+                upper_predictions=upper_predictions,
+                line_targets=line_targets,
+                band_targets=band_targets,
+                raw_future_returns=raw_targets,
+                metadata=metadata,
+                line_target_type=line_target_type,
+                band_target_type=band_target_type,
+                q_low=q_low,
+                q_high=q_high,
+                severe_downside_threshold=severe_downside_threshold,
+                squeeze_breakout_threshold=squeeze_breakout_threshold,
+            )
         )
-    )
+    elif line_predictions and raw_downside_risk_logits:
+        averaged.update(
+            summarize_line_v2_metrics(
+                metadata=metadata,
+                line_predictions=torch.cat(line_predictions, dim=0),
+                risk_logits=torch.cat(raw_downside_risk_logits, dim=0),
+                line_targets=torch.cat(line_targets, dim=0),
+                raw_future_returns=torch.cat(raw_targets, dim=0),
+                line_target_type=line_target_type,
+                severe_downside_threshold=severe_downside_threshold,
+                risk_decision_threshold=risk_decision_threshold,
+            )
+        )
+    elif line_predictions and raw_regime_logits:
+        averaged.update(
+            summarize_line_regime_metrics(
+                metadata=metadata,
+                line_predictions=torch.cat(line_predictions, dim=0),
+                regime_logits=torch.cat(raw_regime_logits, dim=0),
+                line_targets=torch.cat(line_targets, dim=0),
+                raw_future_returns=torch.cat(raw_targets, dim=0),
+                line_target_type=line_target_type,
+                regime_thresholds=regime_thresholds,
+            )
+        )
+    elif lower_predictions:
+        averaged.update(
+            summarize_band_metrics(
+                lower_predictions=torch.cat(lower_predictions, dim=0),
+                upper_predictions=torch.cat(upper_predictions, dim=0),
+                band_targets=torch.cat(band_targets, dim=0),
+                raw_future_returns=torch.cat(raw_targets, dim=0),
+                q_low=q_low,
+                q_high=q_high,
+                squeeze_breakout_threshold=squeeze_breakout_threshold,
+            )
+        )
     return averaged
 
 
@@ -1476,13 +1779,25 @@ def evaluate_bundle(
     q_high: float = 0.9,
     severe_downside_threshold: float | None = None,
     squeeze_breakout_threshold: float | None = None,
+    regime_thresholds: tuple[float, float, float, float] | list[float] | None = None,
     amp_dtype: str = "bf16",
     phase: str = "test",
     run_id: str = "",
     epoch: int = -1,
+    criterion: ForecastCompositeLoss | LineV2Loss | LineRegimeLoss | BandOnlyLoss | None = None,
+    model_role: str | None = None,
 ) -> dict[str, float]:
     loader = make_loader(bundle, batch_size=batch_size, shuffle=False, device=device, num_workers=num_workers)
-    criterion = ForecastCompositeLoss()
+    resolved_model_role = model_role or resolve_model_output_role(model)
+    if criterion is None:
+        criterion = build_evaluation_criterion(
+            model_role=resolved_model_role,
+            q_low=q_low,
+            q_high=q_high,
+            band_mode=str(getattr(unwrap_model(model), "band_mode", "direct") or "direct"),
+            severe_downside_threshold=severe_downside_threshold,
+            regime_thresholds=regime_thresholds,
+        )
     metrics = evaluate_loader(
         model=model,
         loader=loader,
@@ -1495,28 +1810,32 @@ def evaluate_bundle(
         q_high=q_high,
         severe_downside_threshold=severe_downside_threshold,
         squeeze_breakout_threshold=squeeze_breakout_threshold,
+        regime_thresholds=regime_thresholds,
         amp_dtype=amp_dtype,
         phase=phase,
         run_id=run_id,
         epoch=epoch,
+        model_role=resolved_model_role,
     )
     result = {
-        "total_loss": metrics["total_loss"],
-        "forecast_loss": metrics["forecast_loss"],
-        "direction_loss": metrics["direction_loss"],
-        "line_loss": metrics["line_loss"],
-        "band_loss": metrics["band_loss"],
-        "cross_loss": metrics["cross_loss"],
-        "coverage": metrics["coverage"],
-        "lower_breach_rate": metrics["lower_breach_rate"],
-        "upper_breach_rate": metrics["upper_breach_rate"],
-        "avg_band_width": metrics["avg_band_width"],
-        "direction_accuracy": metrics["direction_accuracy"],
-        "mae": metrics["mae"],
-        "smape": metrics["smape"],
-        "mean_signed_error": metrics["mean_signed_error"],
-        "overprediction_rate": metrics["overprediction_rate"],
-        "mean_overprediction": metrics["mean_overprediction"],
+        "total_loss": metrics.get("total_loss"),
+        "forecast_loss": metrics.get("forecast_loss"),
+        "direction_loss": metrics.get("direction_loss"),
+        "risk_loss": metrics.get("risk_loss"),
+        "regime_loss": metrics.get("regime_loss"),
+        "line_loss": metrics.get("line_loss"),
+        "band_loss": metrics.get("band_loss"),
+        "cross_loss": metrics.get("cross_loss"),
+        "coverage": metrics.get("coverage"),
+        "lower_breach_rate": metrics.get("lower_breach_rate"),
+        "upper_breach_rate": metrics.get("upper_breach_rate"),
+        "avg_band_width": metrics.get("avg_band_width"),
+        "direction_accuracy": metrics.get("direction_accuracy"),
+        "mae": metrics.get("mae"),
+        "smape": metrics.get("smape"),
+        "mean_signed_error": metrics.get("mean_signed_error"),
+        "overprediction_rate": metrics.get("overprediction_rate"),
+        "mean_overprediction": metrics.get("mean_overprediction"),
         "underprediction_rate": metrics.get("underprediction_rate"),
         "mean_underprediction": metrics.get("mean_underprediction"),
         "downside_capture_rate": metrics.get("downside_capture_rate"),
@@ -1524,13 +1843,13 @@ def evaluate_bundle(
         "false_safe_rate": metrics.get("false_safe_rate"),
         "conservative_bias": metrics.get("conservative_bias"),
         "upside_sacrifice": metrics.get("upside_sacrifice"),
-        "spearman_ic": metrics["spearman_ic"],
-        "top_k_long_spread": metrics["top_k_long_spread"],
-        "top_k_short_spread": metrics["top_k_short_spread"],
-        "long_short_spread": metrics["long_short_spread"],
-        "fee_adjusted_return": metrics["fee_adjusted_return"],
-        "fee_adjusted_sharpe": metrics["fee_adjusted_sharpe"],
-        "fee_adjusted_turnover": metrics["fee_adjusted_turnover"],
+        "spearman_ic": metrics.get("spearman_ic"),
+        "top_k_long_spread": metrics.get("top_k_long_spread"),
+        "top_k_short_spread": metrics.get("top_k_short_spread"),
+        "long_short_spread": metrics.get("long_short_spread"),
+        "fee_adjusted_return": metrics.get("fee_adjusted_return"),
+        "fee_adjusted_sharpe": metrics.get("fee_adjusted_sharpe"),
+        "fee_adjusted_turnover": metrics.get("fee_adjusted_turnover"),
     }
     for key, value in metrics.items():
         if key not in result:
@@ -1773,9 +2092,16 @@ def save_checkpoint(
     checkpoint_config = {
         **asdict(config),
         "feature_version": FEATURE_CONTRACT_VERSION,
+        "output_role": getattr(state_model, "output_role", config.model_role),
         "severe_downside_threshold": metrics.get("severe_downside_threshold"),
         "squeeze_breakout_threshold": metrics.get("squeeze_breakout_threshold"),
         "risk_threshold_source": metrics.get("risk_threshold_source"),
+        "regime_thresholds": metrics.get("regime_thresholds"),
+        "regime_threshold_q10": metrics.get("regime_threshold_q10"),
+        "regime_threshold_q35": metrics.get("regime_threshold_q35"),
+        "regime_threshold_q65": metrics.get("regime_threshold_q65"),
+        "regime_threshold_q90": metrics.get("regime_threshold_q90"),
+        "regime_threshold_source": metrics.get("regime_threshold_source"),
     }
     torch.save(
         {
@@ -1846,6 +2172,7 @@ def run_training(
             include_future_covariate=config.model == "tide" and config.use_future_covariate,
             line_target_type=config.line_target_type,
             band_target_type=config.band_target_type,
+            split_mode=config.split_mode,
         )
     train_bundle, val_bundle, test_bundle, mean, std = apply_feature_columns_to_splits(
         train_bundle,
@@ -1875,6 +2202,8 @@ def run_training(
     risk_thresholds = estimate_train_risk_thresholds(train_bundle)
     severe_downside_threshold = risk_thresholds["severe_downside_threshold"]
     squeeze_breakout_threshold = risk_thresholds["squeeze_breakout_threshold"]
+    regime_threshold_info = estimate_train_regime_thresholds(train_bundle)
+    config.regime_thresholds = list(regime_threshold_info["regime_thresholds"])
 
     train_loader = make_loader(
         train_bundle,
@@ -1902,21 +2231,7 @@ def run_training(
         warmup_frac=config.warmup_frac,
         schedule=config.lr_schedule,
     )
-    criterion = ForecastCompositeLoss(
-        q_low=config.q_low,
-        q_high=config.q_high,
-        alpha=config.alpha,
-        beta=config.beta,
-        delta=config.delta,
-        lambda_line=config.lambda_line,
-        lambda_band=config.lambda_band,
-        lambda_width=config.lambda_width,
-        lambda_cross=config.lambda_cross,
-        lambda_direction=config.lambda_direction,
-        band_mode=config.band_mode,
-        lower_band_loss_weight=config.lower_band_loss_weight,
-        upper_band_loss_weight=config.upper_band_loss_weight,
-    )
+    criterion = build_criterion(config, severe_downside_threshold=severe_downside_threshold)
     early_stopping = EarlyStopping(
         patience=0 if config.early_stop_patience < 0 else config.early_stop_patience,
         min_delta=config.early_stop_min_delta,
@@ -2059,10 +2374,13 @@ def run_training(
             q_high=config.q_high,
             severe_downside_threshold=severe_downside_threshold,
             squeeze_breakout_threshold=squeeze_breakout_threshold,
+            risk_decision_threshold=config.risk_decision_threshold,
+            regime_thresholds=config.regime_thresholds,
             amp_dtype=config.amp_dtype,
             phase="val",
             run_id=run_id,
             epoch=epoch,
+            model_role=config.model_role,
         )
 
         # CP12 finite gate (validation)
@@ -2184,6 +2502,8 @@ def run_training(
         "band_gate_pass": selection_result.band_gate_pass,
         "combined_gate_pass": selection_result.combined_gate_pass,
         "role": checkpoint_role_for_gate(selection_result.gate_type),
+        "model_role": config.model_role,
+        "output_role": resolve_model_output_role(model),
         "coverage_gate_failed": selection_result.coverage_gate_failed,
         "selected_coverage": selected_summary.get("coverage"),
         "selected_upper_breach_rate": selected_summary.get("upper_breach_rate"),
@@ -2196,6 +2516,8 @@ def run_training(
         "severe_downside_threshold": severe_downside_threshold,
         "squeeze_breakout_threshold": squeeze_breakout_threshold,
         "risk_threshold_source": "train_split_quantile",
+        **regime_threshold_info,
+        **dataset_plan_split_metadata(plan),
     }
     print(
         json.dumps(
@@ -2249,10 +2571,13 @@ def run_training(
         q_high=config.q_high,
         severe_downside_threshold=severe_downside_threshold,
         squeeze_breakout_threshold=squeeze_breakout_threshold,
+        regime_thresholds=config.regime_thresholds,
         amp_dtype=config.amp_dtype,
         phase="test",
         run_id=run_id,
         epoch=early_stopping.best_epoch or -1,
+        criterion=criterion,
+        model_role=config.model_role,
     )
 
     # CP12 finite gate (test_quality 저장 직전)
@@ -2336,6 +2661,8 @@ def run_training(
                     "severe_downside_threshold": severe_downside_threshold,
                     "squeeze_breakout_threshold": squeeze_breakout_threshold,
                     "risk_threshold_source": "train_split_quantile",
+                    "dataset_split": dataset_plan_split_metadata(plan),
+                    **regime_threshold_info,
                     "best_val_loss": checkpoint_metrics.get("best_val_total"),
                     "best_epoch": checkpoint_metrics.get("best_epoch"),
                     "best_val_total": checkpoint_metrics.get("best_val_total"),
@@ -2378,7 +2705,7 @@ def summarize_dataset_plan(
     val_bundle: SequenceDatasetBundle | SequenceDataset,
     test_bundle: SequenceDatasetBundle | SequenceDataset,
 ) -> dict[str, Any]:
-    return {
+    summary = {
         "timeframe": plan.timeframe,
         "seq_len": plan.seq_len,
         "horizon": plan.horizon,
@@ -2402,13 +2729,15 @@ def summarize_dataset_plan(
         "val_samples": len(val_bundle),
         "test_samples": len(test_bundle),
     }
+    summary.update(dataset_plan_split_metadata(plan))
+    return summary
 
 
 def summarize_plan_only(plan: DatasetPlan) -> dict[str, Any]:
     train_samples = sum(spec.train.count for spec in plan.split_specs.values())
     val_samples = sum(spec.val.count for spec in plan.split_specs.values())
     test_samples = sum(spec.test.count for spec in plan.split_specs.values())
-    return {
+    summary = {
         "timeframe": plan.timeframe,
         "seq_len": plan.seq_len,
         "horizon": plan.horizon,
@@ -2432,6 +2761,8 @@ def summarize_plan_only(plan: DatasetPlan) -> dict[str, Any]:
         "val_samples": val_samples,
         "test_samples": test_samples,
     }
+    summary.update(dataset_plan_split_metadata(plan))
+    return summary
 
 
 def run_dry(config: TrainConfig) -> dict[str, Any]:
@@ -2448,6 +2779,7 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
         seq_len=config.seq_len,
         horizon=config.horizon,
         market_data_provider=config.market_data_provider,
+        split_mode=config.split_mode,
         source_data_hash=resolve_data_fingerprint(
             config.timeframe,
             tickers=config.tickers,
@@ -2458,23 +2790,10 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
     config.num_tickers = plan.num_tickers
     config.ticker_registry_path = plan.ticker_registry_path
     model = build_model(config)
-    criterion = ForecastCompositeLoss(
-        q_low=config.q_low,
-        q_high=config.q_high,
-        alpha=config.alpha,
-        beta=config.beta,
-        delta=config.delta,
-        lambda_line=config.lambda_line,
-        lambda_band=config.lambda_band,
-        lambda_width=config.lambda_width,
-        lambda_cross=config.lambda_cross,
-        lambda_direction=config.lambda_direction,
-        band_mode=config.band_mode,
-        lower_band_loss_weight=config.lower_band_loss_weight,
-        upper_band_loss_weight=config.upper_band_loss_weight,
-    )
+    criterion = build_criterion(config)
     sample_input = torch.randn(4, config.seq_len, config.n_features)
-    sample_ticker_ids = torch.tensor([0, 1, 2, 3], dtype=torch.long)
+    sample_ticker_modulo = max(int(config.num_tickers) + 1, 1)
+    sample_ticker_ids = torch.arange(4, dtype=torch.long) % sample_ticker_modulo
     sample_future_covariates = torch.randn(4, config.horizon, FUTURE_COVARIATE_DIM)
     sample_line_target = torch.randn(4, config.horizon)
     sample_band_target = torch.randn(4, config.horizon)
@@ -2486,26 +2805,84 @@ def run_dry(config: TrainConfig) -> dict[str, Any]:
             sample_ticker_ids,
             sample_future_covariates if config.model == "tide" and config.use_future_covariate else None,
         )
+        assert_prediction_matches_criterion(
+            output,
+            criterion,
+            model_role=config.model_role,
+            phase="dry_run",
+            run_id="dry_run",
+        )
         loss = criterion(output, sample_line_target, sample_band_target, sample_raw_future_returns)
-        line_pp, lower_pp, upper_pp = apply_band_postprocess(output.line, output.lower_band, output.upper_band)
+        if isinstance(output, ForecastOutput):
+            line_pp, lower_pp, upper_pp = apply_band_postprocess(output.line, output.lower_band, output.upper_band)
     summary = summarize_plan_only(plan)
-    summary["forward_smoke"] = {
+    forward_smoke: dict[str, Any] = {
         "feature_set": config.feature_set,
         "n_features": config.n_features,
         "feature_columns": config.feature_columns,
-        "line_shape": list(output.line.shape),
-        "lower_shape": list(output.lower_band.shape),
-        "upper_shape": list(output.upper_band.shape),
-        "postprocess_lower_le_upper": bool(torch.all(lower_pp <= upper_pp).item()),
+        "model_role": config.model_role,
         "loss_total": float(loss.total.detach().cpu()),
-        "line_preserved": bool(torch.equal(line_pp, output.line)),
         "ticker_id_shape": list(sample_ticker_ids.shape),
-        "contains_nan_or_inf": bool(
-            not torch.isfinite(output.line).all()
-            or not torch.isfinite(output.lower_band).all()
-            or not torch.isfinite(output.upper_band).all()
-        ),
     }
+    if isinstance(output, ForecastOutput):
+        forward_smoke.update(
+            {
+                "output_type": "legacy",
+                "line_shape": list(output.line.shape),
+                "lower_shape": list(output.lower_band.shape),
+                "upper_shape": list(output.upper_band.shape),
+                "postprocess_lower_le_upper": bool(torch.all(lower_pp <= upper_pp).item()),
+                "line_preserved": bool(torch.equal(line_pp, output.line)),
+                "contains_nan_or_inf": bool(
+                    not torch.isfinite(output.line).all()
+                    or not torch.isfinite(output.lower_band).all()
+                    or not torch.isfinite(output.upper_band).all()
+                ),
+            }
+        )
+    elif isinstance(output, LineV2Output):
+        forward_smoke.update(
+            {
+                "output_type": "line_v2",
+                "line_shape": list(output.line.shape),
+                "downside_risk_logit_shape": list(output.downside_risk_logit.shape),
+                "contains_band_output": False,
+                "contains_nan_or_inf": bool(
+                    not torch.isfinite(output.line).all()
+                    or not torch.isfinite(output.downside_risk_logit).all()
+                ),
+            }
+        )
+    elif isinstance(output, LineRegimeOutput):
+        forward_smoke.update(
+            {
+                "output_type": "line_regime",
+                "line_shape": list(output.line.shape),
+                "regime_logits_shape": list(output.regime_logits.shape),
+                "contains_band_output": False,
+                "contains_nan_or_inf": bool(
+                    not torch.isfinite(output.line).all()
+                    or not torch.isfinite(output.regime_logits).all()
+                ),
+            }
+        )
+    elif isinstance(output, BandOutput):
+        lower_pp = torch.minimum(output.lower_band, output.upper_band)
+        upper_pp = torch.maximum(output.lower_band, output.upper_band)
+        forward_smoke.update(
+            {
+                "output_type": "band",
+                "lower_shape": list(output.lower_band.shape),
+                "upper_shape": list(output.upper_band.shape),
+                "contains_line_output": False,
+                "postprocess_lower_le_upper": bool(torch.all(lower_pp <= upper_pp).item()),
+                "contains_nan_or_inf": bool(
+                    not torch.isfinite(output.lower_band).all()
+                    or not torch.isfinite(output.upper_band).all()
+                ),
+            }
+        )
+    summary["forward_smoke"] = forward_smoke
     return summary
 
 
@@ -2536,6 +2913,9 @@ if __name__ == "__main__":
         lambda_width=args.lambda_width,
         lambda_cross=args.lambda_cross,
         lambda_direction=args.lambda_direction,
+        lambda_risk=args.lambda_risk,
+        lambda_regime=args.lambda_regime,
+        lambda_ordinal=args.lambda_ordinal,
         dropout=args.dropout,
         band_mode=args.band_mode,
         num_tickers=args.num_tickers,
@@ -2574,8 +2954,11 @@ if __name__ == "__main__":
         patchtst_n_layers=args.patchtst_n_layers,
         feature_set=args.feature_set,
         market_data_provider=args.market_data_provider,
+        split_mode=args.split_mode,
         lower_band_loss_weight=args.lower_band_loss_weight,
         upper_band_loss_weight=args.upper_band_loss_weight,
+        model_role=args.model_role,
+        risk_decision_threshold=args.risk_decision_threshold,
     )
     is_cuda_run = str(config.device).lower().startswith("cuda")
     if args.dry_run:

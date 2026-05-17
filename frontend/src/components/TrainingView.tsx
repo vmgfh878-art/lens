@@ -125,11 +125,12 @@ const PRODUCT_SLOTS: ProductSlot[] = [
   },
 ];
 
-const CONFIG_KEYS_COMMON = ["role", "feature_set", "checkpoint_selection", "seq_len", "horizon", "wandb_status"];
+const CONFIG_KEYS_COMMON = ["role", "model_role", "feature_set", "checkpoint_selection", "seq_len", "horizon", "wandb_status"];
 const CONFIG_KEYS_LINE = ["patch_len", "stride", "patch_stride"];
 const CONFIG_KEYS_BAND = ["q_low", "q_high", "lambda_band", "band_mode"];
 const CONFIG_LABELS: Record<string, string> = {
   role: "역할",
+  model_role: "모델 역할",
   feature_set: "사용 데이터",
   checkpoint_selection: "모델 선택 기준",
   seq_len: "입력 길이",
@@ -254,10 +255,10 @@ function formatStatusLabel(status: string | null | undefined) {
 }
 
 function formatRoleLabel(role: string | null | undefined) {
-  if (role === "line_model") {
+  if (role === "line_model" || role === "line_v2" || role === "line") {
     return "보수적 예측선";
   }
-  if (role === "band_model") {
+  if (role === "band_model" || role === "band") {
     return "AI 밴드";
   }
   if (role === "composite_model") {
@@ -520,6 +521,20 @@ function getConfigValue(detail: AiRunDetail | null, key: string) {
   return detail.config_summary?.[key] ?? (detail as unknown as Record<string, unknown>)[key] ?? null;
 }
 
+function normalizeRunRole(role: unknown): string | null {
+  const normalized = String(role ?? "").trim().toLowerCase();
+  if (normalized === "line_model" || normalized === "line_v2" || normalized === "line") {
+    return "line_model";
+  }
+  if (normalized === "band_model" || normalized === "band") {
+    return "band_model";
+  }
+  if (normalized === "composite_model" || normalized === "composite") {
+    return "composite_model";
+  }
+  return null;
+}
+
 function getRunRole(run: AiRunSummary | AiRunDetail | null): string | null {
   if (!run) {
     return null;
@@ -530,10 +545,13 @@ function getRunRole(run: AiRunSummary | AiRunDetail | null): string | null {
   if (run.run_id === PRODUCT_BAND_RUN_ID) {
     return "band_model";
   }
-  if ("config_summary" in run && typeof run.config_summary?.role === "string") {
-    return run.config_summary.role;
+  if ("config_summary" in run) {
+    const configRole = normalizeRunRole(run.config_summary?.role) ?? normalizeRunRole(run.config_summary?.model_role);
+    if (configRole) {
+      return configRole;
+    }
   }
-  return run.role ?? null;
+  return normalizeRunRole(run.role);
 }
 
 function isLegacyRun(run: AiRunSummary | AiRunDetail) {
@@ -544,11 +562,10 @@ function isLegacyRun(run: AiRunSummary | AiRunDetail) {
 
 function getExperimentKind(run: AiRunSummary | AiRunDetail): ExperimentKind | null {
   const role = getRunRole(run);
-  const modelName = String(run.model_name ?? "");
-  if (role === "line_model" || modelName === "patchtst") {
+  if (role === "line_model") {
     return "line";
   }
-  if (role === "band_model" || modelName === "cnn_lstm") {
+  if (role === "band_model") {
     return "band";
   }
   return null;
@@ -566,7 +583,7 @@ function getConfigKeys(detail: AiRunDetail | null) {
 }
 
 function formatConfigValue(key: string, value: unknown) {
-  if (key === "role") {
+  if (key === "role" || key === "model_role") {
     return formatRoleLabel(typeof value === "string" ? value : null);
   }
   if (key === "feature_set") {
@@ -1758,7 +1775,7 @@ export default function TrainingView() {
       const completedRuns = completedResult.status === "fulfilled" ? completedResult.value.data : [];
       const qualityRuns = failedQualityResult.status === "fulfilled" ? failedQualityResult.value.data : [];
       const filterModelRuns = (items: AiRunSummary[]) =>
-        items.filter((run) => TRAINING_RUN_MODELS.has(String(run.model_name ?? "")));
+        items.filter((run) => Boolean(getRunRole(run)) || TRAINING_RUN_MODELS.has(String(run.model_name ?? "")));
       const filteredCompletedRuns = filterModelRuns(completedRuns);
       const filteredQualityRuns = filterModelRuns(qualityRuns);
       const [productLineResult, productBandResult, productWeeklyLineResult] = await Promise.allSettled([

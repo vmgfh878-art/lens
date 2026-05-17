@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from ai.models.blocks import ResidualBlock, init_weights
-from ai.models.common import ForecastOutput, _split_band
+from ai.models.common import BandOutput, ForecastOutput, LineDistributionalOutput, LineMonotonicDistributionalOutput, LineRegimeOutput, LineV2Output, LineWarningOutput, MODEL_OUTPUT_ROLES, _split_band
 
 
 class TiDE(nn.Module):
@@ -26,11 +26,19 @@ class TiDE(nn.Module):
         num_tickers: int = 0,
         ticker_emb_dim: int = 32,
         future_cov_dim: int = 0,
+        output_role: str = "legacy",
+        quantile_count: int = 10,
+        quantile_center_index: int = 6,
     ) -> None:
         super().__init__()
+        if output_role not in MODEL_OUTPUT_ROLES:
+            raise ValueError(f"지원하지 않는 output_role입니다: {output_role}")
         self.seq_len = seq_len
         self.horizon = horizon
         self.band_mode = band_mode
+        self.output_role = output_role
+        self.quantile_count = int(quantile_count)
+        self.quantile_center_index = max(0, min(int(quantile_center_index), self.quantile_count - 1))
         self.lookback_baseline_idx = lookback_baseline_idx
         self.use_ticker_embedding = num_tickers > 0
         self.ticker_emb_dim = ticker_emb_dim if self.use_ticker_embedding else 0
@@ -43,8 +51,24 @@ class TiDE(nn.Module):
         self.dec_input_proj = nn.Linear(enc_dim, dec_dim * horizon)
         self.decoder = nn.Sequential(*[ResidualBlock(dec_dim, dropout=dropout) for _ in range(n_dec_layers)])
         self.temporal_decoder = ResidualBlock(self.temporal_input_dim, dropout=dropout)
-        self.line_head = nn.Linear(self.temporal_hidden_dim, 1)
-        self.band_head = nn.Linear(self.temporal_hidden_dim, 2)
+        if output_role in ("legacy", "line_v2", "line_regime"):
+            self.line_head = nn.Linear(self.temporal_hidden_dim, 1)
+        if output_role in ("legacy", "band"):
+            self.band_head = nn.Linear(self.temporal_hidden_dim, 2)
+        if output_role == "line_v2":
+            self.downside_risk_head = nn.Linear(self.temporal_hidden_dim, 1)
+        if output_role == "line_regime":
+            self.regime_head = nn.Linear(self.temporal_hidden_dim, 5)
+        if output_role == "line_warning":
+            self.warning_head = nn.Linear(self.temporal_hidden_dim, 1)
+        if output_role == "line_distributional":
+            self.quantile_head = nn.Linear(self.temporal_hidden_dim, self.quantile_count)
+        if output_role == "line_distributional_mono":
+            self.line_head = nn.Linear(self.temporal_hidden_dim, 1)
+            lower_count = self.quantile_center_index
+            upper_count = self.quantile_count - self.quantile_center_index - 1
+            self.lower_offset_head = nn.Linear(self.temporal_hidden_dim, lower_count) if lower_count > 0 else None
+            self.upper_offset_head = nn.Linear(self.temporal_hidden_dim, upper_count) if upper_count > 0 else None
         self.lookback_skip = nn.Linear(seq_len, horizon)
         self.ticker_embedding = nn.Embedding(num_tickers + 1, ticker_emb_dim) if self.use_ticker_embedding else None
         self.last_temporal_hidden_shape: tuple[int, ...] | None = None
@@ -55,7 +79,7 @@ class TiDE(nn.Module):
         x: torch.Tensor,
         ticker_id: torch.Tensor | None = None,
         future_covariate: torch.Tensor | None = None,
-    ) -> ForecastOutput:
+    ) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput:
         batch_size = x.size(0)
         projected = self.feature_proj(x)
         encoded = self.enc_input_proj(projected.flatten(start_dim=1))
@@ -81,12 +105,50 @@ class TiDE(nn.Module):
         temporal_input = torch.cat(temporal_parts, dim=-1)
         temporal_hidden = self.temporal_decoder(temporal_input)
         self.last_temporal_hidden_shape = tuple(temporal_hidden.shape)
-        line = self.line_head(temporal_hidden).squeeze(-1)
-        band_raw = self.band_head(temporal_hidden)
-        lower_band, upper_band = _split_band(band_raw, self.band_mode)
 
         baseline_series = x[..., self.lookback_baseline_idx]
         skip = self.lookback_skip(baseline_series)
+        if self.output_role == "line_v2":
+            line = self.line_head(temporal_hidden).squeeze(-1)
+            risk_logit = self.downside_risk_head(temporal_hidden).squeeze(-1)
+            return LineV2Output(line=line + skip, downside_risk_logit=risk_logit)
+
+        if self.output_role == "line_regime":
+            line = self.line_head(temporal_hidden).squeeze(-1)
+            regime_logits = self.regime_head(temporal_hidden[:, -1, :])
+            return LineRegimeOutput(line=line + skip, regime_logits=regime_logits)
+
+        if self.output_role == "line_warning":
+            return LineWarningOutput(warning_logit=self.warning_head(temporal_hidden[:, -1, :]).squeeze(-1))
+
+        if self.output_role == "line_distributional":
+            quantiles = self.quantile_head(temporal_hidden)
+            return LineDistributionalOutput(quantiles=quantiles + skip.unsqueeze(-1))
+
+        if self.output_role == "line_distributional_mono":
+            line = self.line_head(temporal_hidden).squeeze(-1) + skip
+            pieces: list[torch.Tensor] = []
+            lower_count = self.quantile_center_index
+            upper_count = self.quantile_count - self.quantile_center_index - 1
+            if lower_count > 0:
+                lower_steps = torch.nn.functional.softplus(self.lower_offset_head(temporal_hidden)) + 1e-6
+                lower_near_to_far = line.unsqueeze(-1) - torch.cumsum(lower_steps, dim=-1)
+                pieces.append(torch.flip(lower_near_to_far, dims=(-1,)))
+            pieces.append(line.unsqueeze(-1))
+            if upper_count > 0:
+                upper_steps = torch.nn.functional.softplus(self.upper_offset_head(temporal_hidden)) + 1e-6
+                pieces.append(line.unsqueeze(-1) + torch.cumsum(upper_steps, dim=-1))
+            return LineMonotonicDistributionalOutput(line=line, quantiles=torch.cat(pieces, dim=-1))
+
+        band_raw = self.band_head(temporal_hidden)
+        lower_band, upper_band = _split_band(band_raw, self.band_mode)
+        if self.output_role == "band":
+            return BandOutput(
+                lower_band=lower_band + skip,
+                upper_band=upper_band + skip,
+            )
+
+        line = self.line_head(temporal_hidden).squeeze(-1)
         return ForecastOutput(
             line=line + skip,
             lower_band=lower_band + skip,

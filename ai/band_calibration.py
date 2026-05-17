@@ -12,6 +12,7 @@ from ai.torch_bootstrap import bootstrap_torch
 torch = bootstrap_torch()
 
 from ai.evaluation import summarize_forecast_metrics
+from ai.inference_contract import resolve_execution_market_data_provider, select_bundle_features_for_checkpoint
 from ai.inference import load_checkpoint, resolve_checkpoint_ticker_registry
 from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import prepare_dataset_splits
@@ -105,6 +106,7 @@ def collect_predictions(
     device = resolve_device(device_name)
     model = model.to(device)
     model.eval()
+    provider, provider_contract = resolve_execution_market_data_provider(config)
     ticker_registry = resolve_checkpoint_ticker_registry(config, str(config["timeframe"]))
     train_bundle, val_bundle, test_bundle, _, _, plan = prepare_dataset_splits(
         timeframe=str(config["timeframe"]),
@@ -117,8 +119,11 @@ def collect_predictions(
         band_target_type=str(config.get("band_target_type", "raw_future_return")),
         ticker_registry=ticker_registry,
         ticker_registry_path=config.get("ticker_registry_path"),
+        market_data_provider=provider,
     )
     bundle = {"train": train_bundle, "val": val_bundle, "test": test_bundle}[split]
+    feature_subset = select_bundle_features_for_checkpoint(bundle, config)
+    bundle = feature_subset.bundle
     loader = make_loader(bundle, batch_size=batch_size, shuffle=False, device=device, num_workers=num_workers)
 
     line_chunks: list[torch.Tensor] = []
@@ -156,7 +161,7 @@ def collect_predictions(
         raw_future_returns=torch.cat(raw_target_chunks, dim=0),
         metadata=bundle.metadata.reset_index(drop=True),
     )
-    return predictions, {"config": config, "plan": plan}
+    return predictions, {"config": config, "plan": plan, "provider_contract": provider_contract, "feature_contract": feature_subset.report}
 
 
 def fit_scalar_width_calibration(
@@ -321,6 +326,10 @@ def evaluate_candidate(
             "band_mode": config.get("band_mode"),
             "checkpoint_selection": config.get("checkpoint_selection"),
             "feature_version": config.get("feature_version"),
+        },
+        "contract_metrics": {
+            **context["provider_contract"],
+            **context["feature_contract"],
         },
         "original": {
             "val": original_val,

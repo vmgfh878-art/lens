@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from ai.models.blocks import ChannelAttentionPooling, init_weights
-from ai.models.common import ForecastOutput, MultiHeadForecastModel
+from ai.models.common import BandOutput, ForecastOutput, LineDistributionalOutput, LineMonotonicDistributionalOutput, LineRegimeOutput, LineV2Output, LineWarningOutput, MultiHeadForecastModel
 from ai.models.revin import RevIN
 
 
@@ -30,6 +30,9 @@ class PatchTST(MultiHeadForecastModel):
         ci_target_fast: bool = False,
         num_tickers: int = 0,
         ticker_emb_dim: int = 32,
+        output_role: str = "legacy",
+        quantile_count: int = 10,
+        quantile_center_index: int = 6,
     ) -> None:
         self.seq_len = seq_len
         self.patch_len = patch_len
@@ -43,7 +46,14 @@ class PatchTST(MultiHeadForecastModel):
         self.n_patches = self._num_patches(seq_len, patch_len, stride)
         self.use_ticker_embedding = num_tickers > 0
         ticker_extra = ticker_emb_dim if self.use_ticker_embedding else 0
-        super().__init__(hidden_dim=d_model * self.n_patches + ticker_extra, horizon=horizon, band_mode=band_mode)
+        super().__init__(
+            hidden_dim=d_model * self.n_patches + ticker_extra,
+            horizon=horizon,
+            band_mode=band_mode,
+            output_role=output_role,
+            quantile_count=quantile_count,
+            quantile_center_index=quantile_center_index,
+        )
         self.revin = RevIN(n_features) if use_revin else None
         self.patch_proj = nn.Linear(patch_len, d_model)
         self.mixed_patch_proj = nn.Linear(patch_len * n_features, d_model)
@@ -86,16 +96,44 @@ class PatchTST(MultiHeadForecastModel):
             raise ValueError("ticker embedding이 활성화된 모델은 ticker_id가 필요합니다.")
         return torch.cat((hidden, self.ticker_embedding(ticker_id)), dim=-1)
 
-    def _maybe_denormalize_output(self, output: ForecastOutput) -> ForecastOutput:
+    def _maybe_denormalize_output(self, output: ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput:
         if not self.use_revin or self.revin is None:
             return output
+        if isinstance(output, LineWarningOutput):
+            return output
+        if isinstance(output, LineDistributionalOutput):
+            batch, horizon, quantile_count = output.quantiles.shape
+            flat = output.quantiles.reshape(batch, horizon * quantile_count)
+            restored = self.revin.denormalize_target(flat, self.target_channel_idx)
+            return LineDistributionalOutput(quantiles=restored.view(batch, horizon, quantile_count))
+        if isinstance(output, LineMonotonicDistributionalOutput):
+            batch, horizon, quantile_count = output.quantiles.shape
+            flat = output.quantiles.reshape(batch, horizon * quantile_count)
+            restored = self.revin.denormalize_target(flat, self.target_channel_idx).view(batch, horizon, quantile_count)
+            line = self.revin.denormalize_target(output.line, self.target_channel_idx)
+            return LineMonotonicDistributionalOutput(line=line, quantiles=restored)
+        if isinstance(output, LineV2Output):
+            return LineV2Output(
+                line=self.revin.denormalize_target(output.line, self.target_channel_idx),
+                downside_risk_logit=output.downside_risk_logit,
+            )
+        if isinstance(output, LineRegimeOutput):
+            return LineRegimeOutput(
+                line=self.revin.denormalize_target(output.line, self.target_channel_idx),
+                regime_logits=output.regime_logits,
+            )
+        if isinstance(output, BandOutput):
+            return BandOutput(
+                lower_band=self.revin.denormalize_target(output.lower_band, self.target_channel_idx),
+                upper_band=self.revin.denormalize_target(output.upper_band, self.target_channel_idx),
+            )
         return ForecastOutput(
             line=self.revin.denormalize_target(output.line, self.target_channel_idx),
             lower_band=self.revin.denormalize_target(output.lower_band, self.target_channel_idx),
             upper_band=self.revin.denormalize_target(output.upper_band, self.target_channel_idx),
         )
 
-    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput:
+    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput:
         batch_size, seq_len, channel_count = x.shape
         hidden_input = x
         if self.use_revin and self.revin is not None:

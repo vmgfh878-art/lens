@@ -158,11 +158,13 @@ class InferenceBacktestTestCase(unittest.TestCase):
                 "line_target_type": "raw_future_return",
                 "band_target_type": "raw_future_return",
                 "model_ver": "v2",
+                "market_data_provider": "eodhd",
             },
         }
         checkpoint_config = {
             "num_tickers": 2,
             "ticker_registry_path": "registry.json",
+            "market_data_provider": "eodhd",
         }
 
         with patch("ai.inference.get_model_run", return_value=model_run):
@@ -208,13 +210,14 @@ class InferenceBacktestTestCase(unittest.TestCase):
                 "line_target_type": "raw_future_return",
                 "band_target_type": "raw_future_return",
                 "model_ver": "v2",
+                "market_data_provider": "eodhd",
             },
         }
         prediction = {"run_id": "run-1", "ticker": "MSFT", "asof_date": "2026-05-04", "meta": {"layer": "line"}}
         evaluation = {"run_id": "run-1", "ticker": "MSFT", "asof_date": "2026-05-04"}
 
         with patch("ai.inference.get_model_run", return_value=model_run):
-            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0}):
+            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0, "market_data_provider": "eodhd"}):
                 with patch("ai.inference.resolve_checkpoint_ticker_registry", return_value=None):
                     with patch("ai.inference.resolve_bundle", return_value=object()):
                         with patch("ai.inference.infer_bundle", return_value=([prediction], [evaluation], {})):
@@ -243,6 +246,7 @@ class InferenceBacktestTestCase(unittest.TestCase):
                 "band_target_type": "raw_future_return",
                 "model_ver": "v2",
                 "role": "line_model",
+                "market_data_provider": "eodhd",
             },
         }
         prediction = {
@@ -257,7 +261,7 @@ class InferenceBacktestTestCase(unittest.TestCase):
         evaluation = {"run_id": "product-line-run", "ticker": "AAPL", "timeframe": "1D", "asof_date": "2026-05-04"}
 
         with patch("ai.inference.get_model_run", return_value=model_run):
-            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0}):
+            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0, "market_data_provider": "eodhd"}):
                 with patch("ai.inference.resolve_checkpoint_ticker_registry", return_value=None):
                     with patch("ai.inference.resolve_bundle", return_value=object()):
                         with patch("ai.inference.infer_bundle", return_value=([prediction], [evaluation], {})):
@@ -291,6 +295,7 @@ class InferenceBacktestTestCase(unittest.TestCase):
                 "band_target_type": "raw_future_return",
                 "model_ver": "v2",
                 "role": "line_model",
+                "market_data_provider": "eodhd",
             },
         }
         prediction = {
@@ -305,7 +310,7 @@ class InferenceBacktestTestCase(unittest.TestCase):
         evaluation = {"run_id": "product-line-run", "ticker": "AAPL", "timeframe": "1D", "asof_date": "2026-05-04"}
 
         with patch("ai.inference.get_model_run", return_value=model_run):
-            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0}):
+            with patch("ai.inference.load_checkpoint_config", return_value={"num_tickers": 0, "market_data_provider": "eodhd"}):
                 with patch("ai.inference.resolve_checkpoint_ticker_registry", return_value=None):
                     with patch("ai.inference.resolve_bundle", return_value=object()):
                         with patch("ai.inference.infer_bundle", return_value=([prediction], [evaluation], {})):

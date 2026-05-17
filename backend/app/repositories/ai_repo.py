@@ -34,7 +34,7 @@ def _truthy(value) -> bool:
 def is_legacy_composite_run(row: dict) -> bool:
     config = _as_dict(row.get("config"))
     model_name = str(row.get("model_name") or "").strip().lower()
-    role = str(row.get("role") or config.get("role") or "").strip().lower()
+    role = str(row.get("role") or config.get("role") or config.get("model_role") or "").strip().lower()
     if model_name in LEGACY_COMPOSITE_MODEL_NAMES:
         return True
     if role == "composite_model":

@@ -1,7 +1,17 @@
 .env
 .env.local
 *.env
+
+# CP 실험 파일은 정리 전까지 GitHub에 올리지 않는다.
 docs/cp*
+docs/cp*/
+ai/cp*.py
+ai/tests/test_cp*.py
+backend/tests/test_cp*.py
+scripts/cp*.py
+scripts/cp*.ps1
+logs/cp*/
+data/**/cp*/
 CLAUDE.md
 
 
@@ -47,9 +57,11 @@ remember.md
 .tmp/
 artifacts/
 *.log
-logs/cp*/
 docs/tmp_*.json
 docs/daily_yfinance_append_gate_metrics_check_*.json
 docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.json
 docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.md
 docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.log
+docs/yfinance_500_backfill_latest.md
+docs/yfinance_500_backfill_metrics.json
+docs/yfinance_500_backfill_runs/

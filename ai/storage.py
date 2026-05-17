@@ -52,6 +52,40 @@ def _meta_value(record: dict[str, Any], key: str) -> Any:
     return None
 
 
+def _series_length(record: dict[str, Any], key: str) -> int:
+    value = record.get(key)
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    raise ValueError(f"{key}는 배열 또는 빈 값이어야 합니다.")
+
+
+def _require_non_empty_series(record: dict[str, Any], key: str, *, layer: str) -> None:
+    if _series_length(record, key) <= 0:
+        raise ValueError(f"{layer} prediction은 {key}가 1개 이상 있어야 합니다.")
+
+
+def _require_empty_series(record: dict[str, Any], key: str, *, layer: str) -> None:
+    if _series_length(record, key) > 0:
+        raise ValueError(f"{layer} prediction에는 {key}를 저장할 수 없습니다.")
+
+
+def _validate_product_latest_layer_payload(record: dict[str, Any], layer: str) -> None:
+    if layer == "line":
+        _require_non_empty_series(record, "line_series", layer=layer)
+        _require_empty_series(record, "lower_band_series", layer=layer)
+        _require_empty_series(record, "upper_band_series", layer=layer)
+        return
+    if layer == "band":
+        _require_non_empty_series(record, "lower_band_series", layer=layer)
+        _require_non_empty_series(record, "upper_band_series", layer=layer)
+        _require_empty_series(record, "line_series", layer=layer)
+        _require_empty_series(record, "conservative_series", layer=layer)
+        return
+    raise ValueError(f"제품 latest-only prediction meta.layer는 line/band만 허용합니다: {layer}")
+
+
 def with_prediction_storage_contract(records: list[dict[str, Any]], storage_contract: str) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
     for record in records:
@@ -81,6 +115,7 @@ def _validate_product_latest_predictions(records: list[dict[str, Any]], *, max_r
             raise ValueError("제품 latest-only 저장에서는 composite prediction 저장을 허용하지 않습니다.")
         if layer not in PRODUCT_LATEST_ALLOWED_LAYERS:
             raise ValueError(f"제품 latest-only prediction meta.layer는 line/band만 허용합니다: {layer}")
+        _validate_product_latest_layer_payload(record, str(layer))
         key = (
             record.get("run_id"),
             record.get("ticker"),

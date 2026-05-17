@@ -1,10 +1,10 @@
 {
   "checksum": "7e8f03b6fcd827df",
-  "created_at": "2026-05-10T13:39:38.732246Z",
+  "created_at": "2026-05-14T16:54:54.713910Z",
   "date_max": "2026-05-08",
   "date_min": "2016-02-19",
   "kind": "indicators",
-  "last_refresh_rows": 10,
+  "last_refresh_rows": 5,
   "path": "data\\parquet\\indicators_yfinance_1W.parquet",
   "provider": "yfinance",
   "provider_adjustment_policy": "yfinance_auto_adjust_false_adj_close_factor_v3_adjusted_ohlc",
