@@ -64,11 +64,22 @@ def fetch_model_runs(
             query = query.eq("timeframe", timeframe)
         if status is not None:
             query = query.eq("status", status)
-        end = offset + limit - 1
-        rows = query.range(offset, end).execute().data or []
         if include_legacy:
+            end = offset + limit - 1
+            rows = query.range(offset, end).execute().data or []
             return rows
-        return [row for row in rows if not is_legacy_composite_run(row)]
+        filtered_rows: list[dict] = []
+        scan_offset = 0
+        scan_page_size = max(limit * 3, 50)
+        while len(filtered_rows) < offset + limit:
+            rows = query.range(scan_offset, scan_offset + scan_page_size - 1).execute().data or []
+            if not rows:
+                break
+            filtered_rows.extend(row for row in rows if not is_legacy_composite_run(row))
+            if len(rows) < scan_page_size:
+                break
+            scan_offset += scan_page_size
+        return filtered_rows[offset : offset + limit]
     except ConfigError:
         raise
     except Exception as exc:

@@ -133,8 +133,8 @@ class SplitLogicTestCase(unittest.TestCase):
     def test_absolute_history_required_rows_are_separate_from_sequence_requirement(self):
         self.assertEqual(required_history_rows("1D", seq_len=252, h_max=20), 450)
         self.assertEqual(required_history_rows("1W", seq_len=60, h_max=12), 78)
-        self.assertEqual(required_history_rows("1M", seq_len=24, h_max=3), 27)
-        self.assertNotIn("1M", TIMEFRAME_ABSOLUTE_MIN_ROWS)
+        self.assertEqual(required_history_rows("1M", seq_len=24, h_max=3), 36)
+        self.assertEqual(TIMEFRAME_ABSOLUTE_MIN_ROWS["1M"], 36)
 
     def test_timeframe_filters_are_independent(self):
         feature_df = pd.concat(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase
+from app.repositories.ai_repo import is_legacy_composite_run
 
 
 PREDICTION_COLUMNS = (
@@ -9,6 +10,27 @@ PREDICTION_COLUMNS = (
     "run_id, model_ver, signal, forecast_dates, upper_band_series, "
     "lower_band_series, conservative_series, line_series, band_quantile_low, band_quantile_high, meta"
 )
+MODEL_RUN_STATUS_COLUMNS = "run_id, model_name, status, config"
+LATEST_CANDIDATE_LIMIT = 50
+
+
+def _fetch_completed_run_map(client, run_ids: list[str]) -> dict[str, dict]:
+    if not run_ids:
+        return {}
+    rows = (
+        client.table("model_runs")
+        .select(MODEL_RUN_STATUS_COLUMNS)
+        .in_("run_id", sorted(set(run_ids)))
+        .eq("status", "completed")
+        .execute()
+        .data
+        or []
+    )
+    return {
+        str(row.get("run_id")): row
+        for row in rows
+        if row.get("run_id") and not is_legacy_composite_run(row)
+    }
 
 
 def fetch_latest_prediction(
@@ -29,12 +51,16 @@ def fetch_latest_prediction(
             .eq("horizon", horizon)
             .order("asof_date", desc=True)
             .order("decision_time", desc=True)
-            .limit(1)
+            .limit(LATEST_CANDIDATE_LIMIT)
             .execute()
             .data
             or []
         )
-        return rows[0] if rows else None
+        run_map = _fetch_completed_run_map(client, [str(row.get("run_id")) for row in rows if row.get("run_id")])
+        for row in rows:
+            if str(row.get("run_id")) in run_map:
+                return row
+        return None
     except ConfigError:
         raise
     except Exception as exc:

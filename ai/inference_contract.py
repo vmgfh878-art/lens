@@ -7,6 +7,16 @@ from ai.torch_bootstrap import bootstrap_torch
 
 torch = bootstrap_torch()
 
+from ai.models.common import (  # noqa: E402
+    BandOutput,
+    ForecastOutput,
+    LineDistributionalOutput,
+    LineMonotonicDistributionalOutput,
+    LineRegimeOutput,
+    LineV2Output,
+    LineWarningOutput,
+    MODEL_OUTPUT_ROLES,
+)
 from ai.preprocessing import (  # noqa: E402
     MODEL_FEATURE_COLUMNS,
     SequenceDataset,
@@ -27,6 +37,113 @@ PROVIDER_KEYS = (
 class FeatureSubsetResult:
     bundle: SequenceDatasetBundle | SequenceDataset
     report: dict[str, Any]
+
+
+MODEL_ROLE_ALIASES = {
+    "legacy": "legacy",
+    "forecast": "legacy",
+    "multihead": "legacy",
+    "line": "line_v2",
+    "line_v2": "line_v2",
+    "line_model": "line_v2",
+    "conservative_line": "line_v2",
+    "line_regime": "line_regime",
+    "regime": "line_regime",
+    "line_warning": "line_warning",
+    "warning": "line_warning",
+    "line_distributional": "line_distributional",
+    "distributional": "line_distributional",
+    "line_v3": "line_distributional",
+    "line_distributional_mono": "line_distributional_mono",
+    "distributional_mono": "line_distributional_mono",
+    "line_v3_mono": "line_distributional_mono",
+    "band": "band",
+    "band_model": "band",
+}
+ROLE_OUTPUT_TYPES = {
+    "legacy": ForecastOutput,
+    "line_v2": LineV2Output,
+    "line_regime": LineRegimeOutput,
+    "line_warning": LineWarningOutput,
+    "line_distributional": LineDistributionalOutput,
+    "line_distributional_mono": LineMonotonicDistributionalOutput,
+    "band": BandOutput,
+}
+ROLE_ALLOWED_FIELDS = {
+    "legacy": ("line", "lower_band", "upper_band", "direction_logit"),
+    "line_v2": ("line", "downside_risk_logit", "downside_risk_prob"),
+    "line_regime": ("line", "regime_logits", "regime_prob"),
+    "line_warning": ("warning_logit", "warning_prob"),
+    "line_distributional": ("quantiles",),
+    "line_distributional_mono": ("line", "quantiles"),
+    "band": ("lower_band", "upper_band", "bands"),
+}
+INFERENCE_PAYLOAD_SUPPORTED_ROLES = ("legacy", "line_v2", "band")
+COMPOSITE_LINE_SUPPORTED_ROLES = ("legacy", "line_v2")
+COMPOSITE_BAND_SUPPORTED_ROLES = ("legacy", "band")
+BAND_CALIBRATION_SUPPORTED_ROLES = ("legacy", "band")
+AMBIGUOUS_SELECTOR_ROLES = {"line_model", "band_model", "combined_model", "composite_model"}
+
+
+def normalize_model_role(role: str | None, *, context: str = "model_role") -> str:
+    raw_role = str(role or "legacy").strip().lower()
+    resolved = MODEL_ROLE_ALIASES.get(raw_role)
+    if resolved is None or resolved not in MODEL_OUTPUT_ROLES:
+        raise ValueError(f"{context}: 지원하지 않는 model_role입니다: {raw_role}")
+    return resolved
+
+
+def resolve_model_role_from_config(config: dict[str, Any], *, context: str = "checkpoint") -> str:
+    for key in ("model_role", "output_role"):
+        value = config.get(key)
+        if value is not None and str(value).strip():
+            return normalize_model_role(str(value), context=f"{context}.{key}")
+
+    role_value = config.get("role")
+    if role_value is not None and str(role_value).strip():
+        raw_role = str(role_value).strip().lower()
+        if raw_role in AMBIGUOUS_SELECTOR_ROLES:
+            raise ValueError(
+                f"{context}.role={raw_role}은 checkpoint selector/storage label로도 쓰이므로 "
+                "model_role 또는 output_role이 없으면 추론 역할을 확정할 수 없습니다."
+            )
+        return normalize_model_role(raw_role, context=f"{context}.role")
+
+    return "legacy"
+
+
+def assert_output_matches_model_role(output: object, model_role: str, *, context: str = "inference") -> None:
+    resolved_role = normalize_model_role(model_role, context=context)
+    expected_type = ROLE_OUTPUT_TYPES[resolved_role]
+    if not isinstance(output, expected_type):
+        raise TypeError(
+            f"{context}: model_role={resolved_role}은 {expected_type.__name__}만 허용합니다. "
+            f"actual={type(output).__name__}"
+        )
+
+
+def require_role_supported(model_role: str, allowed_roles: tuple[str, ...], *, context: str) -> str:
+    resolved_role = normalize_model_role(model_role, context=context)
+    if resolved_role not in allowed_roles:
+        raise ValueError(
+            f"{context}: model_role={resolved_role}은 현재 경로에서 지원하지 않습니다. "
+            f"supported_roles={list(allowed_roles)}"
+        )
+    return resolved_role
+
+
+def role_contract_table() -> dict[str, dict[str, Any]]:
+    return {
+        role: {
+            "output_type": ROLE_OUTPUT_TYPES[role].__name__,
+            "allowed_fields": list(ROLE_ALLOWED_FIELDS[role]),
+            "inference_payload_supported": role in INFERENCE_PAYLOAD_SUPPORTED_ROLES,
+            "composite_line_supported": role in COMPOSITE_LINE_SUPPORTED_ROLES,
+            "composite_band_supported": role in COMPOSITE_BAND_SUPPORTED_ROLES,
+            "band_calibration_supported": role in BAND_CALIBRATION_SUPPORTED_ROLES,
+        }
+        for role in ROLE_OUTPUT_TYPES
+    }
 
 
 def _iter_contract_dicts(source: dict[str, Any] | None):
@@ -191,12 +308,18 @@ def select_bundle_features_for_columns(
         "bundle_feature_count_after": len(columns),
         "missing_features": [],
         "extra_features_ignored": extra_features_ignored,
-        "feature_order_matches_checkpoint": True,
+        "feature_order_matches_checkpoint": columns == MODEL_FEATURE_COLUMNS[: len(columns)],
     }
 
     if before_count == len(columns):
-        report["bundle_feature_count_after"] = before_count
-        return FeatureSubsetResult(bundle=bundle, report=report)
+        if columns == MODEL_FEATURE_COLUMNS[: len(columns)]:
+            report["bundle_feature_count_after"] = before_count
+            return FeatureSubsetResult(bundle=bundle, report=report)
+        if before_count != len(MODEL_FEATURE_COLUMNS):
+            raise ValueError(
+                "feature_columns order mismatch: 이미 subset된 bundle은 원본 feature 순서를 알 수 없어 "
+                "checkpoint 순서로 안전하게 재정렬할 수 없습니다."
+            )
     if before_count != len(MODEL_FEATURE_COLUMNS):
         raise ValueError(
             "bundle feature 수가 checkpoint 또는 전체 feature contract와 맞지 않습니다: "

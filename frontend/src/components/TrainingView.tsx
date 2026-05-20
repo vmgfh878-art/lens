@@ -78,8 +78,7 @@ interface DetailField {
 
 const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
 const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
-const PRODUCT_WEEKLY_LINE_RUN_ID = "patchtst-1W-fe7f05a84c93";
-const PRODUCT_RUN_IDS = new Set([PRODUCT_LINE_RUN_ID, PRODUCT_BAND_RUN_ID, PRODUCT_WEEKLY_LINE_RUN_ID]);
+const PRODUCT_RUN_IDS = new Set([PRODUCT_LINE_RUN_ID, PRODUCT_BAND_RUN_ID]);
 const TRAINING_RUN_MODELS = new Set(["patchtst", "cnn_lstm", "line_band_composite"]);
 
 const PRODUCT_SLOTS: ProductSlot[] = [
@@ -105,13 +104,13 @@ const PRODUCT_SLOTS: ProductSlot[] = [
   },
   {
     id: "line-1w",
-    kind: "line",
+    kind: "preparing-line",
     title: "1W 보수적 예측선",
-    model: "PatchTST",
-    version: "v1",
+    model: "준비 중",
+    version: null,
     timeframe: "1W",
-    runId: PRODUCT_WEEKLY_LINE_RUN_ID,
-    summary: "중기 방향과 하방 위험을 보수적으로 보기 위한 참고선입니다.",
+    runId: null,
+    summary: "주간 보수적 예측선은 제품 화면에서 비워둔 상태입니다.",
   },
   {
     id: "band-1w",
@@ -539,7 +538,7 @@ function getRunRole(run: AiRunSummary | AiRunDetail | null): string | null {
   if (!run) {
     return null;
   }
-  if (run.run_id === PRODUCT_LINE_RUN_ID || run.run_id === PRODUCT_WEEKLY_LINE_RUN_ID) {
+  if (run.run_id === PRODUCT_LINE_RUN_ID) {
     return "line_model";
   }
   if (run.run_id === PRODUCT_BAND_RUN_ID) {
@@ -1778,14 +1777,13 @@ export default function TrainingView() {
         items.filter((run) => Boolean(getRunRole(run)) || TRAINING_RUN_MODELS.has(String(run.model_name ?? "")));
       const filteredCompletedRuns = filterModelRuns(completedRuns);
       const filteredQualityRuns = filterModelRuns(qualityRuns);
-      const [productLineResult, productBandResult, productWeeklyLineResult] = await Promise.allSettled([
+      const [productLineResult, productBandResult] = await Promise.allSettled([
         fetchAiRun(PRODUCT_LINE_RUN_ID, { includeConfig: false }),
         fetchAiRun(PRODUCT_BAND_RUN_ID, { includeConfig: false }),
-        fetchAiRun(PRODUCT_WEEKLY_LINE_RUN_ID, { includeConfig: false }),
       ]);
       const nextProductLineDetail = productLineResult.status === "fulfilled" ? productLineResult.value.data : null;
       const nextProductBandDetail = productBandResult.status === "fulfilled" ? productBandResult.value.data : null;
-      const nextProductWeeklyLineDetail = productWeeklyLineResult.status === "fulfilled" ? productWeeklyLineResult.value.data : null;
+      const nextProductWeeklyLineDetail = null;
       const experimentCandidates = [...filteredCompletedRuns, ...filteredQualityRuns]
         .filter((run) => !PRODUCT_RUN_IDS.has(run.run_id))
         .filter((run) => !isLegacyRun(run));

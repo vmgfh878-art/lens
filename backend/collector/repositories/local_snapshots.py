@@ -44,6 +44,10 @@ def _candidate_paths(table: str, *, provider: str | None = None, timeframe: str 
     names: list[str] = []
     if provider and timeframe:
         names.append(f"{table}_{provider}_{timeframe}.parquet")
+    if table == "price_data" and str(timeframe or "").upper() in {"1W", "1M"}:
+        if timeframe:
+            names.append(f"{table}_{timeframe}.parquet")
+        return [base / name for name in names]
     if provider:
         names.append(f"{table}_{provider}.parquet")
     if timeframe:

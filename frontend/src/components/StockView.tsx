@@ -85,9 +85,7 @@ const TIMEFRAME_OPTIONS: Array<{ value: DisplayTimeframe; label: string }> = [
 
 const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
 const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
-const PRODUCT_WEEKLY_LINE_RUN_ID = "patchtst-1W-fe7f05a84c93";
 const LINE_MODEL_DISPLAY_NAME = "보수적 예측선 모델 v1";
-const WEEKLY_LINE_MODEL_DISPLAY_NAME = "1W 보수적 예측선 모델 v1";
 const BAND_MODEL_DISPLAY_NAME = "AI 밴드 모델 v1";
 const DEFAULT_INDICATORS: IndicatorId[] = ["rsi", "macd_ratio", "ai_band_width"];
 const PRODUCT_HISTORY_LOOKBACK_DAYS = 370;
@@ -793,50 +791,23 @@ export default function StockView() {
       }
 
       if (nextTimeframe === "1W") {
-        const linePredictionResponse = await fetchPrediction(nextTicker, {
-          timeframe: "1W",
-          runId: PRODUCT_WEEKLY_LINE_RUN_ID,
-        }).catch(() => null);
-        const lineOverlayCheck = linePredictionResponse ? checkLineOverlay(linePredictionResponse.data) : null;
-        const lineReady = Boolean(linePredictionResponse && lineOverlayCheck?.ok);
-
         setLinePredictionHistory([]);
         setBandPredictionHistory([]);
+        setPrediction(null);
         setBandPrediction(null);
         setBandEvaluation(null);
-
-        if (lineReady && linePredictionResponse) {
-          setPrediction(linePredictionResponse.data);
-          setPredictionProvenance({
-            latestRunId: PRODUCT_WEEKLY_LINE_RUN_ID,
-            selectedRunId: linePredictionResponse.data.run_id,
-            isFallback: false,
-          });
-        } else {
-          setPrediction(null);
-          setPredictionProvenance({
-            latestRunId: PRODUCT_WEEKLY_LINE_RUN_ID,
-            selectedRunId: null,
-            isFallback: false,
-          });
-        }
-
-        if (priceRows.length === 0 && lineReady) {
-          setAiState({
-            kind: "empty",
-            message: "1W 보수적 예측선은 저장되어 있지만 가격 데이터가 없어 차트 위에 표시할 수 없습니다. 가격 데이터가 연결되면 표시됩니다.",
-          });
-        } else if (lineReady) {
-          setAiState({
-            kind: "ready",
-            message: "1W 보수적 예측선이 저장된 모델 결과에서 연결되었습니다. 1W AI 밴드는 검증 중입니다.",
-          });
-        } else {
-          setAiState({
-            kind: "empty",
-            message: "1W 보수적 예측선 저장 결과를 아직 표시할 수 없습니다. 1W AI 밴드는 검증 중입니다.",
-          });
-        }
+        setPredictionProvenance({
+          latestRunId: null,
+          selectedRunId: null,
+          isFallback: false,
+        });
+        setAiState({
+          kind: "empty",
+          message:
+            priceRows.length === 0
+              ? "1W 화면은 현재 가격과 보조지표만 표시합니다. 가격 데이터가 연결되면 차트가 표시됩니다."
+              : "1W 보수적 예측선과 AI 밴드는 비워둔 상태입니다. 현재는 가격과 보조지표만 표시합니다.",
+        });
         return;
       }
 
@@ -983,8 +954,8 @@ export default function StockView() {
   const changePercent = getChangePercent(priceData);
   const hasPriceData = priceData.length > 0;
   const aiDisabled = timeframe === "1M";
-  const activeLineModelDisplayName = timeframe === "1W" ? WEEKLY_LINE_MODEL_DISPLAY_NAME : LINE_MODEL_DISPLAY_NAME;
-  const activeBandModelDisplayName = timeframe === "1W" ? "1W AI 밴드 검증 중" : BAND_MODEL_DISPLAY_NAME;
+  const activeLineModelDisplayName = timeframe === "1W" ? "1W 보수적 예측선 비워둠" : LINE_MODEL_DISPLAY_NAME;
+  const activeBandModelDisplayName = timeframe === "1W" ? "1W AI 밴드 비워둠" : BAND_MODEL_DISPLAY_NAME;
   const forecastUnitLabel = timeframe === "1W" ? "주" : "거래일";
   const rawActivePrediction = prediction && timeframe !== "1M" && checkLineOverlay(prediction).ok ? prediction : null;
   const lineOutOfPriceRange = Boolean(hasPriceData && rawActivePrediction && !isPredictionLineWithinPriceRange(rawActivePrediction, priceData));
@@ -1256,7 +1227,7 @@ export default function StockView() {
                   <span>밴드 상태</span>
                   <strong>{bandStatusLabel}</strong>
                   <span>보수적 예측선 실행 ID</span>
-                  <strong>{rawActivePrediction?.run_id ?? (timeframe === "1W" ? PRODUCT_WEEKLY_LINE_RUN_ID : PRODUCT_LINE_RUN_ID)}</strong>
+                  <strong>{rawActivePrediction?.run_id ?? (timeframe === "1W" ? "비워둠" : PRODUCT_LINE_RUN_ID)}</strong>
                   <span>밴드 실행 ID</span>
                   <strong>{activeBandPrediction?.run_id ?? (timeframe === "1W" ? "검증 중" : PRODUCT_BAND_RUN_ID)}</strong>
                 </div>

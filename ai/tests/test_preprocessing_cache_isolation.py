@@ -218,6 +218,77 @@ class PreprocessingCacheIsolationTestCase(unittest.TestCase):
             ],
         )
 
+    def test_1w_feature_index_uses_resampled_friday_label(self):
+        indicator_index = pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "timeframe": ["1W"],
+                "date": ["2026-07-03"],
+                "source": ["yfinance"],
+                "provider": ["yfinance"],
+            }
+        )
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL", "AAPL", "AAPL"],
+                "date": ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02"],
+                "open": [100.0, 101.0, 102.0, 103.0],
+                "high": [101.0, 102.0, 103.0, 104.0],
+                "low": [99.0, 100.0, 101.0, 102.0],
+                "close": [100.5, 101.5, 102.5, 103.5],
+                "adjusted_close": [100.5, 101.5, 102.5, 103.5],
+                "volume": [1000, 1000, 1000, 1000],
+                "source": ["yfinance"] * 4,
+                "provider": ["yfinance"] * 4,
+            }
+        )
+
+        index_frame = _source_aware_feature_index_from_frames(
+            indicator_index,
+            price_df,
+            timeframe="1W",
+            provider="yfinance",
+        )
+
+        self.assertEqual(index_frame["date"].dt.strftime("%Y-%m-%d").tolist(), ["2026-07-03"])
+        self.assertEqual(index_frame.attrs["alignment_audit"]["row_loss_count"], 0)
+        self.assertEqual(index_frame.attrs["alignment_audit"]["join_basis"], "resampled_price_label_date")
+
+    def test_1m_feature_index_uses_month_end_label_when_weekend(self):
+        indicator_index = pd.DataFrame(
+            {
+                "ticker": ["AAPL"],
+                "timeframe": ["1M"],
+                "date": ["2026-02-28"],
+                "source": ["yfinance"],
+                "provider": ["yfinance"],
+            }
+        )
+        price_df = pd.DataFrame(
+            {
+                "ticker": ["AAPL", "AAPL"],
+                "date": ["2026-02-26", "2026-02-27"],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "adjusted_close": [101.0, 102.0],
+                "volume": [1000, 1100],
+                "source": ["yfinance", "yfinance"],
+                "provider": ["yfinance", "yfinance"],
+            }
+        )
+
+        index_frame = _source_aware_feature_index_from_frames(
+            indicator_index,
+            price_df,
+            timeframe="1M",
+            provider="yfinance",
+        )
+
+        self.assertEqual(index_frame["date"].dt.strftime("%Y-%m-%d").tolist(), ["2026-02-28"])
+        self.assertEqual(index_frame.attrs["alignment_audit"]["row_loss_count"], 0)
+
     def test_local_snapshot_feature_index_does_not_call_supabase(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             snapshot_dir = Path(tmp_dir) / "snapshots"

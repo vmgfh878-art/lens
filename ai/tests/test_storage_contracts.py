@@ -7,6 +7,7 @@ from ai.storage import (
     save_model_run,
     save_predictions,
     save_product_latest_predictions,
+    select_product_latest_payload,
     with_prediction_storage_contract,
 )
 
@@ -111,7 +112,7 @@ class StorageContractsTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_product_latest_predictions([prediction, {**prediction, "ticker": "MSFT"}], [evaluation], max_prediction_rows=1)
 
-    def test_save_product_latest_predictions_requires_single_asof_date(self):
+    def test_product_latest_selection_reduces_to_latest_per_ticker(self):
         first = {
             "run_id": "line-run",
             "ticker": "AAPL",
@@ -125,9 +126,21 @@ class StorageContractsTestCase(unittest.TestCase):
             "conservative_series": [],
             "meta": {"layer": "line", "composite": False},
         }
-        second = {**first, "ticker": "MSFT", "asof_date": "2026-05-04"}
-        with self.assertRaises(ValueError):
-            save_product_latest_predictions([first, second], [])
+        newer = {**first, "asof_date": "2026-05-04", "line_series": [102.0]}
+        other_ticker = {**first, "ticker": "MSFT", "asof_date": "2026-05-02"}
+
+        selected_predictions, _, audit = select_product_latest_payload([first, newer, other_ticker], [])
+
+        self.assertEqual(len(selected_predictions), 2)
+        self.assertEqual(audit["input_prediction_row_count"], 3)
+        self.assertEqual(audit["reduced_prediction_row_count"], 2)
+        aapl = [record for record in selected_predictions if record["ticker"] == "AAPL"][0]
+        self.assertEqual(aapl["asof_date"], "2026-05-04")
+
+        with patch("ai.storage.upsert_records") as upsert:
+            save_product_latest_predictions([first, newer, other_ticker], [])
+        saved_predictions = upsert.call_args_list[0].args[1]
+        self.assertEqual(len(saved_predictions), 2)
 
     def test_product_latest_line_layer_rejects_band_payload(self):
         prediction = {

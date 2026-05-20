@@ -20,8 +20,21 @@ torch = bootstrap_torch()
 
 import pandas as pd
 
+from ai.calibration_artifacts import (
+    default_calibration_manifest_path,
+    load_calibration_artifact_manifest,
+    resolve_default_calibration_artifact_manifest,
+)
 from ai.evaluation import build_single_sample_evaluation, summarize_forecast_metrics
-from ai.inference_contract import resolve_execution_market_data_provider, select_bundle_features_for_checkpoint
+from ai.inference_contract import (
+    COMPOSITE_BAND_SUPPORTED_ROLES,
+    COMPOSITE_LINE_SUPPORTED_ROLES,
+    assert_output_matches_model_role,
+    require_role_supported,
+    resolve_execution_market_data_provider,
+    resolve_model_role_from_config,
+    select_bundle_features_for_checkpoint,
+)
 from ai.inference import (
     decode_return_forecasts,
     load_checkpoint,
@@ -29,6 +42,7 @@ from ai.inference import (
     resolve_checkpoint_ticker_registry,
 )
 from ai.loss import PinballLoss
+from ai.models.common import BandOutput, ForecastOutput, LineV2Output
 from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import FEATURE_CONTRACT_VERSION
 from ai.preprocessing import SequenceDataset, SequenceDatasetBundle, prepare_dataset_splits
@@ -162,6 +176,7 @@ def collect_predictions(
 ) -> CollectedPredictions:
     model, checkpoint = load_checkpoint(checkpoint_path)
     config = dict(checkpoint["config"])
+    model_role = resolve_model_role_from_config(config, context="composite.checkpoint")
     bundle, contract_report = _load_bundle_for_checkpoint(
         config=config,
         split=split,
@@ -190,11 +205,27 @@ def collect_predictions(
             future_covariates = future_covariates.to(device, non_blocking=True)
             with autocast_context(device, amp_dtype=amp_dtype):
                 output = forward_model(model, features, ticker_ids, future_covariates)
-            line, lower, upper = apply_band_postprocess(
-                output.line.detach().cpu(),
-                output.lower_band.detach().cpu(),
-                output.upper_band.detach().cpu(),
-            )
+            assert_output_matches_model_role(output, model_role, context="composite.output")
+            if isinstance(output, ForecastOutput):
+                line, lower, upper = apply_band_postprocess(
+                    output.line.detach().cpu(),
+                    output.lower_band.detach().cpu(),
+                    output.upper_band.detach().cpu(),
+                )
+            elif isinstance(output, LineV2Output):
+                line = output.line.detach().cpu()
+                lower = line
+                upper = line
+            elif isinstance(output, BandOutput):
+                ordered = torch.sort(
+                    torch.stack((output.lower_band.detach().cpu(), output.upper_band.detach().cpu()), dim=-1),
+                    dim=-1,
+                ).values
+                lower = ordered[..., 0]
+                upper = ordered[..., 1]
+                line = (lower + upper) / 2.0
+            else:
+                raise TypeError(f"legacy composite에서 지원하지 않는 출력입니다: {type(output).__name__}")
             line_chunks.append(line)
             lower_chunks.append(lower)
             upper_chunks.append(upper)
@@ -215,7 +246,7 @@ def collect_predictions(
         raw_future_returns=torch.cat(raw_target_chunks, dim=0),
         anchor_closes=torch.cat(anchor_chunks, dim=0),
         metadata=bundle.metadata.reset_index(drop=True),
-        contract_report=contract_report,
+        contract_report={**contract_report, "model_role": model_role},
     )
 
 
@@ -521,8 +552,9 @@ def build_composite_contract(
     device_name: str,
     batch_size: int,
     amp_dtype: str,
-    lower_scale: float,
-    upper_scale: float,
+    lower_scale: float | None,
+    upper_scale: float | None,
+    calibration_artifact: Path | None = None,
     output_json: Path,
     composition_policy: str = "raw_composite",
     save: bool = False,
@@ -533,6 +565,16 @@ def build_composite_contract(
         raise ValueError(f"지원하지 않는 composition policy입니다: {composition_policy}")
     line_config = load_checkpoint_config(line_checkpoint)
     band_config = load_checkpoint_config(band_checkpoint)
+    line_role = require_role_supported(
+        resolve_model_role_from_config(line_config, context="composite.line_checkpoint"),
+        COMPOSITE_LINE_SUPPORTED_ROLES,
+        context="composite.line_checkpoint",
+    )
+    band_role = require_role_supported(
+        resolve_model_role_from_config(band_config, context="composite.band_checkpoint"),
+        COMPOSITE_BAND_SUPPORTED_ROLES,
+        context="composite.band_checkpoint",
+    )
     _assert_compatible(line_config, band_config)
 
     line_predictions = collect_predictions(
@@ -564,6 +606,26 @@ def build_composite_contract(
     selected_raw_returns = line_predictions.raw_future_returns[line_indices]
     selected_anchor_closes = line_predictions.anchor_closes[line_indices]
     selected_metadata = line_predictions.metadata.iloc[line_indices].reset_index(drop=True)
+    line_model_run_id = line_model_run_id_override or _resolve_model_run_ref(line_config, line_checkpoint)
+    band_model_run_id = band_model_run_id_override or _resolve_model_run_ref(band_config, band_checkpoint)
+
+    calibration_manifest: dict[str, Any] | None = None
+    if lower_scale is None or upper_scale is None:
+        if lower_scale is not None or upper_scale is not None:
+            raise ValueError("lower_scale과 upper_scale은 함께 지정하거나 둘 다 생략해야 합니다.")
+        if calibration_artifact is not None:
+            calibration_manifest = load_calibration_artifact_manifest(calibration_artifact)
+        else:
+            calibration_manifest = resolve_default_calibration_artifact_manifest(
+                role="band",
+                timeframe=str(line_config["timeframe"]),
+                model_run_id=band_model_run_id,
+            )
+        if str(calibration_manifest.get("calibration_method")) != "scalar_width":
+            raise ValueError(f"legacy composite는 scalar_width calibration만 지원합니다: {calibration_manifest.get('calibration_method')}")
+        params = calibration_manifest["calibration_params"]
+        lower_scale = float(params["lower_scale"])
+        upper_scale = float(params["upper_scale"])
 
     band_line = band_predictions.line[band_indices]
     band_lower = band_predictions.lower[band_indices]
@@ -589,8 +651,6 @@ def build_composite_contract(
         selected_anchor_closes,
     )
 
-    line_model_run_id = line_model_run_id_override or _resolve_model_run_ref(line_config, line_checkpoint)
-    band_model_run_id = band_model_run_id_override or _resolve_model_run_ref(band_config, band_checkpoint)
     if composition_run_id is None:
         if save:
             composition_run_id = f"composite-{line_config['timeframe']}-{uuid4().hex[:12]}"
@@ -628,6 +688,11 @@ def build_composite_contract(
             "band_checkpoint_path": _repo_path(band_checkpoint),
             "band_calibration_method": "scalar_width",
             "band_calibration_params": calibration_params,
+            "band_calibration_artifact": str(calibration_artifact) if calibration_artifact else (
+                str(default_calibration_manifest_path(role="band", timeframe=str(line_config["timeframe"]), model_run_id=band_model_run_id))
+                if calibration_manifest is not None
+                else None
+            ),
             "prediction_composition_version": COMPOSITION_VERSION,
             "line_seq_len": int(line_config["seq_len"]),
             "band_seq_len": int(band_config["seq_len"]),
@@ -724,6 +789,8 @@ def build_composite_contract(
         },
         "line_checkpoint": _repo_path(line_checkpoint),
         "band_checkpoint": _repo_path(band_checkpoint),
+        "line_model_role": line_role,
+        "band_model_role": band_role,
         "line_model_run_id": line_model_run_id,
         "band_model_run_id": band_model_run_id,
         "composition_policy": composition_policy,
@@ -774,8 +841,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--amp-dtype", default="off", choices=["off", "bf16", "fp16"])
-    parser.add_argument("--lower-scale", type=float, required=True)
-    parser.add_argument("--upper-scale", type=float, required=True)
+    parser.add_argument("--lower-scale", type=float, default=None)
+    parser.add_argument("--upper-scale", type=float, default=None)
+    parser.add_argument("--calibration-artifact", default=None)
     parser.add_argument("--composition-policy", default="raw_composite", choices=COMPOSITION_POLICIES)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--save", action="store_true")
@@ -826,6 +894,7 @@ def main() -> None:
         amp_dtype=args.amp_dtype,
         lower_scale=args.lower_scale,
         upper_scale=args.upper_scale,
+        calibration_artifact=Path(args.calibration_artifact) if args.calibration_artifact else None,
         output_json=Path(args.output_json),
         composition_policy=args.composition_policy,
         save=args.save,

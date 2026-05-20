@@ -2,7 +2,8 @@
 .env.local
 *.env
 
-# CP 실험 파일은 정리 전까지 GitHub에 올리지 않는다.
+# CP 원본 실험 파일은 정리 전까지 GitHub에 올리지 않는다.
+# 공개할 필요가 있는 판단/제품/확정 모델 문서는 별도 선별 후 docs 하위에 정리한다.
 docs/cp*
 docs/cp*/
 ai/cp*.py
@@ -12,6 +13,8 @@ scripts/cp*.py
 scripts/cp*.ps1
 logs/cp*/
 data/**/cp*/
+data/raw/**
+data/models/**
 CLAUDE.md
 
 
@@ -65,3 +68,16 @@ docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.log
 docs/yfinance_500_backfill_latest.md
 docs/yfinance_500_backfill_metrics.json
 docs/yfinance_500_backfill_runs/
+docs/yfinance_500_daily_append_latest.md
+docs/yfinance_500_daily_append_metrics.json
+docs/yfinance_500_daily_append_runs/
+docs/daily_yfinance_500_context_latest.md
+docs/daily_yfinance_500_context_metrics.json
+docs/daily_yfinance_500_context_runs/
+docs/daily_yfinance_append_gate_latest.md
+docs/daily_yfinance_append_gate_metrics.json
+docs/daily_yfinance_append_gate_runs/
+
+# 로컬 yfinance 데이터셋/수집 상태 메타
+data/parquet/*yfinance*.manifest.json
+data/parquet/yfinance*_state.json

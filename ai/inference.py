@@ -28,7 +28,12 @@ from ai.evaluation import (
     summarize_line_v2_metrics,
 )
 from ai.inference_contract import (
+    INFERENCE_PAYLOAD_SUPPORTED_ROLES,
+    assert_output_matches_model_role as contract_assert_output_matches_model_role,
+    require_role_supported,
     resolve_execution_market_data_provider,
+    resolve_model_role_from_config,
+    role_contract_table,
     select_bundle_features_for_checkpoint,
     select_bundle_features_for_columns,
     validate_checkpoint_runtime_contract,
@@ -63,17 +68,28 @@ MODEL_REGISTRY = {
 }
 MODEL_ROLE_ALIASES = {
     "legacy": "legacy",
+    "forecast": "legacy",
+    "multihead": "legacy",
+    "line": "line_v2",
     "line_v2": "line_v2",
     "line_model": "line_v2",
-    "line": "line_v2",
+    "conservative_line": "line_v2",
+    "line_regime": "line_regime",
+    "regime": "line_regime",
+    "line_warning": "line_warning",
+    "warning": "line_warning",
+    "line_distributional": "line_distributional",
+    "distributional": "line_distributional",
+    "line_v3": "line_distributional",
+    "line_distributional_mono": "line_distributional_mono",
+    "distributional_mono": "line_distributional_mono",
+    "line_v3_mono": "line_distributional_mono",
     "band": "band",
     "band_model": "band",
 }
-
-
 def resolve_checkpoint_model_role(config: dict[str, Any]) -> str:
     raw_role_value = config.get("model_role") or config.get("output_role")
-    if raw_role_value is None and str(config.get("role") or "").strip().lower() in {"legacy", "line_v2", "band"}:
+    if raw_role_value is None and str(config.get("role") or "").strip():
         raw_role_value = config.get("role")
     raw_role = str(raw_role_value or "legacy").strip().lower()
     model_role = MODEL_ROLE_ALIASES.get(raw_role)
@@ -83,6 +99,8 @@ def resolve_checkpoint_model_role(config: dict[str, Any]) -> str:
 
 
 def assert_output_matches_model_role(output: object, model_role: str) -> None:
+    contract_assert_output_matches_model_role(output, model_role, context="inference.output")
+    return
     if model_role == "line_v2":
         if not isinstance(output, LineV2Output):
             raise TypeError("model_role=line_v2 inference는 LineV2Output만 허용합니다.")
@@ -302,6 +320,11 @@ def infer_bundle(
     )
 
     model_role = resolve_checkpoint_model_role(model_config)
+    require_role_supported(
+        model_role,
+        INFERENCE_PAYLOAD_SUPPORTED_ROLES,
+        context="inference.payload",
+    )
     pinball = PinballLoss((q_low, 0.5, q_high), sort_quantiles=True)
 
     prediction_records: list[dict[str, Any]] = []
@@ -710,8 +733,9 @@ def run_inference(
         model_run=model_run,
         config=config,
     )
+    storage_audit = None
     if storage_contract == "product_latest_only":
-        save_product_latest_predictions(prediction_records, evaluation_records)
+        storage_audit = save_product_latest_predictions(prediction_records, evaluation_records)
     elif storage_contract == STORAGE_CONTRACT_EVALUATION_BULK:
         save_predictions(with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_EVALUATION_BULK))
         save_prediction_evaluations(evaluation_records)
@@ -726,6 +750,8 @@ def run_inference(
         "model_role": resolve_checkpoint_model_role(checkpoint_config),
         "mode": "raw_return" if raw_return_mode else "score_only",
         "storage_contract": storage_contract,
+        "storage_audit": storage_audit,
+        "role_contract_table": role_contract_table(),
         "contract_metrics": contract_metrics,
         "summary_metrics": summary_metrics,
     }

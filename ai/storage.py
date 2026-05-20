@@ -11,6 +11,7 @@ PRODUCT_LATEST_ALLOWED_LAYERS = {"line", "band"}
 PRODUCT_LATEST_DEFAULT_MAX_ROWS = 100
 STORAGE_CONTRACT_PRODUCT_LATEST_ONLY = "product_latest_only"
 STORAGE_CONTRACT_EVALUATION_BULK = "evaluation_bulk"
+PRODUCT_LATEST_TIE_POLICY = "max_asof_date_then_max_decision_time_then_lexical_run_model"
 
 
 def save_model_run(record: dict[str, Any]) -> None:
@@ -96,6 +97,97 @@ def with_prediction_storage_contract(records: list[dict[str, Any]], storage_cont
     return annotated
 
 
+def _product_latest_layer(record: dict[str, Any]) -> str:
+    layer = _meta_value(record, "layer")
+    if layer not in PRODUCT_LATEST_ALLOWED_LAYERS:
+        raise ValueError(f"제품 latest-only prediction meta.layer는 line/band만 허용합니다: {layer}")
+    return str(layer)
+
+
+def _sortable_text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def _product_latest_group_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(record.get("ticker") or "").upper(),
+        str(record.get("timeframe") or ""),
+        str(record.get("horizon") or ""),
+        _product_latest_layer(record),
+    )
+
+
+def _product_latest_sort_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        _sortable_text(record.get("asof_date")),
+        _sortable_text(record.get("decision_time")),
+        _sortable_text(record.get("run_id")),
+        _sortable_text(record.get("model_name")),
+    )
+
+
+def select_product_latest_payload(
+    prediction_records: list[dict[str, Any]],
+    evaluation_records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """제품 latest-only 저장 전 ticker/timeframe/horizon/layer별 최신 row를 고른다."""
+    latest_predictions: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for record in prediction_records:
+        key = _product_latest_group_key(record)
+        previous = latest_predictions.get(key)
+        if previous is None or _product_latest_sort_key(record) > _product_latest_sort_key(previous):
+            latest_predictions[key] = record
+
+    selected_predictions = sorted(
+        latest_predictions.values(),
+        key=lambda item: (_product_latest_group_key(item), _product_latest_sort_key(item)),
+    )
+    selected_eval_keys = {
+        (
+            str(record.get("run_id") or ""),
+            str(record.get("ticker") or "").upper(),
+            str(record.get("timeframe") or ""),
+            str(record.get("asof_date") or ""),
+        )
+        for record in selected_predictions
+    }
+    latest_evaluations: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for record in evaluation_records:
+        key = (
+            str(record.get("run_id") or ""),
+            str(record.get("ticker") or "").upper(),
+            str(record.get("timeframe") or ""),
+            str(record.get("asof_date") or ""),
+        )
+        if key not in selected_eval_keys:
+            continue
+        previous = latest_evaluations.get(key)
+        if previous is None or _sortable_text(record.get("created_at")) > _sortable_text(previous.get("created_at")):
+            latest_evaluations[key] = record
+
+    selected_evaluations = sorted(
+        latest_evaluations.values(),
+        key=lambda item: (
+            str(item.get("ticker") or "").upper(),
+            str(item.get("timeframe") or ""),
+            str(item.get("asof_date") or ""),
+        ),
+    )
+    audit = {
+        "contract": STORAGE_CONTRACT_PRODUCT_LATEST_ONLY,
+        "selection_scope": "ticker_timeframe_horizon_layer_latest",
+        "tie_policy": PRODUCT_LATEST_TIE_POLICY,
+        "input_prediction_row_count": len(prediction_records),
+        "reduced_prediction_row_count": len(selected_predictions),
+        "input_evaluation_row_count": len(evaluation_records),
+        "reduced_evaluation_row_count": len(selected_evaluations),
+        "ticker_count": len({str(record.get("ticker") or "").upper() for record in selected_predictions}),
+        "asof_date_count": len({str(record.get("asof_date") or "") for record in selected_predictions}),
+        "layers": sorted({_product_latest_layer(record) for record in selected_predictions}) if selected_predictions else [],
+    }
+    return selected_predictions, selected_evaluations, audit
+
+
 def _validate_product_latest_predictions(records: list[dict[str, Any]], *, max_rows: int) -> None:
     if len(records) > max_rows:
         raise ValueError(f"제품 latest-only prediction 저장 row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
@@ -154,6 +246,53 @@ def save_product_latest_predictions(
     _validate_product_latest_evaluations(evaluation_records, max_rows=max_evaluation_rows)
     save_predictions(with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_PRODUCT_LATEST_ONLY))
     save_prediction_evaluations(evaluation_records)
+
+
+def _validate_product_latest_predictions(records: list[dict[str, Any]], *, max_rows: int) -> None:
+    if len(records) > max_rows:
+        raise ValueError(f"제품 latest-only prediction row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
+    duplicate_keys: set[tuple[Any, ...]] = set()
+    for record in records:
+        layer = _product_latest_layer(record)
+        composite = bool(_meta_value(record, "composite"))
+        model_name = str(record.get("model_name") or "")
+        if composite or model_name == "line_band_composite" or layer == "composite":
+            raise ValueError("제품 latest-only 저장에는 composite prediction을 허용하지 않습니다.")
+        _validate_product_latest_layer_payload(record, layer)
+        key = (
+            str(record.get("ticker") or "").upper(),
+            str(record.get("timeframe") or ""),
+            str(record.get("horizon") or ""),
+            str(record.get("asof_date") or ""),
+            layer,
+        )
+        if key in duplicate_keys:
+            raise ValueError(f"제품 latest-only prediction 입력에 중복 key가 있습니다: {key}")
+        duplicate_keys.add(key)
+
+
+def _validate_product_latest_evaluations(records: list[dict[str, Any]], *, max_rows: int) -> None:
+    if len(records) > max_rows:
+        raise ValueError(f"제품 latest-only evaluation row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
+
+
+def save_product_latest_predictions(
+    prediction_records: list[dict[str, Any]],
+    evaluation_records: list[dict[str, Any]],
+    *,
+    max_prediction_rows: int = PRODUCT_LATEST_DEFAULT_MAX_ROWS,
+    max_evaluation_rows: int = PRODUCT_LATEST_DEFAULT_MAX_ROWS,
+) -> dict[str, Any]:
+    """제품 latest-only 저장 계약: ticker/timeframe/horizon/layer별 최신 row만 저장한다."""
+    selected_predictions, selected_evaluations, audit = select_product_latest_payload(
+        prediction_records,
+        evaluation_records,
+    )
+    _validate_product_latest_predictions(selected_predictions, max_rows=max_prediction_rows)
+    _validate_product_latest_evaluations(selected_evaluations, max_rows=max_evaluation_rows)
+    save_predictions(with_prediction_storage_contract(selected_predictions, STORAGE_CONTRACT_PRODUCT_LATEST_ONLY))
+    save_prediction_evaluations(selected_evaluations)
+    return audit
 
 
 def fetch_run_evaluations(run_id: str, timeframe: str | None = None) -> pd.DataFrame:

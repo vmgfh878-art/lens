@@ -590,6 +590,65 @@ def _filter_indicator_frame_by_provider(indicator_df: pd.DataFrame, provider: st
     return _filter_frame_by_provider_source(indicator_df, provider)
 
 
+def _price_label_frame_from_price_data(price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    normalized_timeframe = normalize_ai_timeframe(timeframe)
+    prices = price_df.copy()
+    if prices.empty:
+        return pd.DataFrame(columns=["ticker", "date"])
+    prices["ticker"] = prices["ticker"].astype(str).str.upper()
+    prices["date"] = pd.to_datetime(prices["date"], errors="coerce")
+    prices = prices.dropna(subset=["date"])
+    if normalized_timeframe != "1D":
+        if normalized_timeframe == "1W":
+            prices["date"] = prices["date"].dt.to_period("W-FRI").dt.end_time.dt.normalize()
+        else:
+            prices["date"] = prices["date"].dt.to_period("M").dt.end_time.dt.normalize()
+    return (
+        prices[["ticker", "date"]]
+        .dropna(subset=["date"])
+        .drop_duplicates(subset=["ticker", "date"])
+        .sort_values(["ticker", "date"])
+        .reset_index(drop=True)
+    )
+
+
+def audit_feature_price_label_alignment(
+    indicator_index: pd.DataFrame,
+    price_df: pd.DataFrame,
+    *,
+    timeframe: str,
+    provider: str,
+) -> dict[str, Any]:
+    normalized_timeframe = normalize_ai_timeframe(timeframe)
+    indicators = indicator_index.copy()
+    if indicators.empty:
+        return {
+            "timeframe": normalized_timeframe,
+            "provider": provider,
+            "indicator_label_count": 0,
+            "price_label_count": 0,
+            "joined_label_count": 0,
+            "row_loss_count": 0,
+        }
+    indicators["ticker"] = indicators["ticker"].astype(str).str.upper()
+    indicators["timeframe"] = indicators["timeframe"].astype(str).str.upper()
+    indicators["date"] = pd.to_datetime(indicators["date"], errors="coerce")
+    indicators = indicators[indicators["timeframe"] == normalized_timeframe].dropna(subset=["date"])
+    indicators = _filter_indicator_frame_by_provider(indicators, provider)
+    price_labels = _price_label_frame_from_price_data(_filter_price_frame_by_provider(price_df, provider), normalized_timeframe)
+    joined = indicators.merge(price_labels, on=["ticker", "date"], how="inner")
+    return {
+        "timeframe": normalized_timeframe,
+        "provider": provider,
+        "join_basis": "resampled_price_label_date" if normalized_timeframe != "1D" else "daily_price_date",
+        "indicator_label_count": int(len(indicators)),
+        "price_label_count": int(len(price_labels)),
+        "joined_label_count": int(len(joined)),
+        "row_loss_count": int(len(indicators) - len(joined)),
+        "ticker_count": int(indicators["ticker"].nunique()) if not indicators.empty else 0,
+    }
+
+
 def _source_aware_feature_index_from_frames(
     indicator_index: pd.DataFrame,
     price_df: pd.DataFrame,
@@ -609,22 +668,26 @@ def _source_aware_feature_index_from_frames(
     prices = _filter_price_frame_by_provider(price_df, provider)
     if prices.empty:
         return pd.DataFrame(columns=["ticker", "timeframe", "date"])
-    prices = prices.copy()
-    prices["ticker"] = prices["ticker"].astype(str).str.upper()
-    prices["date"] = pd.to_datetime(prices["date"], errors="coerce")
-    prices = prices.dropna(subset=["date"]).drop_duplicates(subset=["ticker", "date"])
+    price_labels = _price_label_frame_from_price_data(prices, normalize_ai_timeframe(timeframe))
 
     index_frame = indicators.merge(
-        prices[["ticker", "date"]],
+        price_labels[["ticker", "date"]],
         on=["ticker", "date"],
         how="inner",
     )
-    return (
+    result = (
         index_frame[["ticker", "timeframe", "date"]]
         .sort_values(["ticker", "date"])
         .drop_duplicates(subset=["ticker", "timeframe", "date"])
         .reset_index(drop=True)
     )
+    result.attrs["alignment_audit"] = audit_feature_price_label_alignment(
+        indicator_index,
+        price_df,
+        timeframe=timeframe,
+        provider=provider,
+    )
+    return result
 
 
 def _local_snapshot_frame(

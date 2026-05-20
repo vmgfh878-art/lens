@@ -43,8 +43,44 @@ const LENS_BALANCE_VALIDATION = [
   ["검증 티커", "95개"],
 ] as const;
 
-type StrategyId = "lens_balance_v1";
+const INDICATOR_BASELINE_RULE = {
+  ma60Entry: 0.02,
+  ma20Entry: -0.02,
+  ma60Exit: -0.05,
+  ma20Exit: -0.05,
+  macdEntry: 0,
+  rsiEntryCap: 75,
+  atrExit: 0.07,
+  pullbackBb: 0.35,
+  pullbackRsi: 55,
+  entryConfirmDays: 2,
+  exitConfirmDays: 3,
+};
+
+const INDICATOR_BASELINE_VALIDATION = [
+  ["전략 수익률", "22.95%"],
+  ["500 동일가중 시장", "16.87%"],
+  ["단순 보유 평균", "30.91%"],
+  ["전략 MDD", "-20.13%"],
+  ["단순 보유 MDD", "-25.95%"],
+  ["MDD 개선폭", "+5.82%"],
+  ["시장 참여율", "63.5%"],
+  ["검증 티커", "500개"],
+] as const;
+
+type StrategyId = "indicator_baseline_v1" | "lens_balance_v1";
 type SignalGroupId = "buy" | "hold" | "risk" | "watch";
+type DecisionFactorId =
+  | "conservative"
+  | "lowerBand"
+  | "bandWidth"
+  | "bandExpansion"
+  | "bandPercentile"
+  | "ma60Trend"
+  | "ma20Trend"
+  | "macd"
+  | "rsi"
+  | "atr";
 
 interface StrategyDefinition {
   id: StrategyId;
@@ -52,18 +88,26 @@ interface StrategyDefinition {
   shortLabel: string;
   description: string;
   ruleRows: Array<[string, string]>;
-  visibleFactors: Array<"conservative" | "lowerBand" | "bandWidth" | "bandExpansion" | "bandPercentile">;
+  visibleFactors: DecisionFactorId[];
+  validationRows: ReadonlyArray<readonly [string, string]>;
+  scopeNote: string;
+  usesAi: boolean;
 }
 
 interface RiskSignal {
   date: string;
   position: 0 | 1;
   targetPosition: 0 | 1;
-  conservativeReturn: number;
-  lowerBandReturn: number;
-  bandWidthReturn: number;
+  conservativeReturn: number | null;
+  lowerBandReturn: number | null;
+  bandWidthReturn: number | null;
   bandWidthExpansion: number | null;
   bandWidthPercentile: number | null;
+  ma60Ratio: number | null;
+  ma20Ratio: number | null;
+  macdRatio: number | null;
+  rsi: number | null;
+  atrRatio: number | null;
   reason: string;
 }
 
@@ -121,11 +165,16 @@ interface TradeRecord {
   price: number | null;
   reason: string;
   nextDayReturn: number | null;
-  conservativeReturn: number;
-  lowerBandReturn: number;
-  bandWidthReturn: number;
+  conservativeReturn: number | null;
+  lowerBandReturn: number | null;
+  bandWidthReturn: number | null;
   bandWidthExpansion: number | null;
   bandWidthPercentile: number | null;
+  ma60Ratio: number | null;
+  ma20Ratio: number | null;
+  macdRatio: number | null;
+  rsi: number | null;
+  atrRatio: number | null;
 }
 
 interface StrategySignalCard {
@@ -141,14 +190,17 @@ interface StrategySignalCard {
   bandWidthExpansion: number | null;
   bandWidthPercentile: number | null;
   ma60Ratio: number | null;
+  ma20Ratio: number | null;
+  macdRatio: number | null;
   rsi: number | null;
+  atrRatio: number | null;
   hasUsableSignal: boolean;
 }
 
 const SIGNAL_GROUPS: Array<{ id: SignalGroupId; title: string; description: string }> = [
-  { id: "buy", title: "매수 후보", description: "AI 지표 기준으로 신규 진입을 검토할 수 있는 종목입니다." },
-  { id: "hold", title: "보유 유지", description: "전략상 보유 상태를 이어가는 종목입니다." },
-  { id: "risk", title: "위험 확대", description: "line 약화나 밴드 위험 확대로 방어 확인이 필요한 종목입니다." },
+  { id: "buy", title: "매수 후보", description: "선택한 전략 기준으로 신규 진입을 검토할 수 있는 종목입니다." },
+  { id: "hold", title: "보유 유지", description: "선택한 전략상 보유 상태를 이어가는 종목입니다." },
+  { id: "risk", title: "위험 확대", description: "전략 기준이 약해져 방어 확인이 필요한 종목입니다." },
   { id: "watch", title: "관망", description: "진입 기준이 아직 충분하지 않거나 신호가 부족한 종목입니다." },
 ];
 
@@ -162,6 +214,28 @@ const SIGNAL_GROUP_DEFAULT_LIMIT: Record<SignalGroupId, number> = {
 const SIGNAL_GROUP_MAX_LIMIT = 10;
 
 const STRATEGIES: StrategyDefinition[] = [
+  {
+    id: "indicator_baseline_v1",
+    label: "지표 기준선 v1",
+    shortLabel: "지표 기준선",
+    description:
+      "AI 예측을 쓰지 않고 60일 추세, 20일 추세, MACD, RSI, ATR만으로 진입과 방어를 판단하는 보조지표 기준 전략입니다.",
+    ruleRows: [
+      ["사용 지표", "60일 추세, 20일 추세, MACD, RSI, ATR, Bollinger 위치"],
+      ["진입", "60일 추세 +2% 이상, 20일 추세 -2% 이상, MACD 양수, RSI 75 미만"],
+      ["저가 반등 진입", "60일 추세가 살아 있고 Bollinger 위치가 낮으며 RSI 55 미만"],
+      ["청산", "60일 추세 -5% 이하 또는 20일 추세 -5% 이하"],
+      ["변동성 방어", "ATR 7% 이상이고 20일 추세가 약하면 청산 후보"],
+      ["확인일", "진입 2일 확인, 청산 3일 확인"],
+      ["포지션", "단일 티커 100% 또는 현금 100%"],
+      ["판정", "AI 없이 비교하기 위한 보조지표-only 기준선"],
+    ],
+    visibleFactors: ["ma60Trend", "ma20Trend", "macd", "rsi", "atr"],
+    validationRows: INDICATOR_BASELINE_VALIDATION,
+    scopeNote:
+      "최근 1년 500티커 기준으로 동일가중 시장 proxy는 넘었지만, 각 티커 단순 보유 평균 수익률은 넘지 못했습니다. 기준선 전략으로만 봅니다.",
+    usesAi: false,
+  },
   {
     id: "lens_balance_v1",
     label: "Lens Balance v1",
@@ -180,6 +254,9 @@ const STRATEGIES: StrategyDefinition[] = [
       ["판정", "제품 기본 후보가 아니라 AI 지표 해석용 실험 전략 v1"],
     ],
     visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "bandPercentile"],
+    validationRows: LENS_BALANCE_VALIDATION,
+    scopeNote: "CP109/CP110 95개 티커 holdout 기준 결과입니다. 제품 기본 후보가 아니라 AI 지표 해석용 실험 전략 v1입니다.",
+    usesAi: true,
   },
 ];
 
@@ -392,12 +469,12 @@ function evaluateTradeFrequency(result: BacktestSimulationResult | null) {
   return "과도";
 }
 
-function strategyNeedsLine(_: StrategyId) {
-  return true;
+function strategyNeedsLine(strategyId: StrategyId) {
+  return strategyId === "lens_balance_v1";
 }
 
-function strategyNeedsBand(_: StrategyId) {
-  return true;
+function strategyNeedsBand(strategyId: StrategyId) {
+  return strategyId === "lens_balance_v1";
 }
 
 function buildRawSignals(params: {
@@ -432,6 +509,11 @@ function buildRawSignals(params: {
         conservativeReturn: conservativeValue / price.close - 1,
         lowerBandReturn: lowerBandValue / price.close - 1,
         bandWidthReturn: bandWidthValue / price.close,
+        ma60Ratio: null,
+        ma20Ratio: null,
+        macdRatio: null,
+        rsi: null,
+        atrRatio: null,
       };
     })
     .filter(
@@ -442,6 +524,11 @@ function buildRawSignals(params: {
         conservativeReturn: number;
         lowerBandReturn: number;
         bandWidthReturn: number;
+        ma60Ratio: null;
+        ma20Ratio: null;
+        macdRatio: null;
+        rsi: null;
+        atrRatio: null;
       } => row !== null
     )
     .sort((left, right) => left.date.localeCompare(right.date));
@@ -462,17 +549,19 @@ function buildRawSignals(params: {
 }
 
 function getRawTarget(row: {
-  conservativeReturn: number;
-  lowerBandReturn: number;
+  conservativeReturn: number | null;
+  lowerBandReturn: number | null;
   bandWidthExpansion: number | null;
 }) {
-  const lineGood = row.conservativeReturn >= LENS_BALANCE_RULE.lineEntryThreshold;
-  const lineHold = row.conservativeReturn >= LENS_BALANCE_RULE.lineHoldThreshold;
-  const lowerRisky = row.lowerBandReturn <= LENS_BALANCE_RULE.lowerRiskThreshold;
+  const conservativeReturn = row.conservativeReturn ?? -Infinity;
+  const lowerBandReturn = row.lowerBandReturn ?? Infinity;
+  const lineGood = conservativeReturn >= LENS_BALANCE_RULE.lineEntryThreshold;
+  const lineHold = conservativeReturn >= LENS_BALANCE_RULE.lineHoldThreshold;
+  const lowerRisky = lowerBandReturn <= LENS_BALANCE_RULE.lowerRiskThreshold;
   const widthExpanded =
     row.bandWidthExpansion != null && row.bandWidthExpansion >= LENS_BALANCE_RULE.widthExpansionThreshold;
   const entryOk = lineGood && !widthExpanded;
-  const riskExit = row.conservativeReturn < LENS_BALANCE_RULE.lineHoldThreshold && (lowerRisky || widthExpanded);
+  const riskExit = conservativeReturn < LENS_BALANCE_RULE.lineHoldThreshold && (lowerRisky || widthExpanded);
 
   if (entryOk) {
     return { target: 1 as const, reason: "보수적 예측선이 진입 기준을 충족하고 밴드 폭 급확장이 없습니다." };
@@ -490,6 +579,145 @@ function getRawTarget(row: {
     return { target: 0 as const, reason: "예측선 약화와 밴드 폭 확장이 함께 나타났습니다." };
   }
   return { target: 0 as const, reason: "진입 또는 보유 기준을 충족하지 못해 현금으로 대기합니다." };
+}
+
+function normalizeRsi(value: number | null | undefined) {
+  if (!Number.isFinite(value ?? NaN)) {
+    return null;
+  }
+  const number = Number(value);
+  return number >= 0 && number <= 1 ? number * 100 : number;
+}
+
+function buildIndicatorRows(priceRows: PriceBar[], indicators: IndicatorPoint[]) {
+  const indicatorByDate = new Map(indicators.map((row) => [row.date, row]));
+  const ma20Values = priceRows.map((row, index) => {
+    const window = priceRows.slice(Math.max(0, index - 19), index + 1);
+    if (window.length < 15) {
+      return null;
+    }
+    const average = window.reduce((sum, item) => sum + item.close, 0) / window.length;
+    return average > 0 ? priceRows[index].close / average - 1 : null;
+  });
+  const ma60Values = priceRows.map((row, index) => {
+    const window = priceRows.slice(Math.max(0, index - 59), index + 1);
+    if (window.length < 40) {
+      return null;
+    }
+    const average = window.reduce((sum, item) => sum + item.close, 0) / window.length;
+    return average > 0 ? priceRows[index].close / average - 1 : null;
+  });
+
+  return priceRows.map((price, index) => {
+    const indicator = indicatorByDate.get(price.date);
+    return {
+      date: price.date,
+      ma60Ratio: Number.isFinite(indicator?.ma_60_ratio ?? NaN) ? indicator?.ma_60_ratio ?? null : ma60Values[index],
+      ma20Ratio: Number.isFinite(indicator?.ma_20_ratio ?? NaN) ? indicator?.ma_20_ratio ?? null : ma20Values[index],
+      macdRatio: Number.isFinite(indicator?.macd_ratio ?? NaN) ? indicator?.macd_ratio ?? null : null,
+      rsi: normalizeRsi(indicator?.rsi),
+      atrRatio: Number.isFinite(indicator?.atr_ratio ?? NaN) ? indicator?.atr_ratio ?? null : null,
+      bbPosition: Number.isFinite(indicator?.bb_position ?? NaN) ? indicator?.bb_position ?? null : null,
+    };
+  });
+}
+
+function getIndicatorRawTarget(row: ReturnType<typeof buildIndicatorRows>[number]) {
+  const ma60 = row.ma60Ratio ?? -Infinity;
+  const ma20 = row.ma20Ratio ?? -Infinity;
+  const macd = row.macdRatio ?? -Infinity;
+  const rsi = row.rsi ?? Infinity;
+  const atr = row.atrRatio ?? 0;
+  const bb = row.bbPosition ?? Infinity;
+  const trendEntry =
+    ma60 >= INDICATOR_BASELINE_RULE.ma60Entry &&
+    ma20 >= INDICATOR_BASELINE_RULE.ma20Entry &&
+    macd >= INDICATOR_BASELINE_RULE.macdEntry &&
+    rsi < INDICATOR_BASELINE_RULE.rsiEntryCap;
+  const pullbackEntry =
+    ma60 >= INDICATOR_BASELINE_RULE.ma60Entry &&
+    bb <= INDICATOR_BASELINE_RULE.pullbackBb &&
+    rsi < INDICATOR_BASELINE_RULE.pullbackRsi;
+  const trendExit = ma60 <= INDICATOR_BASELINE_RULE.ma60Exit || ma20 <= INDICATOR_BASELINE_RULE.ma20Exit;
+  const volatilityExit = atr >= INDICATOR_BASELINE_RULE.atrExit && ma20 < 0;
+
+  if (trendEntry) {
+    return { target: 1 as const, reason: "60일 추세와 20일 추세가 살아 있고 MACD가 양수라 매수합니다." };
+  }
+  if (pullbackEntry) {
+    return { target: 1 as const, reason: "큰 추세가 살아 있는 상태에서 과열이 낮아 반등 후보로 매수합니다." };
+  }
+  if (trendExit && volatilityExit) {
+    return { target: 0 as const, reason: "추세 약화와 변동성 확대가 함께 나타나 매도합니다." };
+  }
+  if (trendExit) {
+    return { target: 0 as const, reason: "60일 또는 20일 추세가 기준 아래로 약해져 매도합니다." };
+  }
+  if (volatilityExit) {
+    return { target: 0 as const, reason: "변동성이 커지고 단기 추세가 약해져 매도합니다." };
+  }
+  return { target: 0 as const, reason: "진입 기준이 아직 충분하지 않아 대기합니다." };
+}
+
+function buildIndicatorSignals(params: { priceRows: PriceBar[]; indicators: IndicatorPoint[] }) {
+  const rows = buildIndicatorRows(params.priceRows, params.indicators).filter(
+    (row) => Number.isFinite(row.ma60Ratio ?? NaN) && Number.isFinite(row.ma20Ratio ?? NaN)
+  );
+  let currentPosition: 0 | 1 = 0;
+  let exitStreak = 0;
+  let entryStreak = 0;
+
+  return rows.map((row) => {
+    const raw = getIndicatorRawTarget(row);
+    const lowering = raw.target < currentPosition;
+    const raising = raw.target > currentPosition;
+    let reason = raw.reason;
+
+    if (lowering) {
+      exitStreak += 1;
+    } else {
+      exitStreak = 0;
+    }
+
+    if (raising) {
+      entryStreak += 1;
+    } else {
+      entryStreak = 0;
+    }
+
+    if (lowering && exitStreak >= INDICATOR_BASELINE_RULE.exitConfirmDays) {
+      currentPosition = raw.target;
+      entryStreak = 0;
+      reason = `${raw.reason} 청산 조건을 ${INDICATOR_BASELINE_RULE.exitConfirmDays}일 확인했습니다.`;
+    } else if (lowering) {
+      reason = `${raw.reason} 청산 조건 확인 중이라 직전 포지션을 유지합니다.`;
+    } else if (raising && entryStreak >= INDICATOR_BASELINE_RULE.entryConfirmDays) {
+      currentPosition = raw.target;
+      exitStreak = 0;
+      reason = `${raw.reason} 진입 조건을 ${INDICATOR_BASELINE_RULE.entryConfirmDays}일 확인했습니다.`;
+    } else if (raising) {
+      reason = `${raw.reason} 진입 조건 확인 중이라 현금 대기를 유지합니다.`;
+    } else if (!lowering && !raising) {
+      currentPosition = raw.target;
+    }
+
+    return {
+      date: row.date,
+      position: currentPosition,
+      targetPosition: raw.target,
+      conservativeReturn: null,
+      lowerBandReturn: null,
+      bandWidthReturn: null,
+      bandWidthExpansion: null,
+      bandWidthPercentile: null,
+      ma60Ratio: row.ma60Ratio,
+      ma20Ratio: row.ma20Ratio,
+      macdRatio: row.macdRatio,
+      rsi: row.rsi,
+      atrRatio: row.atrRatio,
+      reason,
+    };
+  });
 }
 
 function buildSignals(params: {
@@ -571,10 +799,12 @@ function getBandWidthState(card: Pick<StrategySignalCard, "bandWidthExpansion" |
 }
 
 function classifySignalGroup(signal: RiskSignal) {
-  const lowerRisky = signal.lowerBandReturn <= LENS_BALANCE_RULE.lowerRiskThreshold;
+  const lowerBandReturn = signal.lowerBandReturn ?? Infinity;
+  const conservativeReturn = signal.conservativeReturn ?? Infinity;
+  const lowerRisky = lowerBandReturn <= LENS_BALANCE_RULE.lowerRiskThreshold;
   const widthExpanded =
     signal.bandWidthExpansion != null && signal.bandWidthExpansion >= LENS_BALANCE_RULE.widthExpansionThreshold;
-  const lineWeak = signal.conservativeReturn < LENS_BALANCE_RULE.lineHoldThreshold;
+  const lineWeak = conservativeReturn < LENS_BALANCE_RULE.lineHoldThreshold;
 
   if (signal.targetPosition === 1 && signal.position === 0) {
     return { group: "buy" as const, label: "매수 후보" };
@@ -588,13 +818,32 @@ function classifySignalGroup(signal: RiskSignal) {
   return { group: "watch" as const, label: "관망" };
 }
 
-async function loadStrategySignalCard(ticker: string): Promise<StrategySignalCard> {
+function classifyIndicatorSignal(signal: RiskSignal) {
+  const ma60Weak = (signal.ma60Ratio ?? 0) <= INDICATOR_BASELINE_RULE.ma60Exit;
+  const ma20Weak = (signal.ma20Ratio ?? 0) <= INDICATOR_BASELINE_RULE.ma20Exit;
+
+  if (signal.targetPosition === 1 && signal.position === 0) {
+    return { group: "buy" as const, label: "매수 후보" };
+  }
+  if (signal.position === 1) {
+    return { group: "hold" as const, label: "보유 유지" };
+  }
+  if (ma60Weak || ma20Weak || signal.reason.includes("변동성")) {
+    return { group: "risk" as const, label: "위험 확대" };
+  }
+  return { group: "watch" as const, label: "관망" };
+}
+
+async function loadStrategySignalCard(ticker: string, strategyId: StrategyId): Promise<StrategySignalCard> {
   const baseCard: StrategySignalCard = {
     ticker,
     sector: null,
     group: "watch",
     signalLabel: "아직 신호 없음",
-    reason: "가격, 예측선, AI 밴드 history 중 일부가 부족해 최신 전략 신호를 만들 수 없습니다.",
+    reason:
+      strategyId === "lens_balance_v1"
+        ? "가격, 예측선, AI 밴드 history 중 일부가 부족해 최신 전략 신호를 만들 수 없습니다."
+        : "가격 또는 보조지표가 부족해 최신 전략 신호를 만들 수 없습니다.",
     asofDate: null,
     conservativeReturn: null,
     lowerBandReturn: null,
@@ -602,7 +851,10 @@ async function loadStrategySignalCard(ticker: string): Promise<StrategySignalCar
     bandWidthExpansion: null,
     bandWidthPercentile: null,
     ma60Ratio: null,
+    ma20Ratio: null,
+    macdRatio: null,
     rsi: null,
+    atrRatio: null,
     hasUsableSignal: false,
   };
 
@@ -610,8 +862,12 @@ async function loadStrategySignalCard(ticker: string): Promise<StrategySignalCar
     const [prices, indicatorsResponse, lineResponse, bandResponse, tickerResponse] = await Promise.all([
       fetchPriceHistory(ticker, "1D"),
       fetchIndicators(ticker, { timeframe: "1D", limit: 300 }).catch(() => null),
-      fetchPredictionHistory(ticker, { runId: PRODUCT_LINE_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null),
-      fetchPredictionHistory(ticker, { runId: PRODUCT_BAND_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null),
+      strategyId === "lens_balance_v1"
+        ? fetchPredictionHistory(ticker, { runId: PRODUCT_LINE_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null)
+        : Promise.resolve(null),
+      strategyId === "lens_balance_v1"
+        ? fetchPredictionHistory(ticker, { runId: PRODUCT_BAND_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null)
+        : Promise.resolve(null),
       fetchTickers({ search: ticker, limit: 1 }).catch(() => null),
     ]);
     const indicators = sortUniqueByDate(indicatorsResponse?.data.data ?? []);
@@ -619,18 +875,23 @@ async function loadStrategySignalCard(ticker: string): Promise<StrategySignalCar
     const bandRows = bandResponse?.data ?? [];
     const sector = tickerResponse?.data.find((item) => item.ticker === ticker)?.sector ?? null;
 
-    if (prices.length === 0 || lineRows.length === 0 || bandRows.length === 0) {
+    if (prices.length === 0) {
       return { ...baseCard, sector };
     }
 
-    const signals = buildSignals({ priceRows: prices, lineHistory: lineRows, bandHistory: bandRows });
+    const signals =
+      strategyId === "lens_balance_v1"
+        ? lineRows.length > 0 && bandRows.length > 0
+          ? buildSignals({ priceRows: prices, lineHistory: lineRows, bandHistory: bandRows })
+          : []
+        : buildIndicatorSignals({ priceRows: prices, indicators });
     const latestSignal = signals.at(-1);
     if (!latestSignal) {
       return { ...baseCard, sector };
     }
 
     const latestIndicator = getLatestIndicatorBefore(indicators, latestSignal.date);
-    const classification = classifySignalGroup(latestSignal);
+    const classification = strategyId === "lens_balance_v1" ? classifySignalGroup(latestSignal) : classifyIndicatorSignal(latestSignal);
     return {
       ticker,
       sector,
@@ -643,8 +904,11 @@ async function loadStrategySignalCard(ticker: string): Promise<StrategySignalCar
       bandWidthReturn: latestSignal.bandWidthReturn,
       bandWidthExpansion: latestSignal.bandWidthExpansion,
       bandWidthPercentile: latestSignal.bandWidthPercentile,
-      ma60Ratio: latestIndicator?.ma_60_ratio ?? null,
-      rsi: latestIndicator?.rsi ?? null,
+      ma60Ratio: latestSignal.ma60Ratio ?? latestIndicator?.ma_60_ratio ?? null,
+      ma20Ratio: latestSignal.ma20Ratio ?? latestIndicator?.ma_20_ratio ?? null,
+      macdRatio: latestSignal.macdRatio ?? latestIndicator?.macd_ratio ?? null,
+      rsi: latestSignal.rsi ?? normalizeRsi(latestIndicator?.rsi),
+      atrRatio: latestSignal.atrRatio ?? latestIndicator?.atr_ratio ?? null,
       hasUsableSignal: true,
     };
   } catch {
@@ -706,12 +970,17 @@ function chooseLargeLossThreshold(returns: number[]) {
 }
 
 function runStrategyBacktest(params: {
+  strategyId: StrategyId;
   priceRows: PriceBar[];
   lineHistory: PredictionResult[];
   bandHistory: PredictionResult[];
+  indicators: IndicatorPoint[];
   feeBps: number;
 }): BacktestSimulationResult | null {
-  const signals = buildSignals(params);
+  const signals =
+    params.strategyId === "lens_balance_v1"
+      ? buildSignals(params)
+      : buildIndicatorSignals({ priceRows: params.priceRows, indicators: params.indicators });
   if (params.priceRows.length < 2 || signals.length === 0) {
     return null;
   }
@@ -946,7 +1215,7 @@ export default function BacktestView() {
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [selectedTicker, setSelectedTicker] = useState("AAPL");
   const timeframe: DisplayTimeframe = "1D";
-  const strategyId: StrategyId = "lens_balance_v1";
+  const [strategyId, setStrategyId] = useState<StrategyId>("indicator_baseline_v1");
   const [priceData, setPriceData] = useState<PriceBar[]>([]);
   const [indicatorData, setIndicatorData] = useState<IndicatorPoint[]>([]);
   const [lineHistory, setLineHistory] = useState<PredictionResult[]>([]);
@@ -1003,7 +1272,7 @@ export default function BacktestView() {
     let active = true;
     setSignalLoading(true);
     setSignalErrorMessage(null);
-    Promise.all(SIGNAL_SCAN_TICKERS.map((ticker) => loadStrategySignalCard(ticker)))
+    Promise.all(SIGNAL_SCAN_TICKERS.map((ticker) => loadStrategySignalCard(ticker, strategyId)))
       .then((cards) => {
         if (active) {
           setSignalCards(cards);
@@ -1024,7 +1293,7 @@ export default function BacktestView() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [strategyId]);
 
   async function loadBacktest(nextTicker: string, nextTimeframe: DisplayTimeframe, nextStrategyId = strategyId) {
     setIsLoading(true);
@@ -1054,23 +1323,27 @@ export default function BacktestView() {
         return;
       }
 
+      const needsLine = strategyNeedsLine(nextStrategyId);
+      const needsBand = strategyNeedsBand(nextStrategyId);
       const [lineResponse, bandResponse] = await Promise.all([
-        fetchPredictionHistory(normalizedTicker, {
-          runId: PRODUCT_LINE_RUN_ID,
-          limit: PREDICTION_HISTORY_LIMIT,
-        }).catch(() => null),
-        fetchPredictionHistory(normalizedTicker, {
-          runId: PRODUCT_BAND_RUN_ID,
-          limit: PREDICTION_HISTORY_LIMIT,
-        }).catch(() => null),
+        needsLine
+          ? fetchPredictionHistory(normalizedTicker, {
+              runId: PRODUCT_LINE_RUN_ID,
+              limit: PREDICTION_HISTORY_LIMIT,
+            }).catch(() => null)
+          : Promise.resolve(null),
+        needsBand
+          ? fetchPredictionHistory(normalizedTicker, {
+              runId: PRODUCT_BAND_RUN_ID,
+              limit: PREDICTION_HISTORY_LIMIT,
+            }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       const lineRows = lineResponse?.data ?? [];
       const bandRows = bandResponse?.data ?? [];
       setLineHistory(lineRows);
       setBandHistory(bandRows);
 
-      const needsLine = strategyNeedsLine(nextStrategyId);
-      const needsBand = strategyNeedsBand(nextStrategyId);
       if ((needsLine && lineRows.length === 0) || (needsBand && bandRows.length === 0)) {
         const missingParts = [
           needsLine && lineRows.length === 0 ? "보수적 예측선" : null,
@@ -1081,9 +1354,11 @@ export default function BacktestView() {
       }
 
       const nextResult = runStrategyBacktest({
+        strategyId: nextStrategyId,
         priceRows: prices,
         lineHistory: lineRows,
         bandHistory: bandRows,
+        indicators,
         feeBps: DEFAULT_FEE_BPS,
       });
       setResult(nextResult);
@@ -1099,7 +1374,7 @@ export default function BacktestView() {
   }
 
   useEffect(() => {
-    void loadBacktest("AAPL", "1D", "lens_balance_v1");
+    void loadBacktest("AAPL", "1D", "indicator_baseline_v1");
   }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1122,6 +1397,13 @@ export default function BacktestView() {
     if (scrollToDetail) {
       window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
     }
+  }
+
+  function handleStrategyChange(nextStrategyId: StrategyId) {
+    setStrategyId(nextStrategyId);
+    startTransition(() => {
+      void loadBacktest(selectedTicker, timeframe, nextStrategyId);
+    });
   }
 
   function toggleSignalGroup(groupId: SignalGroupId) {
@@ -1177,6 +1459,11 @@ export default function BacktestView() {
         bandWidthReturn: signal.bandWidthReturn,
         bandWidthExpansion: signal.bandWidthExpansion,
         bandWidthPercentile: signal.bandWidthPercentile,
+        ma60Ratio: signal.ma60Ratio,
+        ma20Ratio: signal.ma20Ratio,
+        macdRatio: signal.macdRatio,
+        rsi: signal.rsi,
+        atrRatio: signal.atrRatio,
       };
     });
   }, [priceData, priceByDate, result]);
@@ -1238,7 +1525,37 @@ export default function BacktestView() {
           value: latestTradeRecord.bandWidthPercentile == null ? "-" : formatUnsignedRatioAsPercent(latestTradeRecord.bandWidthPercentile),
           description: "최근 history 안에서 밴드 폭이 어느 정도 넓은 편인지 보는 참고값입니다.",
         },
-      ].filter((factor) => strategyDefinition.visibleFactors.includes(factor.id as StrategyDefinition["visibleFactors"][number]))
+        {
+          id: "ma60Trend",
+          label: "60일 추세",
+          value: formatRatioAsPercent(latestTradeRecord.ma60Ratio),
+          description: "+2% 이상이면 상승 추세로 보고, -5% 이하이면 방어 후보로 봅니다.",
+        },
+        {
+          id: "ma20Trend",
+          label: "20일 추세",
+          value: formatRatioAsPercent(latestTradeRecord.ma20Ratio),
+          description: "단기 흐름이 크게 무너지면 청산 후보로 봅니다.",
+        },
+        {
+          id: "macd",
+          label: "MACD",
+          value: formatRatioAsPercent(latestTradeRecord.macdRatio),
+          description: "0보다 크면 추세 모멘텀이 살아 있는 쪽으로 봅니다.",
+        },
+        {
+          id: "rsi",
+          label: "RSI",
+          value: formatNumber(latestTradeRecord.rsi, 1),
+          description: "75 이상이면 신규 진입을 조심합니다.",
+        },
+        {
+          id: "atr",
+          label: "ATR",
+          value: formatRatioAsPercent(latestTradeRecord.atrRatio),
+          description: "변동성이 커질 때 포지션 위험을 확인합니다.",
+        },
+      ].filter((factor) => strategyDefinition.visibleFactors.includes(factor.id as DecisionFactorId))
     : [];
 
   return (
@@ -1247,18 +1564,20 @@ export default function BacktestView() {
         <div className="view-header__title">
           <div className="eyebrow">백테스트</div>
           <h1>전략 신호</h1>
-          <p>Lens Balance v1이 보수적 예측선과 AI 밴드를 어떻게 해석했는지 먼저 보고, 종목을 선택해 단일 티커 백테스트를 확인합니다.</p>
+          <p>전략이 고른 종목 후보를 먼저 보고, 종목을 선택해 단일 티커 백테스트를 확인합니다.</p>
         </div>
-        <div className="status-badge status-badge--neutral">실험 전략 v1</div>
+        <div className="status-badge status-badge--neutral">{strategyDefinition.label}</div>
       </header>
 
       <section className="panel strategy-signal-overview">
         <div>
           <div className="eyebrow">오늘의 신호 요약</div>
-          <h2>Lens Balance v1 AI 지표 기준 신호</h2>
+          <h2>{strategyDefinition.label} 기준 신호</h2>
           <p>
-            저장된 1D 제품 예측선과 AI 밴드 history가 있는 종목만 읽어 최신 전략 상태를 요약합니다. 포트폴리오 추천이 아니라 단일 티커
-            백테스트로 이어지는 신호 탐색 화면입니다.
+            {strategyDefinition.usesAi
+              ? "저장된 1D 제품 예측선과 AI 밴드 history가 있는 종목만 읽어 최신 전략 상태를 요약합니다."
+              : "AI 예측 없이 가격과 보조지표만 읽어 최신 전략 상태를 요약합니다."}
+            {" "}포트폴리오 추천이 아니라 단일 티커 백테스트로 이어지는 신호 탐색 화면입니다.
           </p>
           <p className="strategy-signal-scope-note">현재는 12개 주요 종목 기준 전략 신호입니다. 전체 scanner API가 붙기 전까지는 subset 신호로만 봅니다.</p>
         </div>
@@ -1313,22 +1632,45 @@ export default function BacktestView() {
                     </div>
                     <div className="signal-card__label">{card.signalLabel}</div>
                     <dl>
-                      <div>
-                        <dt>예측선</dt>
-                        <dd>{formatRatioAsPercent(card.conservativeReturn)}</dd>
-                      </div>
-                      <div>
-                        <dt>하단 위험</dt>
-                        <dd>{formatRatioAsPercent(card.lowerBandReturn)}</dd>
-                      </div>
-                      <div>
-                        <dt>밴드 폭</dt>
-                        <dd>{getBandWidthState(card)}</dd>
-                      </div>
-                      <div>
-                        <dt>60일 추세</dt>
-                        <dd>{formatRatioAsPercent(card.ma60Ratio)}</dd>
-                      </div>
+                      {strategyDefinition.usesAi ? (
+                        <>
+                          <div>
+                            <dt>예측선</dt>
+                            <dd>{formatRatioAsPercent(card.conservativeReturn)}</dd>
+                          </div>
+                          <div>
+                            <dt>하단 위험</dt>
+                            <dd>{formatRatioAsPercent(card.lowerBandReturn)}</dd>
+                          </div>
+                          <div>
+                            <dt>밴드 폭</dt>
+                            <dd>{getBandWidthState(card)}</dd>
+                          </div>
+                          <div>
+                            <dt>60일 추세</dt>
+                            <dd>{formatRatioAsPercent(card.ma60Ratio)}</dd>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <dt>60일 추세</dt>
+                            <dd>{formatRatioAsPercent(card.ma60Ratio)}</dd>
+                          </div>
+                          <div>
+                            <dt>20일 추세</dt>
+                            <dd>{formatRatioAsPercent(card.ma20Ratio)}</dd>
+                          </div>
+                          <div>
+                            <dt>RSI</dt>
+                            <dd>{formatNumber(card.rsi, 1)}</dd>
+                          </div>
+                          <div>
+                            <dt>ATR</dt>
+                            <dd>{formatRatioAsPercent(card.atrRatio)}</dd>
+                          </div>
+                        </>
+                      )}
                     </dl>
                     <p>{card.hasUsableSignal ? card.reason : "아직 신호 없음"}</p>
                   </button>
@@ -1358,6 +1700,16 @@ export default function BacktestView() {
           <label className="search-field">
             <span>티커</span>
             <input value={tickerInput} onChange={(event) => setTickerInput(event.target.value.toUpperCase())} />
+          </label>
+          <label className="select-field">
+            <span>전략</span>
+            <select value={strategyId} onChange={(event) => handleStrategyChange(event.target.value as StrategyId)}>
+              {STRATEGIES.map((strategy) => (
+                <option key={strategy.id} value={strategy.id}>
+                  {strategy.label}
+                </option>
+              ))}
+            </select>
           </label>
           <button type="submit" className="primary-button primary-button--compact" disabled={isLoading}>
             조회
@@ -1390,14 +1742,11 @@ export default function BacktestView() {
           <h2>{strategyDefinition.label}</h2>
           <p>{strategyDefinition.description}</p>
           <p className="compact-note">
-            이 화면은 매수·매도 추천이 아니라 AI 지표를 해석해 본 룰 기반 시뮬레이션입니다. 현금 보유는 하방 위험과 불확실성이 커졌을 때
-            시장 참여를 잠시 줄이는 방식입니다.
+            이 화면은 매수·매도 추천이 아니라 룰 기반 시뮬레이션입니다. 현금 보유는 전략 기준이 약할 때 시장 참여를 잠시 줄이는 방식입니다.
           </p>
-          <p className="compact-note compact-note--warning">
-            검증 판정: 제품 기본 후보가 아니라 실험 전략 v1입니다. 대표 티커별 일관성이 약했던 한계를 숨기지 않고 표시합니다.
-          </p>
-          <div className="strategy-validation-strip" aria-label="Lens Balance v1 검증 결과">
-            {LENS_BALANCE_VALIDATION.map(([label, value]) => (
+          <p className="compact-note compact-note--warning">{strategyDefinition.scopeNote}</p>
+          <div className="strategy-validation-strip" aria-label={`${strategyDefinition.label} 검증 결과`}>
+            {strategyDefinition.validationRows.map(([label, value]) => (
               <div key={label}>
                 <span>{label}</span>
                 <strong>{value}</strong>
