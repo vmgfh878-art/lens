@@ -535,8 +535,15 @@ def upsert_price_data(frame: pd.DataFrame) -> None:
     if frame.empty:
         print("[Sync] price_data 신규 데이터 없음")
         return
+    frame = frame.copy()
+    frame["source"] = frame.get("source", "eodhd")
+    frame["provider"] = frame.get("provider", "eodhd")
+    frame["provider_adjustment_policy"] = frame.get(
+        "provider_adjustment_policy",
+        "eodhd_raw_ohlc_adjusted_close_factor_v3_adjusted_ohlc",
+    )
     records = normalize_frame(frame).to_dict(orient="records")
-    chunked_upsert(get_client(), "price_data", records, on_conflict="ticker,date")
+    chunked_upsert(get_client(), "price_data", records, on_conflict="ticker,date,source")
     print(f"[Sync] price_data {len(records):,}건 적재")
 
 
@@ -668,9 +675,11 @@ def upsert_indicators(
             continue
 
         frame = features.copy()
+        frame["source"] = "eodhd"
+        frame["provider"] = "eodhd"
         frame["date"] = pd.to_datetime(frame["date"]).dt.strftime("%Y-%m-%d")
         records = frame.where(pd.notnull(frame), None).to_dict(orient="records")
-        chunked_upsert(client, "indicators", records, on_conflict="ticker,timeframe,date")
+        chunked_upsert(client, "indicators", records, on_conflict="ticker,timeframe,date,source")
         print(f"[Sync] indicators {timeframe} {len(records):,}건 적재")
 
 

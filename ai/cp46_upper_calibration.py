@@ -6,14 +6,17 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import torch
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai.torch_bootstrap import bootstrap_torch  # noqa: E402
+
+torch = bootstrap_torch()  # noqa: E402
+
 from ai.composite_inference import (  # noqa: E402
+    COMPOSITION_PHASE1_NOTICE,
+    COMPOSITION_TOOL_STATUS,
     _apply_scalar_width,
     _json_safe,
     _repo_path,
@@ -229,14 +232,15 @@ def _summarize_policy(
             base_upper=tensors["base_upper"],
         )
     )
-    summary["pass_flags"] = {
+    summary["diagnostic_flags"] = {
         "coverage": 0.75 <= float(summary["coverage"]) <= 0.90,
         "upper_breach_rate": float(summary["upper_breach_rate"]) <= 0.15,
         "lower_breach_rate": float(summary["lower_breach_rate"]) <= 0.12,
         "line_inside_band_ratio": float(summary["line_inside_band_ratio"]) >= 0.95,
         "lower_not_less_conservative": not bool(summary["lower_less_conservative"]),
     }
-    summary["all_pass"] = all(summary["pass_flags"].values())
+    summary["diagnostic_all_thresholds_met"] = all(summary["diagnostic_flags"].values())
+    summary["interpretation"] = "legacy diagnostic comparison only; 모델 후보 통과/탈락 판정으로 사용하지 않습니다."
     return summary
 
 
@@ -294,6 +298,11 @@ def evaluate_upper_calibration(
     ]
     result = {
         "cp": "CP46-M",
+        "scope": "legacy composite upper calibration diagnostic comparison",
+        "phase1_contract_status": COMPOSITION_TOOL_STATUS,
+        "deprecated_for_phase1_product_contract": True,
+        "phase1_notice": COMPOSITION_PHASE1_NOTICE,
+        "interpretation": "diagnostic comparison only; 모델 후보 통과/탈락 판정으로 사용하지 않습니다.",
         "line_checkpoint": _repo_path(line_checkpoint),
         "band_checkpoint": _repo_path(band_checkpoint),
         "limit_tickers": limit_tickers,
@@ -319,7 +328,7 @@ def evaluate_upper_calibration(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CP46 composite upper calibration 비교")
+    parser = argparse.ArgumentParser(description="Legacy composite upper calibration diagnostic comparison")
     parser.add_argument("--line-checkpoint", required=True)
     parser.add_argument("--band-checkpoint", required=True)
     parser.add_argument("--limit-tickers", type=int, default=200)
@@ -355,7 +364,7 @@ def main() -> None:
             "avg_band_width": values["test"]["avg_band_width"],
             "width_increase_ratio": values["test"]["width_increase_ratio"],
             "line_inside_band_ratio": values["test"]["line_inside_band_ratio"],
-            "all_pass": values["test"]["all_pass"],
+            "diagnostic_all_thresholds_met": values["test"]["diagnostic_all_thresholds_met"],
         }
         for policy, values in result["policies"].items()
     }

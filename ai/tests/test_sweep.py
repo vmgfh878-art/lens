@@ -83,7 +83,7 @@ class SweepTestCase(unittest.TestCase):
         second = params_list[-1]
         self.assertEqual(first, second)
 
-    def test_wandb_disabled_in_test_env(self):
+    def test_wandb_disabled_env_does_not_silently_disable_required_sweep(self):
         study = build_study("wandb_off", storage_url="sqlite:///:memory:", max_resource=2)
         trial = study.ask()
         with patch.dict(os.environ, {"WANDB_MODE": "disabled"}):
@@ -95,9 +95,10 @@ class SweepTestCase(unittest.TestCase):
                     "checkpoint_path": "checkpoint.pt",
                     "test_metrics": {"coverage": 0.7},
                 },
-            ):
+            ) as run_training_mock:
                 value = objective_lr_sweep(trial, _base_args(use_wandb=True))
         self.assertEqual(value, 0.456)
+        self.assertTrue(run_training_mock.call_args.kwargs["wandb_required"])
 
 
 if __name__ == "__main__":

@@ -3,4 +3,7 @@ $Host.UI.RawUI.WindowTitle = "Lens backend 8000"
 Set-Location "C:\Users\user\lens"
 $env:PYTHONPATH="C:\Users\user\lens\backend"
 $env:BACKEND_CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"
+$env:MARKET_DATA_PROVIDER="yfinance"
+$env:LENS_USE_LOCAL_SNAPSHOTS="1"
+$env:LENS_LOCAL_SNAPSHOT_DIR="C:\Users\user\lens\data\parquet"
 & "C:\Users\user\lens\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000

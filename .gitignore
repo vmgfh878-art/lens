@@ -1,7 +1,20 @@
 .env
 .env.local
 *.env
+
+# CP 원본 실험 파일은 정리 전까지 GitHub에 올리지 않는다.
+# 공개할 필요가 있는 판단/제품/확정 모델 문서는 별도 선별 후 docs 하위에 정리한다.
 docs/cp*
+docs/cp*/
+ai/cp*.py
+ai/tests/test_cp*.py
+backend/tests/test_cp*.py
+scripts/cp*.py
+scripts/cp*.ps1
+logs/cp*/
+data/**/cp*/
+data/raw/**
+data/models/**
 CLAUDE.md
 
 
@@ -18,9 +31,13 @@ node_modules/
 *.pth
 *.onnx
 ai/cache/ticker_id_map_*.json
+ai/cache/*.manifest.json
+ai/cache/*.pt.manifest.json
 
 backend/data/parquet/
 *.parquet
+# v1 frontend serving parquets — must ship with backend deploy
+!backend/data/v1/*.parquet
 tmp/
 .claude/
 backend/logs/
@@ -30,6 +47,11 @@ wandb/
 optuna_artifacts/
 docs/cp8_sweep_plots/
 docs/cp8_gpu_benchmark.json
+logs/runs/
+frontend/tsconfig.tsbuildinfo
+backend/data/cache/yfinance/*.db
+backend/data/cache/yfinance/*.db-shm
+backend/data/cache/yfinance/*.db-wal
 
 .vscode/
 .idea/
@@ -40,4 +62,24 @@ remember.md
 .tmp/
 artifacts/
 *.log
-logs/cp*/
+docs/tmp_*.json
+docs/daily_yfinance_append_gate_metrics_check_*.json
+docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.json
+docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.md
+docs/daily_yfinance_append_gate_runs/daily_yfinance_append_gate_*.log
+docs/yfinance_500_backfill_latest.md
+docs/yfinance_500_backfill_metrics.json
+docs/yfinance_500_backfill_runs/
+docs/yfinance_500_daily_append_latest.md
+docs/yfinance_500_daily_append_metrics.json
+docs/yfinance_500_daily_append_runs/
+docs/daily_yfinance_500_context_latest.md
+docs/daily_yfinance_500_context_metrics.json
+docs/daily_yfinance_500_context_runs/
+docs/daily_yfinance_append_gate_latest.md
+docs/daily_yfinance_append_gate_metrics.json
+docs/daily_yfinance_append_gate_runs/
+
+# 로컬 yfinance 데이터셋/수집 상태 메타
+data/parquet/*yfinance*.manifest.json
+data/parquet/yfinance*_state.json

@@ -7,10 +7,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
 
+torch = bootstrap_torch()
+
+from ai.calibration_artifacts import (
+    build_calibration_artifact_manifest,
+    calibration_model_run_id,
+    write_calibration_artifact_manifest,
+)
 from ai.evaluation import summarize_forecast_metrics
+from ai.inference_contract import (
+    BAND_CALIBRATION_SUPPORTED_ROLES,
+    assert_output_matches_model_role,
+    require_role_supported,
+    resolve_execution_market_data_provider,
+    resolve_model_role_from_config,
+    select_bundle_features_for_checkpoint,
+)
 from ai.inference import load_checkpoint, resolve_checkpoint_ticker_registry
+from ai.models.common import BandOutput, ForecastOutput
 from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import prepare_dataset_splits
 from ai.train import autocast_context, forward_model, make_loader, resolve_device
@@ -100,9 +116,16 @@ def collect_predictions(
 ) -> tuple[PredictionSet, dict[str, Any]]:
     model, checkpoint = load_checkpoint(checkpoint_path)
     config = checkpoint["config"]
+    model_role = resolve_model_role_from_config(config, context="band_calibration.checkpoint")
+    require_role_supported(
+        model_role,
+        BAND_CALIBRATION_SUPPORTED_ROLES,
+        context="band_calibration",
+    )
     device = resolve_device(device_name)
     model = model.to(device)
     model.eval()
+    provider, provider_contract = resolve_execution_market_data_provider(config)
     ticker_registry = resolve_checkpoint_ticker_registry(config, str(config["timeframe"]))
     train_bundle, val_bundle, test_bundle, _, _, plan = prepare_dataset_splits(
         timeframe=str(config["timeframe"]),
@@ -115,8 +138,11 @@ def collect_predictions(
         band_target_type=str(config.get("band_target_type", "raw_future_return")),
         ticker_registry=ticker_registry,
         ticker_registry_path=config.get("ticker_registry_path"),
+        market_data_provider=provider,
     )
     bundle = {"train": train_bundle, "val": val_bundle, "test": test_bundle}[split]
+    feature_subset = select_bundle_features_for_checkpoint(bundle, config)
+    bundle = feature_subset.bundle
     loader = make_loader(bundle, batch_size=batch_size, shuffle=False, device=device, num_workers=num_workers)
 
     line_chunks: list[torch.Tensor] = []
@@ -133,11 +159,23 @@ def collect_predictions(
             future_covariates = future_covariates.to(device, non_blocking=True)
             with autocast_context(device, amp_dtype=amp_dtype):
                 output = forward_model(model, features, ticker_ids, future_covariates)
-            line, lower, upper = apply_band_postprocess(
-                output.line.detach().cpu(),
-                output.lower_band.detach().cpu(),
-                output.upper_band.detach().cpu(),
-            )
+            assert_output_matches_model_role(output, model_role, context="band_calibration.output")
+            if isinstance(output, ForecastOutput):
+                line, lower, upper = apply_band_postprocess(
+                    output.line.detach().cpu(),
+                    output.lower_band.detach().cpu(),
+                    output.upper_band.detach().cpu(),
+                )
+            elif isinstance(output, BandOutput):
+                ordered = torch.sort(
+                    torch.stack((output.lower_band.detach().cpu(), output.upper_band.detach().cpu()), dim=-1),
+                    dim=-1,
+                ).values
+                lower = ordered[..., 0]
+                upper = ordered[..., 1]
+                line = (lower + upper) / 2.0
+            else:
+                raise TypeError(f"band_calibration에서 지원하지 않는 출력입니다: {type(output).__name__}")
             line_chunks.append(line)
             lower_chunks.append(lower)
             upper_chunks.append(upper)
@@ -154,7 +192,7 @@ def collect_predictions(
         raw_future_returns=torch.cat(raw_target_chunks, dim=0),
         metadata=bundle.metadata.reset_index(drop=True),
     )
-    return predictions, {"config": config, "plan": plan}
+    return predictions, {"config": config, "plan": plan, "provider_contract": provider_contract, "feature_contract": feature_subset.report}
 
 
 def fit_scalar_width_calibration(
@@ -320,6 +358,10 @@ def evaluate_candidate(
             "checkpoint_selection": config.get("checkpoint_selection"),
             "feature_version": config.get("feature_version"),
         },
+        "contract_metrics": {
+            **context["provider_contract"],
+            **context["feature_contract"],
+        },
         "original": {
             "val": original_val,
             "test": original_test,
@@ -378,6 +420,25 @@ def main() -> None:
         )
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact_paths: dict[str, str] = {}
+    for name, candidate in result["candidates"].items():
+        config = candidate.get("config", {})
+        manifest = build_calibration_artifact_manifest(
+            role="band",
+            timeframe=str(config.get("timeframe")),
+            model_run_id=calibration_model_run_id(
+                {"run_id": candidate.get("run_id")},
+                Path(str(candidate.get("checkpoint_path"))),
+            ),
+            calibration_method="scalar_width",
+            calibration_params=dict(candidate["scalar_width"]["calibration"]),
+            source_metrics_path=str(output_path),
+            checkpoint_path=str(candidate.get("checkpoint_path")),
+            metrics=dict(candidate["scalar_width"].get("test") or {}),
+        )
+        artifact_paths[name] = str(write_calibration_artifact_manifest(manifest))
+    result["calibration_artifact_manifests"] = artifact_paths
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output_json": str(output_path), "candidate_count": len(candidates)}, ensure_ascii=False))
 

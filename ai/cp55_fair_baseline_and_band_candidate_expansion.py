@@ -5,9 +5,12 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 import numpy as np
 import pandas as pd
 
@@ -76,6 +79,34 @@ CORE_BAND_COMPARE = (
 _CHECKPOINT_CONFIG_CACHE: dict[str, dict[str, Any]] = {}
 _SPLIT_CACHE: dict[str, tuple[Any, Any, Any, dict[str, float | None]]] = {}
 _BASELINE_CACHE: dict[str, dict[str, Any]] = {}
+
+LINE_PRIORITY_TERMS = (
+    "h5_longer_context_seq252_p32_s16",
+    "h5_dense_overlap_seq252_p16_s4",
+    "h5_baseline_seq252_p16_s8",
+)
+
+BAND_PRIORITY_TERMS = (
+    "s60_q15_b2_direct_188",
+    "s60_q15_b2_direct",
+    "tide_param_scalar_width",
+    "tide_direct_original",
+    "s60_q20_b2_direct",
+    "50_q15_b2",
+    "50_q20_b2",
+    "50_q25_b2",
+)
+
+EXECUTION_PRIORITY_TERMS = (
+    ("line", "h5_longer_context_seq252_p32_s16"),
+    ("line", "h5_dense_overlap_seq252_p16_s4"),
+    ("band", "s60_q15_b2_direct_188::scalar_width"),
+    ("band", "s60_q15_b2_direct::scalar_width"),
+    ("band", "tide_param_scalar_width"),
+    ("band", "tide_direct_original"),
+    ("band", "s60_q20_b2_direct::scalar_width"),
+    ("band", "patchtst_band_reference::h5_longer_context_seq252_p32_s16"),
+)
 
 
 @dataclass
@@ -439,6 +470,8 @@ def _split_key(config: dict[str, Any], *, limit_tickers: int) -> str:
             "seq_len": int(config.get("seq_len", 252)),
             "horizon": int(config.get("horizon", 5)),
             "limit_tickers": int(limit_tickers),
+            "q_low": float(config.get("q_low", 0.15)),
+            "q_high": float(config.get("q_high", 0.85)),
             "registry_path": str(registry_path) if registry_path else None,
             "future": bool(config.get("use_future_covariate", config.get("model") == "tide")),
         },
@@ -480,6 +513,36 @@ def _prepare_splits(config: dict[str, Any], *, limit_tickers: int) -> tuple[Spli
     )
     _SPLIT_CACHE[key] = result
     return result
+
+
+def _split_fingerprint(train: SplitData, validation: SplitData, test: SplitData) -> str:
+    payload = {
+        "train": _split_meta_fingerprint(train),
+        "validation": _split_meta_fingerprint(validation),
+        "test": _split_meta_fingerprint(test),
+    }
+    return str(abs(hash(json.dumps(payload, sort_keys=True))))[:12]
+
+
+def _split_meta_fingerprint(data: SplitData) -> dict[str, Any]:
+    meta = data.metadata
+    if meta.empty:
+        return {"rows": 0}
+    return {
+        "rows": len(meta),
+        "ticker_count": int(meta["ticker"].nunique()) if "ticker" in meta.columns else None,
+        "first_asof": str(meta["asof_date"].min()) if "asof_date" in meta.columns else None,
+        "last_asof": str(meta["asof_date"].max()) if "asof_date" in meta.columns else None,
+    }
+
+
+def _deadline_exceeded(deadline: float | None) -> bool:
+    return deadline is not None and time.perf_counter() > deadline
+
+
+def _check_deadline(deadline: float | None, label: str) -> None:
+    if _deadline_exceeded(deadline):
+        raise TimeoutError(f"{label} 단계가 후보별 시간 제한을 초과했습니다.")
 
 
 def _as_tensor(values: np.ndarray) -> torch.Tensor:
@@ -680,22 +743,57 @@ def _volatility_scaled_band(data: SplitData, train_raw: np.ndarray, *, window: i
     return lower, upper
 
 
-def _baseline_pack(config: dict[str, Any], *, limit_tickers: int, q_low: float, q_high: float) -> dict[str, Any]:
+def _baseline_pack(
+    config: dict[str, Any],
+    *,
+    limit_tickers: int,
+    q_low: float,
+    q_high: float,
+    baseline_set: str,
+    needed_role: str,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     key = json.dumps(
         {
             "split": _split_key(config, limit_tickers=limit_tickers),
             "q_low": q_low,
             "q_high": q_high,
+            "baseline_set": baseline_set,
+            "needed_role": needed_role,
         },
         sort_keys=True,
     )
     if key in _BASELINE_CACHE:
+        print(f"[CP55] baseline cache hit key={key[:120]}", flush=True)
         return _BASELINE_CACHE[key]
 
+    baseline_start = time.perf_counter()
+    print(f"[CP55] baseline start name={baseline_set} key={key[:120]}", flush=True)
     train, validation, test, thresholds = _prepare_splits(config, limit_tickers=limit_tickers)
-    windows = (20, 60, 120, 252)
+    _check_deadline(deadline, "prepare_dataset_splits")
+    if baseline_set == "minimal":
+        windows = (60,)
+        random_seed_count = 1
+        quantile_windows = (60,)
+        bollinger_specs = ((60, 1.0),)
+        volatility_windows: tuple[int, ...] = ()
+    elif baseline_set == "core":
+        windows = (20, 60, 252)
+        random_seed_count = 30
+        quantile_windows = (60, 252)
+        bollinger_specs = ((60, 1.0),)
+        volatility_windows = (60,)
+    else:
+        windows = (20, 60, 120, 252)
+        random_seed_count = 30
+        quantile_windows = (60, 120, 252)
+        bollinger_specs = tuple((window, k_std) for window in (20, 60) for k_std in (1.0, 1.5, 2.0))
+        volatility_windows = (20, 60)
+
     val_stats = _rolling_stats_for_bundle(validation.bundle, windows=windows, q_low=q_low, q_high=q_high)
+    _check_deadline(deadline, "validation rolling stats")
     test_stats = _rolling_stats_for_bundle(test.bundle, windows=windows, q_low=q_low, q_high=q_high)
+    _check_deadline(deadline, "test rolling stats")
     fallback_lower = np.quantile(train.raw_future_returns, q_low, axis=0).astype("float32")
     fallback_upper = np.quantile(train.raw_future_returns, q_high, axis=0).astype("float32")
     fallback_mean = train.raw_future_returns.mean(axis=0).astype("float32")
@@ -706,62 +804,68 @@ def _baseline_pack(config: dict[str, Any], *, limit_tickers: int, q_low: float, 
     wide_val = (np.full(shape_val, -1_000_000.0, dtype="float32"), np.full(shape_val, 1_000_000.0, dtype="float32"))
     wide_test = (np.full(shape_test, -1_000_000.0, dtype="float32"), np.full(shape_test, 1_000_000.0, dtype="float32"))
 
-    val_momentum = _momentum_line(validation)
-    test_momentum = _momentum_line(test)
-    line_specs: list[tuple[str, dict[str, Any], np.ndarray, np.ndarray]] = [
-        ("zero_line", {}, np.zeros(shape_val, dtype="float32"), np.zeros(shape_test, dtype="float32")),
-        ("historical_mean_line_w20", {"window": 20}, _historical_mean_line(validation, val_stats, window=20), _historical_mean_line(test, test_stats, window=20)),
-        ("historical_mean_line_w60", {"window": 60}, _historical_mean_line(validation, val_stats, window=60), _historical_mean_line(test, test_stats, window=60)),
-        ("momentum_line_horizon", {"lookback": "horizon_step"}, val_momentum, test_momentum),
-        ("reversal_line_horizon", {"lookback": "horizon_step", "sign": -1}, -val_momentum, -test_momentum),
-    ]
-    for seed in range(30):
-        line_specs.append(
-            (
-                f"random_or_shuffled_score_seed_{seed}",
-                {"source": "datewise_shuffled_momentum", "seed": seed},
-                _shuffle_by_date(val_momentum, validation.metadata, seed=seed),
-                _shuffle_by_date(test_momentum, test.metadata, seed=seed),
-            )
-        )
-
     line_baselines = []
-    for name, baseline_config, val_line, test_line in line_specs:
-        line_baselines.append(
-            {
-                "name": name,
-                "config": baseline_config,
-                "validation": _metric_subset(
-                    _evaluate(data=validation, line=val_line, lower=wide_val[0], upper=wide_val[1], q_low=q_low, q_high=q_high, thresholds=thresholds),
-                    LINE_METRIC_KEYS,
-                ),
-                "test": _metric_subset(
-                    _evaluate(data=test, line=test_line, lower=wide_test[0], upper=wide_test[1], q_low=q_low, q_high=q_high, thresholds=thresholds),
-                    LINE_METRIC_KEYS,
-                ),
-            }
-        )
+    if needed_role in {"line", "both"}:
+        val_momentum = _momentum_line(validation)
+        test_momentum = _momentum_line(test)
+        line_specs: list[tuple[str, dict[str, Any], np.ndarray, np.ndarray]] = [
+            ("zero_line", {}, np.zeros(shape_val, dtype="float32"), np.zeros(shape_test, dtype="float32")),
+            ("historical_mean_line_w60", {"window": 60}, _historical_mean_line(validation, val_stats, window=60), _historical_mean_line(test, test_stats, window=60)),
+            ("momentum_line_horizon", {"lookback": "horizon_step"}, val_momentum, test_momentum),
+            ("reversal_line_horizon", {"lookback": "horizon_step", "sign": -1}, -val_momentum, -test_momentum),
+        ]
+        if baseline_set == "full":
+            line_specs.insert(
+                1,
+                ("historical_mean_line_w20", {"window": 20}, _historical_mean_line(validation, val_stats, window=20), _historical_mean_line(test, test_stats, window=20)),
+            )
+        for seed in range(random_seed_count):
+            line_specs.append(
+                (
+                    f"random_or_shuffled_score_seed_{seed}",
+                    {"source": "datewise_shuffled_momentum", "seed": seed},
+                    _shuffle_by_date(val_momentum, validation.metadata, seed=seed),
+                    _shuffle_by_date(test_momentum, test.metadata, seed=seed),
+                )
+            )
+
+        for name, baseline_config, val_line, test_line in line_specs:
+            _check_deadline(deadline, f"line baseline {name}")
+            line_baselines.append(
+                {
+                    "name": name,
+                    "config": baseline_config,
+                    "validation": _metric_subset(
+                        _evaluate(data=validation, line=val_line, lower=wide_val[0], upper=wide_val[1], q_low=q_low, q_high=q_high, thresholds=thresholds),
+                        LINE_METRIC_KEYS,
+                    ),
+                    "test": _metric_subset(
+                        _evaluate(data=test, line=test_line, lower=wide_test[0], upper=wide_test[1], q_low=q_low, q_high=q_high, thresholds=thresholds),
+                        LINE_METRIC_KEYS,
+                    ),
+                }
+            )
 
     band_specs: list[tuple[str, dict[str, Any], tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]] = []
-    band_specs.append(
-        (
-            "constant_width_train_quantile",
-            {"q_low": q_low, "q_high": q_high},
-            _constant_band(train.raw_future_returns, shape_val, q_low=q_low, q_high=q_high),
-            _constant_band(train.raw_future_returns, shape_test, q_low=q_low, q_high=q_high),
-        )
-    )
-    for window in (60, 120, 252):
+    if needed_role in {"band", "both"}:
         band_specs.append(
             (
-                f"rolling_historical_quantile_band_w{window}",
-                {"window": window, "q_low": q_low, "q_high": q_high},
-                _rolling_quantile_band(validation, val_stats, window=window, fallback_lower=fallback_lower, fallback_upper=fallback_upper),
-                _rolling_quantile_band(test, test_stats, window=window, fallback_lower=fallback_lower, fallback_upper=fallback_upper),
+                "constant_width_train_quantile",
+                {"q_low": q_low, "q_high": q_high},
+                _constant_band(train.raw_future_returns, shape_val, q_low=q_low, q_high=q_high),
+                _constant_band(train.raw_future_returns, shape_test, q_low=q_low, q_high=q_high),
             )
         )
-    for window in (20, 60):
-        for k_std in (1.0, 1.5, 2.0):
+        for window in quantile_windows:
+            band_specs.append(
+                (
+                    f"rolling_historical_quantile_band_w{window}",
+                    {"window": window, "q_low": q_low, "q_high": q_high},
+                    _rolling_quantile_band(validation, val_stats, window=window, fallback_lower=fallback_lower, fallback_upper=fallback_upper),
+                    _rolling_quantile_band(test, test_stats, window=window, fallback_lower=fallback_lower, fallback_upper=fallback_upper),
+                )
+            )
+        for window, k_std in bollinger_specs:
             band_specs.append(
                 (
                     f"rolling_bollinger_return_band_w{window}_k{k_std:g}",
@@ -770,18 +874,19 @@ def _baseline_pack(config: dict[str, Any], *, limit_tickers: int, q_low: float, 
                     _bollinger_band(test, test_stats, window=window, k_std=k_std, fallback_mean=fallback_mean, fallback_std=fallback_std),
                 )
             )
-    for window in (20, 60):
-        band_specs.append(
-            (
-                f"volatility_scaled_constant_band_w{window}",
-                {"window": window, "base": "train_quantile_width", "scale_clip": [0.25, 4.0]},
-                _volatility_scaled_band(validation, train.raw_future_returns, window=window, q_low=q_low, q_high=q_high),
-                _volatility_scaled_band(test, train.raw_future_returns, window=window, q_low=q_low, q_high=q_high),
+        for window in volatility_windows:
+            band_specs.append(
+                (
+                    f"volatility_scaled_constant_band_w{window}",
+                    {"window": window, "base": "train_quantile_width", "scale_clip": [0.25, 4.0]},
+                    _volatility_scaled_band(validation, train.raw_future_returns, window=window, q_low=q_low, q_high=q_high),
+                    _volatility_scaled_band(test, train.raw_future_returns, window=window, q_low=q_low, q_high=q_high),
+                )
             )
-        )
 
     band_baselines = []
     for name, baseline_config, val_band, test_band in band_specs:
+        _check_deadline(deadline, f"band baseline {name}")
         val_lower, val_upper = val_band
         test_lower, test_upper = test_band
         val_line = ((val_lower + val_upper) / 2.0).astype("float32")
@@ -814,11 +919,16 @@ def _baseline_pack(config: dict[str, Any], *, limit_tickers: int, q_low: float, 
             "validation_samples": len(validation.bundle),
             "test_samples": len(test.bundle),
             "risk_thresholds": thresholds,
+            "split_fingerprint": _split_fingerprint(train, validation, test),
+            "baseline_set": baseline_set,
+            "needed_role": needed_role,
+            "baseline_elapsed_seconds": time.perf_counter() - baseline_start,
         },
         "line_baselines": line_baselines,
         "band_baselines": band_baselines,
     }
     _BASELINE_CACHE[key] = pack
+    print(f"[CP55] baseline done name={baseline_set} elapsed={pack['scope']['baseline_elapsed_seconds']:.2f}s", flush=True)
     return pack
 
 
@@ -856,8 +966,6 @@ def _compare_band(ai_metrics: dict[str, Any], baseline: dict[str, Any] | None) -
         if abs(ai_value - baseline_value) < 1e-12:
             ties_or_missing += 1
             per_metric[metric] = "tie"
-        elif (direction == "lower and ai" and False):
-            pass
         elif (direction == "lower" and ai_value < baseline_value) or (direction == "higher" and ai_value > baseline_value):
             ai_wins += 1
             per_metric[metric] = "ai"
@@ -993,15 +1101,198 @@ def _config_summary(config: dict[str, Any]) -> dict[str, Any]:
     return {key: config.get(key) for key in keys if config.get(key) is not None}
 
 
+def _candidate_priority(candidate: Candidate) -> tuple[int, str]:
+    name = candidate.name
+    terms = LINE_PRIORITY_TERMS if candidate.role == "line" else BAND_PRIORITY_TERMS
+    for index, term in enumerate(terms):
+        if term in name:
+            return index, name
+    if candidate.role == "band" and name.startswith("patchtst_band_reference::"):
+        return len(terms) + 50, name
+    return len(terms) + 1, name
+
+
+def _representative_candidates(candidates: list[Candidate], max_candidates: int) -> list[Candidate]:
+    sorted_candidates = sorted(candidates, key=_candidate_priority)
+    selected: list[Candidate] = []
+    selected_ids: set[int] = set()
+    for role, term in EXECUTION_PRIORITY_TERMS:
+        match = next(
+            (
+                candidate
+                for candidate in sorted_candidates
+                if candidate.role == role and term in candidate.name and id(candidate) not in selected_ids
+            ),
+            None,
+        )
+        if match is None:
+            continue
+        selected.append(match)
+        selected_ids.add(id(match))
+        if len(selected) >= max_candidates:
+            return selected
+    for candidate in sorted_candidates:
+        if id(candidate) in selected_ids:
+            continue
+        selected.append(candidate)
+        selected_ids.add(id(candidate))
+        if len(selected) >= max_candidates:
+            break
+    return selected
+
+
+def _select_execution_candidates(candidates: list[Candidate], args: argparse.Namespace) -> tuple[list[Candidate], list[dict[str, Any]]]:
+    sorted_candidates = sorted(candidates, key=_candidate_priority)
+    skipped: list[dict[str, Any]] = []
+    if args.smoke:
+        representatives = _representative_candidates(candidates, max_candidates=8)
+        selected: list[Candidate] = []
+        first_line = next((candidate for candidate in representatives if candidate.role == "line"), None)
+        first_band = next((candidate for candidate in representatives if candidate.role == "band"), None)
+        if first_line is not None:
+            selected.append(first_line)
+        if first_band is not None:
+            selected.append(first_band)
+        selected_ids = {id(candidate) for candidate in selected}
+        for candidate in sorted_candidates:
+            if id(candidate) not in selected_ids:
+                skipped.append(
+                    {
+                        "name": candidate.name,
+                        "role": candidate.role,
+                        "reason": "smoke 모드에서 대표 후보 1개씩만 실행",
+                        "checkpoint_path": candidate.checkpoint_path,
+                    }
+                )
+        return selected, skipped
+
+    max_candidates = int(args.max_candidates or 8)
+    selected = _representative_candidates(candidates, max_candidates=max_candidates)
+    selected_ids = {id(candidate) for candidate in selected}
+    for candidate in sorted_candidates:
+        if id(candidate) not in selected_ids:
+            skipped.append(
+                {
+                    "name": candidate.name,
+                    "role": candidate.role,
+                    "reason": f"기본 후보 범위 제한 max_candidates={max_candidates}",
+                    "checkpoint_path": candidate.checkpoint_path,
+                }
+            )
+    return selected, skipped
+
+
+def _discovery_payload(candidates: list[Candidate]) -> dict[str, Any]:
+    rows = []
+    for candidate in sorted(candidates, key=_candidate_priority):
+        config = _merge_config(candidate)
+        metrics = candidate.test_metrics or {}
+        rows.append(
+            {
+                "name": candidate.name,
+                "role": candidate.role,
+                "family": candidate.family,
+                "source": candidate.source,
+                "checkpoint_path": candidate.checkpoint_path,
+                "checkpoint_exists": bool(candidate.checkpoint_path and (PROJECT_ROOT / candidate.checkpoint_path).exists()),
+                "config": _config_summary(config),
+                "cp52_band_metrics_complete": _band_metrics_complete(_normalize_band_metrics(metrics, q_low=float(config.get("q_low", 0.15)), q_high=float(config.get("q_high", 0.85)))) if candidate.role == "band" else None,
+                "has_line_ic": metrics.get("ic_mean") is not None,
+                "calibration_method": candidate.calibration_method,
+                "notes": candidate.notes,
+            }
+        )
+    return {
+        "cp": "CP55-M",
+        "mode": "discover-only",
+        "candidate_count": len(rows),
+        "candidates": rows,
+    }
+
+
+def _baseline_definitions(baseline_set: str) -> dict[str, list[str]]:
+    if baseline_set == "minimal":
+        return {
+            "line": [
+                "zero_line",
+                "momentum_line_horizon",
+                "reversal_line_horizon",
+                "random_or_shuffled_score_seed_0",
+            ],
+            "band": [
+                "constant_width_train_quantile",
+                "rolling_historical_quantile_band_w60",
+                "rolling_bollinger_return_band_w60_k1",
+            ],
+        }
+    if baseline_set == "core":
+        return {
+            "line": [
+                "zero_line",
+                "historical_mean_line_w60",
+                "momentum_line_horizon",
+                "reversal_line_horizon",
+                "random_or_shuffled_score_seed_0..29",
+            ],
+            "band": [
+                "constant_width_train_quantile",
+                "rolling_historical_quantile_band_w60/w252",
+                "rolling_bollinger_return_band_w20/w60_k1/k1.5/k2",
+                "volatility_scaled_constant_band_w20/w60",
+            ],
+        }
+    return {
+        "line": [
+            "zero_line",
+            "historical_mean_line_w20/w60",
+            "momentum_line_horizon",
+            "reversal_line_horizon",
+            "random_or_shuffled_score_seed_0..29",
+        ],
+        "band": [
+            "constant_width_train_quantile",
+            "rolling_historical_quantile_band_w60/w120/w252",
+            "rolling_bollinger_return_band_w20/w60_k1/k1.5/k2",
+            "volatility_scaled_constant_band_w20/w60",
+        ],
+    }
+
+
 def build_payload(args: argparse.Namespace) -> dict[str, Any]:
-    candidates = _collect_candidates()
+    payload_start = time.perf_counter()
+    all_candidates = _collect_candidates()
+    candidates, skipped_by_limit = _select_execution_candidates(all_candidates, args)
     line_results: list[dict[str, Any]] = []
     band_results: list[dict[str, Any]] = []
-    unsupported: list[dict[str, Any]] = []
+    unsupported: list[dict[str, Any]] = list(skipped_by_limit)
 
-    for candidate in candidates:
+    total = len(candidates)
+
+    for index, candidate in enumerate(candidates, start=1):
+        candidate_start = time.perf_counter()
+        print(f"[CP55] candidate {index}/{total} name={candidate.name}", flush=True)
         config = _merge_config(candidate)
         limit_tickers = int(config.get("limit_tickers") or 50)
+        original_limit_tickers = limit_tickers
+        if args.smoke and args.smoke_limit_tickers:
+            smoke_limit = int(args.smoke_limit_tickers)
+            if limit_tickers > smoke_limit:
+                limit_tickers = smoke_limit
+                config["limit_tickers"] = limit_tickers
+                config["cp55_smoke_original_limit_tickers"] = original_limit_tickers
+                print(
+                    f"[CP55] smoke limit override original_limit={original_limit_tickers} effective_limit={limit_tickers}",
+                    flush=True,
+                )
+        print(
+            "[CP55] config timeframe={timeframe} horizon={horizon} seq_len={seq_len} limit={limit}".format(
+                timeframe=config.get("timeframe", "1D"),
+                horizon=config.get("horizon", 5),
+                seq_len=config.get("seq_len", 252),
+                limit=limit_tickers,
+            ),
+            flush=True,
+        )
         if args.max_limit_tickers and limit_tickers > args.max_limit_tickers:
             unsupported.append(
                 {
@@ -1013,11 +1304,15 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             )
             continue
         try:
+            deadline = time.perf_counter() + float(args.candidate_timeout_seconds)
             pack = _baseline_pack(
                 config,
                 limit_tickers=limit_tickers,
                 q_low=float(config.get("q_low", 0.15)),
                 q_high=float(config.get("q_high", 0.85)),
+                baseline_set=args.baseline_set,
+                needed_role=candidate.role,
+                deadline=deadline,
             )
         except Exception as exc:
             unsupported.append(
@@ -1029,11 +1324,22 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "config": _config_summary(config),
                 }
             )
+            print(f"[CP55] candidate done elapsed={time.perf_counter() - candidate_start:.2f}s status=failed", flush=True)
             continue
         if candidate.role == "line":
-            line_results.append(_analyze_line_candidate(candidate, config, pack))
+            row = _analyze_line_candidate(candidate, config, pack)
+            line_results.append(row)
         else:
-            band_results.append(_analyze_band_candidate(candidate, config, pack))
+            row = _analyze_band_candidate(candidate, config, pack)
+            band_results.append(row)
+        candidate_elapsed = time.perf_counter() - candidate_start
+        row["execution_elapsed_seconds"] = candidate_elapsed
+        row["baseline_elapsed_seconds"] = (pack.get("scope") or {}).get("baseline_elapsed_seconds")
+        row["effective_limit_tickers"] = limit_tickers
+        row["original_limit_tickers"] = original_limit_tickers
+        print(f"[CP55] candidate done elapsed={candidate_elapsed:.2f}s", flush=True)
+
+    total_elapsed_seconds = time.perf_counter() - payload_start
 
     payload = {
         "cp": "CP55-M",
@@ -1048,20 +1354,16 @@ def build_payload(args: argparse.Namespace) -> dict[str, Any]:
             "fake_data": False,
         },
         "baseline_scope_note": "이번 baseline은 DLinear/NLinear/LightGBM/CatBoost 같은 학습형 baseline이 아니라 통계 baseline이다.",
-        "baseline_definitions": {
-            "line": [
-                "zero_line",
-                "historical_mean_line_w20/w60",
-                "momentum_line_horizon",
-                "reversal_line_horizon",
-                "random_or_shuffled_score_seed_0..29",
-            ],
-            "band": [
-                "constant_width_train_quantile",
-                "rolling_historical_quantile_band_w60/w120/w252",
-                "rolling_bollinger_return_band_w20/w60_k1/k1.5/k2",
-                "volatility_scaled_constant_band_w20/w60",
-            ],
+        "baseline_definitions": _baseline_definitions(args.baseline_set),
+        "execution": {
+            "mode": "smoke" if args.smoke else "limited",
+            "baseline_set": args.baseline_set,
+            "max_candidates": args.max_candidates,
+            "smoke_limit_tickers": args.smoke_limit_tickers if args.smoke else None,
+            "candidate_timeout_seconds": args.candidate_timeout_seconds,
+            "total_elapsed_seconds": total_elapsed_seconds,
+            "selected_candidate_count": len(candidates),
+            "discovered_candidate_count": len(all_candidates),
         },
         "line_candidates": line_results,
         "band_candidates": band_results,
@@ -1181,16 +1483,37 @@ def _render_report(payload: dict[str, Any]) -> str:
     )
     if not unsupported_lines:
         unsupported_lines = "- 없음"
+    definitions = payload.get("baseline_definitions") or {}
+    line_definition = ", ".join(definitions.get("line") or [])
+    band_definition = ", ".join(definitions.get("band") or [])
+    timed_rows = list(payload.get("line_candidates") or []) + list(payload.get("band_candidates") or [])
+    slowest_rows = sorted(timed_rows, key=lambda row: float(row.get("execution_elapsed_seconds") or 0.0), reverse=True)[:5]
+    slowest_lines = "\n".join(
+        "- {name}: elapsed={elapsed}s, baseline={baseline}s, limit={limit}".format(
+            name=row.get("name"),
+            elapsed=_fmt(row.get("execution_elapsed_seconds"), 2),
+            baseline=_fmt(row.get("baseline_elapsed_seconds"), 2),
+            limit=row.get("effective_limit_tickers"),
+        )
+        for row in slowest_rows
+    )
+    if not slowest_lines:
+        slowest_lines = "- 없음"
     return f"""# CP55 후보별 공정 baseline 비교 및 band 후보군 재확장 보고서
 
 CP55는 새 학습이 아니라, 기존 checkpoint와 기존 산출물을 후보별 동일 조건의 통계 baseline과 비교하는 CP다.
 
 ## Executive Summary
 - 이번 baseline은 모델 baseline이 아니라 통계 baseline이다. DLinear/NLinear/LightGBM/CatBoost 같은 학습형 baseline은 아직 아니다.
-- line baseline은 zero, historical mean, momentum, reversal, random/shuffled 30 seeds를 포함했다.
-- band baseline은 train quantile, rolling historical quantile, return-space Bollinger, volatility-scaled constant band를 포함했다.
+- line baseline({payload['execution']['baseline_set']}): {line_definition}
+- band baseline({payload['execution']['baseline_set']}): {band_definition}
 - line 후보 {payload['summary']['line_candidate_count']}개, band 후보 {payload['summary']['band_candidate_count']}개를 정리했다.
+- 실행 모드: {payload['execution']['mode']}, baseline_set={payload['execution']['baseline_set']}, 후보별 timeout={payload['execution']['candidate_timeout_seconds']}초, 총 실행시간={_fmt(payload['execution'].get('total_elapsed_seconds'), 2)}초.
 - CP52 전체 band 지표가 없는 과거 후보는 새 추론을 돌리지 않고 `재실험 필요` 또는 부분 비교로 표시했다.
+- 기존 45분 지연 원인은 후보 전체와 rolling baseline 전체를 한 번에 계산했고, 동일 split baseline 캐시와 후보 범위 제한이 부족했기 때문이다. 이번 스크립트는 discover/smoke/제한 실행으로 분리했다.
+
+## 실행 시간 및 병목
+{slowest_lines}
 
 ## Line 후보 공정 비교
 {_line_table(payload['line_candidates'])}
@@ -1223,12 +1546,38 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CP55 후보별 공정 통계 baseline 비교")
     parser.add_argument("--output-json", default="docs/cp55_fair_baseline_and_band_candidate_expansion_metrics.json")
     parser.add_argument("--output-report", default="docs/cp55_fair_baseline_and_band_candidate_expansion_report.md")
+    parser.add_argument("--candidate-output-json", default="docs/cp55_candidate_discovery.json")
+    parser.add_argument("--discover-only", action="store_true")
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--max-candidates", type=int, default=8)
     parser.add_argument("--max-limit-tickers", type=int, default=200)
+    parser.add_argument("--candidate-timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--baseline-set", choices=["minimal", "core", "full"], default="minimal")
+    parser.add_argument("--smoke-limit-tickers", type=int, default=50)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.smoke:
+        args.baseline_set = "minimal"
+    all_candidates = _collect_candidates()
+    if args.discover_only:
+        output_path = PROJECT_ROOT / args.candidate_output_json
+        payload = _discovery_payload(all_candidates)
+        _write_json(output_path, payload)
+        print(
+            json.dumps(
+                {
+                    "output_json": _repo_path(output_path),
+                    "candidate_count": payload["candidate_count"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
     payload = build_payload(args)
     output_json = PROJECT_ROOT / args.output_json
     output_report = PROJECT_ROOT / args.output_report

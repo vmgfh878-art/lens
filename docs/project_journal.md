@@ -1641,3 +1641,288 @@ Line baseline은 `zero_line`, historical mean 20/60, momentum, reversal, datewis
 Band baseline은 train quantile 고정폭, rolling historical quantile, return-space Bollinger, volatility-scaled constant band를 계산했다. CNN-LSTM `s60_q15_b2_direct_188`은 coverage_abs_error 0.1069, interval_score 0.1487, band_width_ic 0.2463이었지만, rolling historical quantile w252는 interval_score 0.1310, band_width_ic 0.3780으로 더 좋았다. Bollinger w60 k1은 coverage_abs_error가 거의 0이었다.
 
 결론은 명확하다. PatchTST line은 baseline 대비 의미가 있지만, CNN-LSTM band는 아직 단순 rolling/historical band baseline을 이기지 못했다. 다음 band 실험은 새 모델 sweep보다 baseline-aware calibration 또는 historical quantile/Bollinger 대비 interval_score 개선을 먼저 봐야 한다.
+
+### CP55-M 후보별 공정 baseline 비교 경량화 및 재채점
+
+CP55-M 실행 중 기존 스크립트가 45분 이상 걸린 문제를 중단하고, 실행 구조를 `discover-only`, `smoke`, `max-candidates` 제한 모드로 분리했다. `py_compile`은 0.2초로 정상이라 병목은 컴파일이 아니라 baseline 계산이었다.
+
+`--discover-only`는 후보 58개를 3.2초에 수집했고, `docs/cp55_candidate_discovery.json`에 checkpoint/config/status만 저장한다. baseline 계산, forward, rolling 계산은 하지 않는다.
+
+`--smoke`는 line 1개와 band 1개만 실행하고, smoke 전용 `smoke_limit_tickers=50`을 적용한다. smoke는 146.4초에 완료되어 5분 기준을 통과했다. 본 제한 실행은 `--max-candidates 8`, `baseline_set=minimal`로 547초에 완료했다.
+
+최종 제한 실행의 병목은 `s60_q15_b2_direct_188::scalar_width` 200티커 band baseline 197.1초, `s60_q15_b2_direct::scalar_width` 100티커 band baseline 132.9초, PatchTST h5 longer-context line baseline 85.1초였다. 후보별 timeout 300초를 넘긴 항목은 없었다.
+
+재채점 결과 line 후보는 PatchTST `h5_longer_context_seq252_p32_s16`만 생존했다. `h5_dense_overlap_seq252_p16_s4`는 risk-only 보조 성격은 남지만 IC/spread가 음수라 line 후보에서는 탈락이다.
+
+Band 후보는 6개를 비교했지만, CNN-LSTM 3개는 CP52 전체 지표가 부족해 재실험 필요로 남았고 TiDE 2개와 PatchTST band 참고 후보는 통계 baseline 대비 탈락으로 정리했다. 다음 단계는 AI lower/upper 직접 예측을 계속 늘리기보다 rolling quantile/Bollinger 위의 baseline-aware residual/scale band를 검토하는 쪽이 맞다.
+
+### CP56-M Line/Band 분리 계약 전수 감사
+
+CP56-M에서는 새 학습, save-run, DB schema 변경 없이 PatchTST line + CNN-LSTM/TiDE band 조합 계약을 전수 감사했다. 데이터와 타겟 계약은 대체로 안전하며 주요 후보는 `feature_version=v3_adjusted_ohlc`, `raw_future_return`, 1D h5 기준을 공유한다.
+
+감사 결과 병목은 모델 구조보다 composite 계약에 있었다. PatchTST line 후보는 48 ticker registry, CNN-LSTM band 후보는 188 ticker registry를 사용하며, 현재 composite는 공통 ticker/asof_date/forecast_dates 교집합만 조용히 사용한다. 또한 CNN-LSTM scalar width calibration은 CNN-LSTM 자체 line을 band center로 쓰기 때문에 PatchTST line과 band 중심선이 어긋날 수 있다.
+
+즉시 수정할 P1은 다섯 가지로 정리했다. `risk_first_lower_preserve`와 `include_line_clamp` 동일 구현 분리, `series_length_all_5` 하드코딩 제거, composite 공통 sample coverage 기록, scalar width center 계약 명시, `role=line_model`의 standalone band 저장/해석 차단이다.
+
+산출물은 `docs/cp56_line_band_contract_audit_report.md`와 `docs/cp56_line_band_contract_audit_matrix.json`이다. 다음 단계는 성능 실험이 아니라 CP57에서 composite 계약 P1을 먼저 닫는 것이다.
+
+### CP57-M Composite 계약 폐기 및 AI Indicator Layer 분리
+
+CP57-M에서 방향을 수정했다. line과 band를 하나의 composite prediction으로 더 잘 합치는 것이 아니라, composite model 계약을 Phase 1 본류에서 내리고 AI indicator layer로 분리한다.
+
+새 계약은 `AI line layer`, `AI band layer`, `overlay bundle` 세 가지다. PatchTST/TiDE line 후보는 line 지표로 평가하고, CNN-LSTM/TiDE/PatchTST band 후보는 band 지표로 평가한다. 화면에서는 두 layer를 함께 표시할 수 있지만 하나의 lower/line/upper 예측으로 합성하지 않는다.
+
+기존 composite run과 `ai.composite_inference`는 삭제하지 않고 legacy demo/research utility로 격하했다. `include_line_clamp`, `risk_first_lower_preserve`, `risk_first_upper_buffer_1.10` 같은 보정 정책은 Phase 1 본류 모델 성능 기준에서 제외한다.
+
+산출물은 `docs/cp57_ai_indicator_layer_contract_report.md`와 `docs/cp57_ai_indicator_layer_contract_matrix.json`이다. 다음 단계는 line/band를 합치는 실험이 아니라 band layer 재실험, line layer 재실험, overlay provenance 계약 설계로 나눈다.
+
+### CP59-P composite legacy 제품 노출 차단
+
+CP59-P에서는 CP57-M의 결정을 제품 조회 경로에 반영했다. `line_band_composite`와 `role=composite_model` run은 Phase 1 제품 기본 latest 후보에서 제외하고, `include_legacy=true`를 명시했을 때만 `/api/v1/ai/runs` 목록에 포함되게 정리했다.
+
+기존 composite run은 삭제하지 않았다. 이제 composite는 제품 기본 모델이 아니라 `legacy demo artifact`로만 해석한다. 주식 보기, 백테스트, 모델 학습 화면의 기본 후보는 PatchTST 중심으로 제한했고, readiness도 composite를 정상 제품 기본 산출물로 요구하지 않는다.
+
+남은 과제는 overlay bundle API 설계, role별 AI inference meta 정리, rolling AI band history, h5/h20 horizon 결정이다. 이 항목은 CP60-M 이후 모델/계약 작업에서 다룬다.
+
+### CP60-M Composite Legacy AI Guard
+
+CP60-M에서는 CP57/CP59 결정에 맞춰 AI composite 스크립트가 Phase 1 본류 산출물처럼 저장되거나 평가되는 경로를 차단했다. `ai.composite_inference`는 legacy/research utility로 격하했고, `--save`는 `--allow-legacy-composite-save` 없이는 실패하도록 바꿨다.
+
+legacy 저장을 명시적으로 허용해도 config/meta에는 `deprecated_for_phase1_product_contract=true`, `indicator_layer_replacement=overlay_bundle`, `role=composite_model`, `legacy_reason=line_and_band_layers_are_product-separated`, `composite_is_not_product_default=true`를 강제한다. `line_inside_band_ratio`는 제품 탈락 기준이 아니라 표시 진단값으로만 남기며, h5 고정 길이 체크는 horizon 동적 체크로 교체했다.
+
+남은 과제는 overlay bundle API, line layer inference 저장 계약, band layer inference 저장 계약, rolling AI band history다.
+
+### CP61-M line/band 평가 지표 완전 분리
+
+CP61-M에서는 Phase 1 모델 평가판에서 composite/overlay 계열 지표를 기본 model metric에서 제거했다. `summarize_forecast_metrics`는 이제 `line_metrics`와 `band_metrics`를 우선 schema로 반환하며, `line_inside_band_ratio` 같은 값은 기본 반환에서 빠지고 `include_legacy_overlay_diagnostics=True`일 때만 `legacy_overlay_diagnostics`로 생성된다.
+
+`line_gate`는 `line_metrics`만 보고, `band_gate`는 `band_metrics`만 본다. `combined_gate`와 `coverage_gate`는 호환을 위해 남겼지만 deprecated이며, `coverage_gate`는 계속 `combined_gate` alias다. line model은 band coverage 실패로 탈락하지 않고, band model은 IC/spread 실패로 탈락하지 않는다.
+
+산출물은 `docs/cp61_line_band_metric_split_report.md`와 `docs/cp61_metric_layer_schema.json`이다. 다음 모델 실험부터 line 표와 band 표를 분리해서 보고한다.
+
+### CP62-M CP61 schema 기준 기존 후보 재채점
+
+CP62-M에서는 새 학습, save-run, DB 쓰기 없이 기존 `docs/cp53`, `docs/cp54`, `docs/cp55` 산출물을 CP61의 `line_metrics` / `band_metrics` 분리 schema로 다시 정리했다. 처리 스크립트는 `ai/cp62_cp61_schema_candidate_regrade.py`이며, 실행 시간은 0.01초 미만으로 기존 JSON만 읽었다.
+
+Line 후보는 `line_metrics`만으로 판단했고, band 후보는 `band_metrics`만으로 판단했다. `line_inside_band`, `risk_first_*`, `include_line_clamp`, CP46 upper buffer 계열은 전부 모델 랭킹에서 제외하고 legacy overlay 진단으로만 기록했다.
+
+재채점 결과 line 후보는 survive 5개, watch 4개, fail 1개였다. PatchTST `h5_longer_context_seq252_p32_s16`은 line 주력 후보로 유지되고, `h5_dense_overlap_seq252_p16_s4`는 IC/spread가 약해 risk-only watch로만 남겼다. Band 후보는 survive 0개, watch 4개, fail 2개였다. CNN-LSTM s60 계열은 dynamic width 신호는 있으나 통계 baseline을 충분히 이기지 못해 재실험 필요로 분류했다.
+
+산출물은 `docs/cp62_cp61_schema_candidate_regrade_report.md`와 `docs/cp62_cp61_schema_candidate_regrade_metrics.json`이다. 다음 단계는 composite 복구가 아니라 line 실험과 band 실험을 계속 분리하고, band는 baseline-aware residual/scale 구조를 우선 검토하는 방향이다.
+
+### CP63-BM AI band model 피처 감사
+
+CP63-BM에서는 새 학습, save-run, DB 쓰기, DB schema 변경, UI/backend API 수정 없이 기존 1D feature cache만 읽어 band layer 피처 감사를 수행했다. 기준은 `feature_version=v3_adjusted_ohlc`, `seq_len=60`, `horizon=5`, `target=raw_future_return`, `band_target_type=raw_future_return`, `role=band_model`이다.
+
+현재 `MODEL_FEATURE_COLUMNS` 36개를 price/return, volatility/range, volume/liquidity, momentum/oscillator, market/sector/breadth, fundamentals, calendar/future covariate, missingness flag로 재분류했다. exact eligible 50/100/188 ticker scope에서 non-null, finite, 분포 통계, ticker coverage 편차, train/val/test shift, 절대 미래수익률 proxy IC, realized_abs_return proxy IC, downside_event 관계를 계산했다.
+
+핵심 결론은 세 가지다. 첫째, 현재 36개 입력은 finite contract는 통과하지만 fundamentals 원시값과 missingness flag는 band 노이즈 또는 편향 위험이 크다. 둘째, `atr_ratio`와 `intraday_range_ratio`는 현재 모델 입력이 아니지만 band proxy가 강해 indicator-only 후보로 분리했다. 셋째, 다음 BM smoke는 CNN-LSTM을 1순위, TiDE를 2순위로 두고 `price_volatility` feature set부터 확인한다.
+
+통계 baseline은 계속 비교 기준으로만 둔다. Bollinger/rolling quantile 위의 AI residual/scale 보정 모델은 이번 Phase 1 BM 본류에서 제외했고, baseline-aware 보정은 Phase 1.5 후보로만 기록했다.
+
+산출물은 `docs/cp63_bm_feature_audit_report.md`, `docs/cp63_bm_feature_inventory.csv`, `docs/cp63_bm_feature_proxy_metrics.csv`, `docs/cp63_bm_feature_set_plan.json`이다.
+
+### CP64-BM paused/aborted
+
+CP64-BM은 사용자의 즉시 중단 지시로 closure 처리하지 않고 paused/aborted 상태로 기록한다. 진행된 범위는 `ai.train`의 `--feature-set` / `--feature-columns-preset` 최소 구현, feature set 입력 차원 반영 테스트, CP64 smoke runner 초안 작성까지다.
+
+실험 matrix는 완료하지 않았다. `cp64_bm_feature_group_smoke`와 `ai.train --feature-set` 관련 실행 중인 Python 프로세스를 확인했으나, 중단 시점 이후 남아 있는 `python/pythonw` 프로세스는 보이지 않았다. 다음 순서는 CP64-D indicator full backfill이다.
+
+### CP64-BM closure
+
+사용자 재개 지시에 따라 CP64-BM을 paused/aborted가 아니라 closure 상태로 마감했다. 시작 전 `python/pythonw` 학습 프로세스와 GPU compute 프로세스가 남아 있지 않음을 확인했고, 기존 빈 백그라운드 래퍼 대신 실험별 순차 실행과 기존 결과 재사용 방식으로 정리했다.
+
+`ai.train`에 `--feature-set`과 `--feature-columns-preset` alias를 추가했고, CP63의 `docs/cp63_bm_feature_set_plan.json`을 기준으로 feature column subset을 로드한다. feature tensor, mean/std, 모델 생성의 `n_features`가 같은 순서로 반영되도록 구현했으며 `candidate_indicator_expanded`처럼 indicator-only 또는 contract 변경이 필요한 set은 이번 CP에서 모델 feature로 쓰지 않게 막았다.
+
+6개 smoke는 모두 `limit_tickers=50`, `epochs=3`, `batch_size=256`, `checkpoint_selection=band_gate`, `role=band_model`, `band_target_type=raw_future_return`, `wandb=false` 조건으로 완료했다. full 473 실행, save-run, DB 쓰기, DB schema 변경, UI/backend 수정, composite/overlay 지표 사용, 통계 baseline 보정 구현은 하지 않았다.
+
+결과는 CNN-LSTM 2개와 TiDE 1개가 `band_survive`, 나머지 3개가 `band_watch`다. 가장 강한 CNN-LSTM smoke는 `cnn_s60_q20_b2_direct_price_volatility`였고, `cnn_s60_q15_b2_direct_price_volatility_volume`도 coverage calibration과 dynamic width가 좋았다. TiDE는 `tide_q10_b2_param_technical_only`가 survive로 남았지만 interval score는 CNN-LSTM 상위 후보보다 약해 BM 우선순위는 CNN-LSTM 1순위, TiDE 2순위를 유지한다. PatchTST band는 참고 후순위다.
+
+산출물은 `docs/cp64_bm_feature_group_smoke_report.md`, `docs/cp64_bm_feature_group_smoke_metrics.json`, `docs/cp64_bm_feature_group_smoke_logs/`에 정리했다. 검증은 `py_compile`, feature_set 관련 unittest 포함 23개 unittest, metrics JSON 파싱을 통과했고 마지막 확인 시 남은 python 학습 프로세스는 없었다. 다음 순서는 CP64-D indicator full backfill이다.
+
+### CP65-LM PatchTST line feature set smoke + h20 visual branch
+
+CP65-LM은 PatchTST `role=line_model`만 대상으로 했다. 기존 1D cache인 `ai/cache/feature_index_1D_1a967362529f_0c1d7f52.pt`와 `ai/cache/features_1D_97ece65766b1_0c1d7f52.pt`만 읽었고, DB 백필 데이터 읽기, DB 쓰기, save-run, full 473티커 실행, cache fingerprint 생성/삭제, UI/backend 수정은 하지 않았다.
+
+공통 조건은 `feature_version=v3_adjusted_ohlc`, `target=raw_future_return`, `line_target_type=raw_future_return`, `checkpoint_selection=line_gate`, `ci_aggregate=target`, `limit_tickers=50`, `epochs=3`, `batch_size=256`, `wandb=off`, `no-compile`이다. `coverage_gate`, `combined_gate`, composite/overlay 지표는 line 판정에 사용하지 않았다.
+
+h5에서는 `technical_only`와 `price_volatility_volume`이 같은 11개 column이라 중복 학습 없이 같은 결과로 기록했다. `no_fundamentals`는 IC 0.0035, spread 0.0005로 통계 baseline 기준 line_survive지만, 기존 `h5_longer_context_seq252_p32_s16` full_features보다 false_safe_tail_rate와 severe_downside_recall이 모두 약했다. 따라서 h5 주력 후보는 기존 longer-context full_features를 유지한다.
+
+h20 visual/risk branch에서는 `no_fundamentals`가 IC 0.0230, spread 0.0147, false_safe_tail_rate 0.3015, severe_downside_recall 0.6993으로 기존 h20 full_features 대비 risk 조건을 개선했다. 다만 h20은 Phase 1 본류 확정 후보가 아니라 Phase 1.5 visual/risk branch로 분리 기록한다.
+
+산출물은 `docs/cp65_lm_feature_h20_smoke_report.md`, `docs/cp65_lm_feature_h20_smoke_metrics.json`, `docs/cp65_lm_feature_h20_smoke_logs/`다. 검증은 `py_compile`, feature_set unittest 5개, metrics JSON 파싱을 통과했고 마지막 확인 시 남은 `python/pythonw` 학습 프로세스는 없었다. 다음 LM은 h5 longer-context 유지, h20 no_fundamentals visual branch 보류, 그리고 `technical_only`와 `price_volatility_volume` 정의 중복 정리를 우선한다.
+
+### CP64-D ATR full backfill 및 indicator 가격 피처 재계산
+
+CP64-D에서는 BM feature 승격 전 `public.indicators`의 ATR 계열과 과거 가격 ratio 이상치를 정리했다. 모델 학습, save-run, checkpoint 생성, UI/backend API schema 변경은 하지 않았고, 계산은 `backend.collector.jobs.compute_indicators.run()` 공식 경로만 사용했다.
+
+백필 전 `atr_ratio`는 407,861 / 1,584,191 rows만 채워져 있었고, 1D 최신 row 503개는 모두 null이었다. 백필 후에는 1,649,317 / 1,649,317 rows가 non-null이고, 최신 coverage는 1D 503 / 503, 1W 502 / 502, 1M 494 / 494다.
+
+과거 adjusted/raw OHLC 혼용으로 남은 stale indicator row도 정리했다. 1D `open_ratio/high_ratio/low_ratio` abs p99는 각각 14.0473 / 14.2371 / 13.9232에서 0.0485 / 0.0760 / 0.0752로 정상화됐다. 단순 upsert만으로 stale row가 제거되지 않아 `force_full_backfill=True`일 때만 ticker/timeframe/source 범위를 삭제 후 공식 계산 결과를 다시 upsert하도록 collector job을 보강했다.
+
+`atr_ratio`는 `feature_svc.build_features()` output에는 포함되지만 모델 입력에는 아직 포함하지 않는다. `MODEL_N_FEATURES=36`과 `atr_ratio in MODEL_FEATURE_COLUMNS=False`를 확인했다. 향후 BM에서 `atr_ratio`를 feature로 승격하려면 feature contract, cache digest, feature version, clipping/winsorization 정책을 별도 CP에서 함께 변경해야 한다.
+
+산출물은 `docs/cp64_indicator_full_backfill_report.md`와 `docs/cp64_indicator_full_backfill_metrics.json`이다. 검증은 `py_compile`, backend unittest 53개, metrics JSON 파싱, 문서 UTF-8 확인을 수행했다.
+
+### CP66-LM post-backfill cache gate + h20 / 1W line 재진입
+
+CP66-LM에서는 CP64-D full backfill 이후 학습 cache가 새 indicator 계약을 반영하는지 먼저 확인했다. CP65 기준 1D source data hash는 `0c1d7f52`였고, 현재 1D hash는 `f7c7b101`으로 바뀌어 stale로 판정했다. CP66 초회 gate에서 새 1D/1W cache를 생성했고, 최종 GPU 실행에서는 해당 cache를 재사용했다.
+
+feature contract는 `v3_adjusted_ohlc`로 유지됐고 `MODEL_FEATURE_COLUMNS=36`도 유지됐다. `atr_ratio`는 indicators에는 존재하지만 모델 입력에는 포함하지 않았다. 1D feature tensor와 target NaN/Inf는 0이고, `open_ratio/high_ratio/low_ratio` p99 sanity도 통과했다.
+
+1D h20 PatchTST line 재검증은 `limit_tickers=50`, `epochs=3`, `seq_len=252`, `patch_len=32`, `patch_stride=16`, `checkpoint_selection=line_gate`, `save-run=false`, W&B off, CUDA 환경으로 완료했다. `full_features`는 IC 0.0230, spread 0.0067, false_safe_tail_rate 0.2895, severe_downside_recall 0.7120으로 CP65 h20 full 대비 false-safe와 recall이 같이 개선되어 `visual_risk_survive`다. `no_fundamentals`와 `technical_only`는 false_safe_tail_rate가 각각 0.3361, 0.3237이라 기본 제품 표시는 금지하고 watch로 둔다.
+
+1W readiness는 전체 index 기준 eligible 447개, split gap h_max=12, feature/target NaN/Inf 0, future label leakage blocker 없음으로 PASS다. 단 전체 1W default ticker registry는 eligible 447개 중 27개가 빠져 stale 신호가 있고, 이번 50 ticker smoke scope에서는 누락이 없었다. readiness PASS 조건에 따라 1W h12 PatchTST 1epoch smoke를 실행했고 completed였지만 IC는 -0.0144로 약해 다음 CP에서 50->100 ticker 확장 전에 registry 정리와 risk-only 해석을 먼저 둔다.
+
+산출물은 `docs/cp66_lm_post_backfill_h20_1w_report.md`, `docs/cp66_lm_post_backfill_h20_1w_metrics.json`, `docs/cp66_lm_post_backfill_h20_1w_logs/`다. CPU-only Python으로 잘못 실행되어 CPU 100%가 된 원인은 시스템 Python의 `torch 2.3.1+cpu`였고, CP66 runner는 기본 device를 `cuda`로 바꾸고 CUDA 미인식 시 즉시 실패하도록 보강했다. 또한 Windows에서 `numpy/pandas`를 Torch보다 먼저 import하면 venv CUDA Torch의 `c10.dll` 초기화가 실패해 Torch-first import 순서로 고쳤다.
+
+### CP67-LM 1D h20 100티커 재검증
+
+CP67-LM에서는 CP66에서 50티커 기준 `visual_risk_survive`였던 PatchTST h20 `full_features`를 100티커로 확장해 재현성을 확인했다. 실행은 `.venv\Scripts\python.exe`, CUDA, `torch 2.11.0+cu128`, `device=cuda`, W&B off, no-compile, save-run=false로 진행했다.
+
+cache gate는 CP66과 같은 1D post-backfill hash `f7c7b101`을 사용했고, 100티커용 feature index/cache는 새로 생성됐다. feature contract는 `v3_adjusted_ohlc`, `MODEL_FEATURE_COLUMNS=36` 그대로이며 `atr_ratio`는 모델 feature로 승격하지 않았다. eligible ticker는 93개였고 feature/target NaN/Inf 0, ratio p99 sanity PASS다.
+
+A 실험 `h20_full_features_post_backfill_100`은 학습 자체는 completed였지만 line 판정은 fail이다. IC 0.0667, spread 0.0280, fee_adjusted_sharpe 0.4219로 ranking 계열은 강해졌지만, false_safe_tail_rate 0.3918, false_safe_severe_rate 0.3810, severe_downside_recall 0.6190으로 보수적 line 기준이 무너졌다. h11_h20 bucket도 IC 0.0633과 spread 0.0203은 양수지만 false_safe_tail_rate 0.3829, severe_downside_recall 0.6295라 제품 표시 금지 조건이다.
+
+따라서 B `h20_no_fundamentals_post_backfill_100`은 “A가 실패하면 실행하지 말 것” 지시에 따라 실행하지 않았다. 선택 C 5epoch도 A가 product_aux_pass가 아니므로 실행하지 않았다.
+
+제품 표시 판단은 h5 단기 line을 진한 실선 기본으로 유지하고, h20은 제품 기본 ON 후보에서 제외한다. CP66 50티커 생존은 100티커에서 재현되지 않았으므로 h20은 Phase 1.5 연구 후보로 보류한다.
+
+산출물은 `docs/cp67_lm_h20_100ticker_validation_report.md`, `docs/cp67_lm_h20_100ticker_validation_metrics.json`, `docs/cp67_lm_h20_100ticker_validation_logs/`다.
+
+### CP68-LM h20 conservative line rescue
+
+CP68-LM에서는 CP67 `h20_full_features_post_backfill_100` checkpoint를 새 학습 없이 재사용해 post-hoc conservative calibration을 검증했다. line_model 전용으로 수행했고 band 실험, composite/overlay, line_inside_band 평가, DB 쓰기, save-run, W&B, full 473티커, UI/backend 수정, feature contract 변경은 하지 않았다.
+
+검증 정책은 raw_line, global_downshift, horizon_bucket_downshift, volatility_scaled_downshift 네 가지다. 모든 offset은 validation split에서만 fit했고 test 지표를 보고 고르지 않았다. cache는 CP67/CP66과 같은 1D post-backfill hash `f7c7b101`을 사용했고 기존 100티커 cache를 재사용했다. eligible ticker는 93개, feature/target NaN/Inf는 0이며 `MODEL_FEATURE_COLUMNS=36`, `atr_ratio` 모델 feature 제외 계약도 유지했다.
+
+test 기준 raw_line은 IC 0.0667, spread 0.0280으로 랭킹용 신호는 강하지만 false_safe_tail_rate 0.3918, severe_downside_recall 0.6190이라 위험선으로 쓰면 안 된다. `horizon_bucket_downshift`는 validation에서 h1_h5 0.0113019, h6_h10 0.0138117, h11_h20 0.0148215 offset을 fit했고, test에서 IC 0.0667, spread 0.0280을 유지하면서 false_safe_tail_rate 0.2857, false_safe_severe_rate 0.2829, severe_downside_recall 0.7171로 개선했다. h11_h20 bucket도 false_safe_tail_rate 0.2648, severe_downside_recall 0.7309로 제품 표시 금지선을 벗어났다.
+
+최종 판단은 PASS다. 다만 h20 raw line과 h20 conservative line은 분리한다. h20 conservative line은 h5 기본 예측선을 대체하지 않고, 기본 OFF / 사용자 선택형 중기 보수 판단선 후보로만 유지한다. 산출물은 `docs/cp68_lm_h20_conservative_line_rescue_report.md`와 `docs/cp68_lm_h20_conservative_line_rescue_metrics.json`이다.
+
+### CP69-LM line 보수성 계약 재감사
+
+CP69-LM에서는 새 학습, 성능 재평가, h20 추가 보정 없이 Lens line이 원래 의도한 하방 보수 학습 계약을 실제로 따르는지 감사했다. DB 쓰기, save-run, band/composite, UI/backend 수정은 하지 않았다.
+
+`AsymmetricHuberLoss`는 `error = prediction - target`을 사용하고, `error > 0`인 과대예측에 `beta`를 적용한다. 단위 예제에서 target 1.0, prediction 2.0의 loss는 1.0이고 prediction 0.0의 loss는 0.5로, alpha=1 beta=2 계약이 과대예측 페널티로 작동함을 확인했다. `ForecastCompositeLoss`도 `prediction.line`과 `line_target`에 `AsymmetricHuberLoss`를 직접 사용한다.
+
+감사 대상 h5 longer/baseline/dense, CP65 h20 후보, CP67 h20 full checkpoint는 모두 checkpoint config에서 alpha=1, beta=2, delta=1, lambda_line=1, checkpoint_selection=`line_gate`, line_target_type=`raw_future_return`을 확인해 `verified_trained_conservative`로 분류했다. CP68 `horizon_bucket_downshift`는 같은 CP67 checkpoint를 기반으로 하지만 validation offset 표시 보정이므로 `posthoc_only_not_training`으로 분류했다.
+
+용어는 앞으로 `raw_model_line`, `trained_conservative_line`, `display_calibrated_line`으로 분리한다. CP68의 global/bucket downshift는 학습 보수성이 아니라 `display_calibrated_line`이며, h5/h20 checkpoint 원출력은 alpha/beta loss로 학습된 `trained_conservative_line`이다. 신규 산출물은 `docs/cp69_line_conservatism_contract_audit_report.md`와 `docs/cp69_line_conservatism_contract_audit_matrix.json`이다.
+
+### CP70-LM h20 display calibration 정책 비교
+
+CP70-LM에서는 CP69 용어 계약을 유지한 상태에서 CP68 display calibration 후보를 다시 비교했다. 새 학습, save-run, DB 쓰기, W&B, full 473티커, UI/backend 수정, band/composite 실험은 하지 않았다. 옆 프로젝트 GPU 점유 가능성을 고려해 GPU는 쓰지 않고 CPU-only forward-only / metrics-only로 실행했으며, 총 실행 시간은 약 424.8초다.
+
+실행 시 현재 1D source hash는 `3ac43945`로 CP67의 `f7c7b101`과 달랐다. 따라서 CP70 결과는 정확한 CP68 동일-hash 재현이 아니라 `CP67 checkpoint + 현재 100티커 cache/data` 기준의 정책 안정성 재확인이다. feature contract는 `v3_adjusted_ohlc`, 모델 feature 수는 36개, `atr_ratio`는 모델 feature 제외를 유지했고 feature/target NaN/Inf는 0, ratio sanity는 PASS다.
+
+raw_model_line은 IC 0.0676, spread 0.0284로 랭킹 신호는 유지됐지만 false_safe_tail_rate 0.3911, severe_downside_recall 0.6196이라 fail이다. display_calibrated_line 세 정책은 모두 default_off_candidate 기준을 통과했다. `global_downshift`는 false_safe_tail_rate 0.2744, severe_downside_recall 0.7269로 가장 단순하다. `horizon_bucket_downshift`는 false_safe_tail_rate 0.2841, severe_downside_recall 0.7186, h11_h20 false_safe_tail_rate 0.2630으로 horizon별 해석성이 좋고 IC/spread/fee 희생이 없다. `volatility_scaled_downshift`는 false_safe_tail_rate 0.2566으로 가장 낮지만 IC 0.0640, spread 0.0259, fee_adjusted_return 5423.8341로 희생이 있고 과적합 가능성을 기록했다.
+
+최종 추천은 A안이다. h20 `display_calibrated_line`은 제품 기본 ON이 아니라 기본 OFF / 사용자 선택형 중기 참고선 후보로 유지하고, 선택 정책은 `horizon_bucket_downshift`로 둔다. 산출물은 `docs/cp70_lm_h20_display_calibration_policy_report.md`와 `docs/cp70_lm_h20_display_calibration_policy_metrics.json`이다.
+
+### CP74-G W&B optional fallback 수리
+
+CP72-BM 준비 중 W&B online 확인이 API key/로그인 단계에서 멈추는 문제가 확인되어, 학습 실행 전에 CP74-G로 W&B 초기화 정책을 먼저 수리했다. 남아 있던 W&B probe Python 프로세스는 해당 시작 시각과 경로를 확인한 뒤 정리했고, 이후 full training, save-run, DB 쓰기는 수행하지 않았다.
+
+`ai.train`에서는 W&B를 full training optional로 바꿨다. `use_wandb=True`라도 `WANDB_API_KEY` 누락, `wandb` 패키지 없음, `WANDB_MODE=disabled`, `wandb.init()` 예외가 발생하면 warning과 `wandb_status`만 남기고 학습은 계속 진행한다. status는 `online_ok`, `package_missing`, `disabled_by_env`, `disabled_missing_key`, `disabled_init_failed`, `disabled_by_cli`로 기록한다. API key 원문은 로그나 status에 남기지 않는다.
+
+`ai.sweep`은 반대로 required 정책을 유지한다. sweep에서 `--wandb`가 켜져 있으면 `run_training(..., wandb_required=True)`를 넘기며, init 실패 시 `W&B required for sweep, set WANDB_API_KEY or use --no-wandb` 메시지로 중단한다. sweep에서 W&B 없이 돌리려면 `--no-wandb`를 명시해야 한다.
+
+검증은 `py_compile ai/train.py ai/sweep.py ai/tests/test_wandb_optional_fallback.py ai/tests/test_sweep.py`와 `ai.tests.test_wandb_optional_fallback ai.tests.test_sweep`를 통과했다. 산출물은 `docs/cp74_wandb_optional_fallback_report.md`다.
+
+### CP75-G local training progress logger
+
+CP75-G에서는 W&B를 끈 full training에서도 진행 상황을 로컬 파일로 추적할 수 있도록 `ai.train`에 local training progress logger를 추가했다. 기본 경로는 `logs/runs/{run_id}/`이며 `metrics.jsonl`, `summary.json`, `config.json`을 기록한다.
+
+epoch별 `metrics.jsonl`에는 run id, epoch/epochs, elapsed/epoch/ETA seconds, learning rate, train/val loss, early stopping 상태, checkpoint selection, gate status, VRAM peak, line metric, band metric을 JSONL 한 줄로 남긴다. line 또는 band metric이 없는 모델은 해당 값을 `null`로 기록한다.
+
+CLI는 기본 local logging on이며 `--no-local-log`로 비활성화하고 `--local-log-dir`로 base directory를 바꿀 수 있다. W&B init/fallback 정책, loss, checkpoint selector, DB schema, UI는 변경하지 않았다. 검증은 `py_compile`과 `ai.tests.test_local_logging`만 수행했고 실제 학습은 실행하지 않았다.
+
+산출물은 `docs/cp75_local_training_progress_logger_report.md`다.
+
+### CP72-BM 1D band full product candidate closure
+
+CP72-BM은 CNN-LSTM 1D h5 band 전용 full run으로 closure했다. 최종 제품 후보는 `cnn_lstm-1D-d0c780dee5e8`이며 `model_runs.status=completed`, `config.role=band_model`, `feature_set=price_volatility_volume`, `checkpoint_selection=band_gate`, `band_target_type=raw_future_return`로 저장됐다. W&B는 사용자 정책 변경에 따라 에이전트 실행에서는 online을 쓰지 않고 `--no-wandb`, `WANDB_MODE=disabled`로 실행했으며 `wandb_status=disabled_by_cli`로 기록됐다.
+
+W&B online 시도 `run-20260501_115752-rdv0vhhw`는 `127.0.0.1:9` proxy connection refused로 실패/중단 run으로 남겼다. 해당 partial row `cnn_lstm-1D-495d7eec9101`와 수정 전 no-W&B row `cnn_lstm-1D-5be94f33f784`는 삭제하지 않았다. 수정 전 no-W&B row는 q15/q85 nominal coverage 0.70을 legacy 0.85 band gate로 판단한 코드 불일치 때문에 `failed_quality_gate`가 됐다.
+
+CP72 과정에서 `ai/train.py`의 band_gate를 `band_metrics.nominal_coverage` 기준 coverage/tail error로 수정했고, `ai/inference.py`는 feature_set checkpoint의 11개 feature를 DataLoader 생성 전에 선택하도록 고쳤다. 최종 run의 test band_metrics는 empirical_coverage 0.7141, coverage_abs_error 0.0141, lower_breach_rate 0.1499, upper_breach_rate 0.1359, avg_band_width 0.0607, asymmetric_interval_score 0.1244, band_width_ic 0.3724, downside_width_ic 0.0673이다.
+
+저장은 `predictions` 185,683건, `prediction_evaluations` 185,683건, checkpoint 존재까지 확인했다. 산출물은 `docs/cp72_bm_1d_full_band_product_candidate_report.md`, `docs/cp72_bm_1d_full_band_product_candidate_metrics.json`, `docs/cp72_bm_1d_full_band_product_candidate_logs/`다. 검증은 py_compile, 관련 unittest, metrics JSON 파싱, 마지막 python/pythonw 잔여 프로세스 없음 확인까지 완료했다.
+### CP75-LM 1D h5 line full product candidate
+
+CP75-LM에서는 1D 제품 기본 line layer 후보를 저장 가능한 completed run으로 닫았다. 범위는 PatchTST 1D h5 line_model 전용이며, band 실험, h20 실험, 1W 실험, composite/overlay, UI/backend 수정, feature contract 변경은 하지 않았다. 학습과 inference 모두 `.venv\Scripts\python.exe`를 사용했고 W&B는 `--no-wandb`, `WANDB_MODE=disabled`로 비활성화했다.
+
+사전 게이트는 PASS였다. 1D source_data_hash는 `3ac43945`로 CP72 BM과 동일했고, feature_version은 `v3_adjusted_ohlc`, feature_set은 `full_features`, MODEL_FEATURE_COLUMNS는 36개였다. `atr_ratio`와 `intraday_range_ratio`는 모델 입력에 포함되지 않았고 feature/target NaN/Inf는 0, open/high/low_ratio sanity도 PASS였다. `no --limit-tickers` 기준 eligible 전체는 473개이며 train/val/test sample은 798,950 / 170,960 / 171,781개였다.
+
+학습 run은 `patchtst-1D-efad3c29d803`이다. 조건은 horizon 5, seq_len 252, patch_len 32, patch_stride 16, batch_size 256, epochs 5, CUDA bf16, no-compile, num_workers 0, explicit_cuda_cleanup, checkpoint_selection `line_gate`, target/line_target_type `raw_future_return`이다. 학습 시간은 약 2,816초였고 local log 기준 peak VRAM은 3,030.66MB였다.
+
+저장은 완료됐다. `model_runs.status=completed`, `config.role=line_model`, checkpoint 존재, W&B status `disabled_by_cli`를 확인했다. inference 저장은 test split 기준 predictions 171,781건, prediction_evaluations 171,781건으로 완료됐다. `predictions` 전체 count 조회는 DB statement timeout이 발생해 inference stdout count와 샘플 `line_series` 존재 확인으로 검증했고, 샘플 3건 모두 저장된 `line_series`가 있었다.
+
+test line_metrics는 IC/spread 관점에서는 살아났다. ic_mean 0.0406, ic_ir 0.2080, ic_t_stat 4.0387, long_short_spread 0.0063, spread_ir 0.1916, spread_t_stat 3.7306, fee_adjusted_return 6.1278, fee_adjusted_sharpe 0.1749였다. 다만 false_safe_tail_rate 0.3931, false_safe_severe_rate 0.3942, severe_downside_recall 0.6058로 위험 회피선으로는 아직 약하다. conservative_bias는 -0.0119로 보수 편향은 유지됐다.
+
+최종 판단은 `completed_line_watch`다. 제품 기본 h5 line 저장 후보로 볼 가치는 있지만, 위험 회피선 품질은 false-safe 개선이 필요하다. 이번 run은 CP72 BM과 결합 저장하지 않았고 line_model 단독 후보로만 남겼다. 산출물은 `docs/cp75_lm_1d_h5_full_line_product_candidate_report.md`와 `docs/cp75_lm_1d_h5_full_line_product_candidate_metrics.json`이다.
+
+## 2026-05-03 제품 1D 루프 및 AI 모델 화면 정리
+
+CP76부터 CP83-3까지는 모델을 새로 늘리는 작업보다, 이미 저장된 1D line layer와 band layer를 제품 화면에서 납득 가능하게 보여주는 데 집중했다. 세 공용 문서가 CP75 부근에서 멈춰 있어 이번 섹션에 제품 흐름을 통합 기록한다.
+
+현재 1D 제품 후보는 두 layer로 분리한다. 보수적 예측선은 `patchtst-1D-efad3c29d803`이고, AI 밴드는 `cnn_lstm-1D-d0c780dee5e8`이다. 둘은 composite로 합쳐 저장하거나 평가하지 않는다. 화면에서만 함께 overlay한다. 1W 보수적 예측선과 1W AI 밴드는 제품 후보가 아직 없으므로 준비 중 상태로 둔다.
+
+CP76-P에서는 주식 보기, 차트, AI 모델 화면, readiness 기준을 composite 중심에서 line layer와 band layer 중심으로 바꿨다. `line_band_composite`는 제품 기본에서 제외했고, legacy/demo 성격으로만 남겼다. 주식 보기에서는 1D line run과 1D band run을 따로 조회하고, 1M은 price-only 정책을 유지했다.
+
+CP77-P에서는 rolling prediction history, latest 5일 forecast, AI band width 보조지표를 추가했다. line 예측값이 현재 가격 범위를 지나치게 벗어나면 값을 고치지 않고 차트에서 조용히 숨기는 정책을 넣었다. 이 단계에서 “결과를 억지로 맞추지 않고 표시 안전성만 관리한다”는 원칙을 세웠다.
+
+CP78-P부터 CP80-2-P까지는 제품 문구와 차트 안정성을 정리했다. run_id, feature_set 같은 내부 용어를 기본 화면에서 줄이고, `예측선 모델 v1`, `AI 밴드 모델 v1` 같은 사용자용 이름을 쓰기 시작했다. CP79-P에서는 1W 전환 시 lightweight-charts가 요구하는 시간 오름차순 계약을 모든 series에 강제했다. CP80-P에서는 오늘 marker를 모델 기준일과 분리했고, CP80-2-P에서는 보수적 예측선과 AI 밴드 색/두께를 강화하고 거래량 bar를 추가했다. Bollinger overlay는 `bb_upper`, `bb_middle`, `bb_lower` 가격 series가 API에 없어 임의 계산하지 않고 보류했다.
+
+CP81-P와 CP81-2-P에서는 차트 layer를 가격 오버레이, 거래량, 하단 지표로 나누고, 예측선과 보수적 기준선을 `보수적 예측선` 하나로 통합했다. 표시 우선순위는 `conservative_series`가 있으면 우선 사용하고, 없으면 `line_series`를 사용한다. 차트 토글은 보수적 예측선, AI 밴드, 거래량 bar로 단순화했다.
+
+CP82-P와 CP82-2-P에서는 백테스트 화면을 포트폴리오가 아니라 단일 티커 룰 기반 전략 실험으로 바꿨다. 먼저 Risk Guard v1을 넣었지만 상승 추세를 너무 못 따라가서 기본 전략으로는 부적절했다. 이후 Trend Guard v1을 기본으로 바꿨고, 60일 추세, 보수적 예측선, AI 밴드 하단, RSI를 함께 보게 했다. 다만 두 전략 모두 최종 전략 후보라기보다 UI/실험 구조를 확인하기 위한 데모 전략이다. 나중에 실제로 쓸 전략은 다시 설계해야 한다.
+
+CP83-P부터 CP83-3-P까지는 `모델 학습` 화면을 `AI 모델` 화면으로 재구성했다. 기본 화면은 제품 모델 현황 4슬롯만 보여준다. 4슬롯은 1D 보수적 예측선, 1D AI 밴드, 1W 보수적 예측선, 1W AI 밴드다. 이전 실험은 기본으로 펼치지 않고, `예측선 실험 보기`, `밴드 실험 보기`를 눌렀을 때만 보여준다. NaN 실패, 계산 불가, composite 실험은 제품 UI 기본 노출에서 제외했다. 이전 실험을 클릭하면 같은 상세 패널이 해당 실험 설명으로 바뀌도록 정리했다.
+
+현재 제품 쪽 남은 과제는 네 가지다. 첫째, AI 모델 화면의 평가 설명을 더 자연어 리포트처럼 강화해야 한다. 목표, 실제, 차이, 판정은 들어갔지만 “왜 실패했는지”를 일반 사용자도 이해할 수 있게 더 풀어야 한다. 둘째, 보조지표 패널은 여전히 TradingView 수준의 밀도와 정리가 부족하다. ATR, AI band width, 거래량, RSI/MACD의 위치와 설명을 다시 봐야 한다. 셋째, Bollinger overlay는 API 데이터가 준비될 때까지 보류한다. 넷째, 백테스트 전략은 현재 데모 전략이므로 최종 투자 보조 전략으로 착각하면 안 된다.
+
+### CP86-D yfinance 로컬 primary 데이터 전환
+
+CP86-D에서는 개인 로컬 운영 비용을 줄이기 위해 EODHD 의존 가격 수집을 provider 계층으로 분리하고 yfinance를 로컬 primary provider로 선택할 수 있게 했다. `MARKET_DATA_PROVIDER=yfinance`, `MARKET_DATA_FALLBACK_PROVIDER=eodhd` 설정을 추가했고, EODHD 코드는 삭제하지 않고 fallback/검증용으로 유지했다.
+
+yfinance는 `auto_adjust=False`로 고정해 raw OHLC와 `Adj Close`를 함께 보존한다. 저장 전 adjusted factor, adjusted high/low, 날짜 중복, required price finite, `open_ratio/high_ratio/low_ratio` p99/max sanity를 검사하는 gate를 추가했다. dry-run 12티커 비교는 `overall_pass=true`, adjusted OHLC violation 0, fallback_used 0이었다. AAPL/MSFT는 dividend adjustment policy 차이, NFLX는 split raw/adjusted policy 차이, SPY/QQQ는 기존 DB baseline 부재로 분류했다.
+
+DB write는 수행하지 않았다. write mode는 `backend.collector.pipelines.yfinance_price_sync --write`로 명시해야 하며, write 후에는 `backend.collector.pipelines.compute_indicators_cli --lookback-days 60 --timeframes 1D 1W 1M`로 indicators 재계산이 필요하다. 모델 학습과 live inference 연결은 하지 않았다. 산출물은 `docs/cp86_yfinance_local_primary_migration_report.md`와 `docs/cp86_yfinance_local_primary_migration_metrics.json`이다.
+### CP96-D yfinance 전체 전환 전 P1 데이터 가드 수리
+
+CP96-D에서 전체 universe yfinance write와 live inference 연결 전에 남은 P1 데이터 가드를 수리했다. 전체 yfinance write, 100티커 추가 write, EODHD row 삭제, full retraining, save-run, live inference, product run 교체는 실행하지 않았다.
+
+`ai/preprocessing.py`의 `source_data_hash` 계산에 indicator value checksum을 추가했다. 기존 count/min/max만 보는 방식으로는 같은 ticker/date/count에서 indicator 값이 바뀌어도 cache가 재사용될 수 있었기 때문이다. CP95 yfinance 100티커 기준 hash는 `5be36437`에서 `b6ad28de`로 바뀌었고, 새 feature/index cache path가 존재하지 않아 기존 cache가 그대로 재사용되지 않음을 확인했다.
+
+`market_repo`, `api_service`, `ai/backtest.py`, `daily_market_sync`는 provider/source-aware 조회 계약으로 보강했다. yfinance mode는 `source='yfinance'`만 읽고, eodhd mode는 `source='eodhd'` 또는 legacy null row만 읽는다. repository를 provider 없이 직접 호출하면 warning을 남긴다.
+
+`feature_svc`와 가격 API aggregation에서는 1W/1M partial period를 제외하도록 고쳤다. 최신 일봉이 수요일이면 그 주 금요일 candle을 저장하지 않고, 월 중간이면 해당 월 말 candle을 완성 데이터처럼 보여주지 않는다.
+
+검증은 py_compile, 관련 unittest 50개, CP95 100티커 fingerprint read-only 확인까지 완료했다. 최종 판정은 PASS이며, 다음 단계는 전체 universe 1D yfinance write 후보로 진행 가능하다. 산출물은 `docs/cp96_yfinance_p1_data_guard_repair_report.md`와 `docs/cp96_yfinance_p1_data_guard_repair_metrics.json`이다.
+
+### CP116-S Windows torch import 안정화
+
+CP116-S에서는 Windows에서 `pandas`/`numpy` import 후 `torch` CUDA DLL을 로드할 때 발생할 수 있는 `c10.dll` 초기화 실패를 줄이기 위해 torch-first import 계약을 정리했다. 새 학습, inference 저장, DB write, Supabase 대량 read는 수행하지 않았다.
+
+`ai/torch_bootstrap.py`를 추가해 `PYTHONUTF8=1`, `KMP_DUPLICATE_LIB_OK=TRUE`, `TORCHDYNAMO_DISABLE=1`, `PYTORCH_NVML_BASED_CUDA_CHECK=1`을 공통 설정하고, torch 사용 entrypoint가 `pandas`/`numpy`보다 먼저 `bootstrap_torch()`를 호출하도록 정리했다. CUDA 학습 경로에는 `CUDA_VISIBLE_DEVICES=-1`을 넣지 않고, CP99/CP116 같은 CPU-only 리허설에서만 `bootstrap_torch(cpu_only=True)`를 사용한다.
+
+CP101은 CP99 model inference helper를 top-level에서 import하지 않도록 lazy wrapper로 바꿔 CP103 data-only import 경로가 torch를 끌고 오지 않게 했다. 검증은 py_compile, torch-first 최소 import, CP103/CP115 torch 미로드 확인, `ai.tests.test_torch_import_contract`, `ai.tests.test_evaluation_targets`, `ai.tests.test_metric_definition_contract`, `ai.tests.test_checkpoint_selection`을 통과했다. 산출물은 `docs/cp116_torch_import_stability_report.md`다.
+
+### CP124-BM 1W band loss / downside guard 제한 실험
+
+CP124-BM에서는 1W band 후보의 하방 이탈 약점을 보기 위해 save-run, DB write, inference 저장, W&B, composite, 프론트 수정을 모두 막고 validation 중심 제한 실험만 수행했다. 기본 동작을 깨지 않도록 `ForecastCompositeLoss`에 `--lower-band-loss-weight`, `--upper-band-loss-weight`를 추가했으며 기본값은 1.0/1.0이다. width alignment는 기존 `lambda_width`가 실제 손실 계산에 연결되어 있지 않아 design_needed로 남겼다.
+
+CP121 기준선은 학습을 재실행하지 않고 checkpoint를 재사용했지만, regime metric은 현재 yfinance local 1W snapshot 기준으로 다시 계산했다. 이 재평가 기준에서 `tide_pvv_q15_param` baseline의 falling lower_breach_rate는 0.2420이었고, lower guard 1.5는 0.2518, asym guard 2.0은 0.2629로 오히려 악화되어 TiDE의 falling regime 약점은 이번 손실 조정으로 개선되지 않았다.
+
+`cnn_full_q10_direct_lower_guard_w1p5`는 validation band_gate pass, coverage_abs_error 0.0388, lower_breach_rate 0.0704, falling lower_breach_rate 0.1555, asymmetric_interval_score 0.2512, band_width_ic 0.2436, downside_width_ic 0.0048로 CP124 기준을 통과했다. 다만 CNN 기준선 대비 falling lower 개선 폭은 0.1585에서 0.1555로 작으므로 제품 저장 전에는 CP121/CP124를 합친 재검증이 필요하다.
+
+산출물은 `docs/cp124_bm_1w_band_loss_downside_guard_report.md`, `docs/cp124_bm_1w_band_loss_downside_guard_metrics.json`, `docs/cp124_bm_1w_band_loss_downside_guard_registry.json`, `docs/cp124_bm_1w_band_loss_downside_guard_summary.csv`, `docs/cp124_bm_1w_band_loss_downside_guard_logs/`이다.
+### 2026-05-07 Phase 1 기준 변경
+
+Phase 1 제품 모델의 최소 기준을 500티커 데이터셋으로 올린다. 기존 100티커 기반 1D line/band 모델은 초기 검증과 데모 후보로 유지하지만, 최종 제품 후보라고 부르지 않는다.
+
+제품 모델 슬롯은 1D line, 1D band, 1W line, 1W band 네 개로 고정한다. 1M은 데이터 부족으로 Phase 1 모델 실험에서 제외하고 가격 전용으로 둔다. EODHD 500 local parquet를 현재 학습용 기준 데이터로 삼고, yfinance는 무료 운영 전환용 parallel dataset으로 분리한다. Supabase는 원천 저장소가 아니라 제품 표시용 thin DB로 유지한다.
+
+다음 집중 작업은 네 모델 슬롯의 500티커 v1을 만드는 것이다. 개별 실험 설계는 프로젝트 기록에 길게 섞지 않고 별도 실험 계획서로 관리한다. 현재 전체 상태는 `docs/phase1_project_status.md`에 정리한다.

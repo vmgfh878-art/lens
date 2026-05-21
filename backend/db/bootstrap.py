@@ -13,6 +13,7 @@ import httpx
 import pandas as pd
 from dotenv import load_dotenv
 from postgrest.exceptions import APIError
+from postgrest.types import ReturnMethod
 from supabase import Client, create_client
 
 load_dotenv()
@@ -48,11 +49,22 @@ def _is_retryable_upsert_error(error: Exception) -> bool:
     return code == "502" or any(keyword in combined for keyword in retry_keywords)
 
 
-def _upsert_chunk_with_retry(client: Client, table: str, chunk: list[dict], on_conflict: str) -> None:
+def _upsert_chunk_with_retry(
+    client: Client,
+    table: str,
+    chunk: list[dict],
+    on_conflict: str,
+    *,
+    returning: ReturnMethod = ReturnMethod.minimal,
+) -> None:
     """업서트가 잠깐 실패하면 지수 백오프로 다시 시도한다."""
     for attempt in range(1, UPSERT_MAX_ATTEMPTS + 1):
         try:
-            client.table(table).upsert(chunk, on_conflict=on_conflict).execute()
+            client.table(table).upsert(
+                chunk,
+                on_conflict=on_conflict,
+                returning=returning,
+            ).execute()
             return
         except Exception as error:
             is_retryable = _is_retryable_upsert_error(error)
@@ -68,11 +80,19 @@ def _upsert_chunk_with_retry(client: Client, table: str, chunk: list[dict], on_c
             time.sleep(wait_seconds)
 
 
-def chunked_upsert(client: Client, table: str, records: list[dict], on_conflict: str) -> None:
+def chunked_upsert(
+    client: Client,
+    table: str,
+    records: list[dict],
+    on_conflict: str,
+    *,
+    returning: ReturnMethod = ReturnMethod.minimal,
+) -> None:
+    """대량 upsert 응답 payload egress를 줄이기 위해 기본값은 return=minimal로 둔다."""
     total = len(records)
     for index in range(0, total, CHUNK_SIZE):
         chunk = records[index : index + CHUNK_SIZE]
-        _upsert_chunk_with_retry(client, table, chunk, on_conflict)
+        _upsert_chunk_with_retry(client, table, chunk, on_conflict, returning=returning)
         done = min(index + CHUNK_SIZE, total)
         print(f"  {done:,} / {total:,}", end="\r")
     print(f"  {total:,} rows loaded")
@@ -140,10 +160,13 @@ def step_price_data(client: Client, data_dir: Path, sample_tickers: list[str] | 
             "amount": safe_value(row.get("amount")),
             "per": safe_value(row.get("per")),
             "pbr": safe_value(row.get("pbr")),
+            "source": "eodhd",
+            "provider": "eodhd",
+            "provider_adjustment_policy": "eodhd_raw_ohlc_adjusted_close_factor_v3_adjusted_ohlc",
         }
         for _, row in df.iterrows()
     ]
-    chunked_upsert(client, "price_data", records, on_conflict="ticker,date")
+    chunked_upsert(client, "price_data", records, on_conflict="ticker,date,source")
 
 
 def step_macro(client: Client, data_dir: Path) -> None:

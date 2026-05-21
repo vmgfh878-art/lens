@@ -30,12 +30,19 @@ class CollectorSettings:
     breadth_min_tickers: int
     allow_yahoo_fallback: bool
     use_yahoo_fundamentals_baseline: bool
+    market_data_provider: str
+    market_data_fallback_provider: str | None
     stock_info_sleep_seconds: float
     fundamentals_sleep_seconds: float
     price_sleep_seconds: float
 
 
 def get_settings() -> CollectorSettings:
+    market_data_provider = os.environ.get("MARKET_DATA_PROVIDER", "yahoo").strip().lower()
+    fallback_raw = os.environ.get("MARKET_DATA_FALLBACK_PROVIDER")
+    market_data_fallback_provider = fallback_raw.strip().lower() if fallback_raw is not None and fallback_raw.strip() else None
+    if market_data_provider != "yahoo" and market_data_fallback_provider is None:
+        market_data_fallback_provider = "yahoo" if fallback_raw is None else None
     return CollectorSettings(
         fred_api_key=os.environ.get("FRED_API_KEY"),
         fmp_api_key=os.environ.get("FMP_API_KEY"),
@@ -54,6 +61,8 @@ def get_settings() -> CollectorSettings:
         breadth_min_tickers=int(os.environ.get("LENS_BREADTH_MIN_TICKERS", "50")),
         allow_yahoo_fallback=os.environ.get("LENS_ALLOW_YAHOO_FALLBACK", "0") == "1",
         use_yahoo_fundamentals_baseline=os.environ.get("LENS_USE_YAHOO_FUNDAMENTALS_BASELINE", "1") == "1",
+        market_data_provider=market_data_provider,
+        market_data_fallback_provider=market_data_fallback_provider,
         stock_info_sleep_seconds=float(os.environ.get("LENS_STOCK_INFO_SLEEP_SECONDS", "0.2")),
         fundamentals_sleep_seconds=float(os.environ.get("LENS_FUNDAMENTALS_SLEEP_SECONDS", "0.5")),
         price_sleep_seconds=float(os.environ.get("LENS_PRICE_SLEEP_SECONDS", "0.3")),

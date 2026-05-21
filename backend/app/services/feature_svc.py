@@ -205,6 +205,43 @@ def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str, enforce
         raise ValueError(f"{context}: OHLC ratio sanity check 실패: {failures}")
 
 
+def latest_complete_period_end(latest_daily_date: object, timeframe: str) -> pd.Timestamp | None:
+    """최신 일봉 기준으로 완성된 1W/1M 버킷의 마지막 날짜를 계산한다."""
+    timeframe = normalize_timeframe(timeframe)
+    latest = pd.to_datetime(latest_daily_date, errors="coerce")
+    if pd.isna(latest):
+        return None
+    latest = latest.normalize()
+    if timeframe == "1D":
+        return latest
+    if timeframe == "1W":
+        period_end = latest.to_period("W-FRI").end_time.normalize()
+        return period_end if period_end <= latest else period_end - pd.Timedelta(days=7)
+    period_end = latest.to_period("M").end_time.normalize()
+    return period_end if period_end <= latest else (latest.to_period("M") - 1).end_time.normalize()
+
+
+def drop_incomplete_resampled_periods(
+    frame: pd.DataFrame,
+    timeframe: str,
+    *,
+    latest_daily_date: object | None = None,
+) -> pd.DataFrame:
+    """1W/1M 리샘플 결과에서 아직 끝나지 않은 현재 주/월 버킷을 제거한다."""
+    timeframe = normalize_timeframe(timeframe)
+    if timeframe == "1D" or frame.empty or "date" not in frame.columns:
+        return frame.copy()
+    cutoff = latest_complete_period_end(
+        latest_daily_date if latest_daily_date is not None else frame["date"].max(),
+        timeframe,
+    )
+    if cutoff is None:
+        return frame.iloc[0:0].copy()
+    filtered = frame.copy()
+    filtered["date"] = pd.to_datetime(filtered["date"], errors="coerce")
+    return filtered[filtered["date"] <= cutoff].copy()
+
+
 def _resample_single_ticker(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     timeframe = normalize_timeframe(timeframe)
     frame = _apply_adjusted_ohlc_contract(
@@ -229,6 +266,7 @@ def _resample_single_ticker(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 
     aggregated = frame.resample(rule).agg(agg_map)
     aggregated = aggregated.dropna(subset=["open", "high", "low", "close"]).reset_index()
+    aggregated = drop_incomplete_resampled_periods(aggregated, timeframe, latest_daily_date=frame.index.max())
     if "ticker" in df.columns and not aggregated.empty:
         aggregated["ticker"] = df["ticker"].iloc[0]
     if not aggregated.empty:

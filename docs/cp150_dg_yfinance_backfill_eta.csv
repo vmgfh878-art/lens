@@ -1,0 +1,4 @@
+scenario,measurement_basis,best_minutes,base_minutes,worst_minutes,notes
+100 ticker daily append to 2026-05-08,"50 ticker recent fetch 18.663s, actual 5 ticker append+1D/1W refresh 99.6s including context checks",2,4-6,15-30,"direct chart stable, one-shot 100 ticker append; worst assumes retry/chunk and Yahoo transient throttling"
+100 ticker full yfinance parquet rebuild from 2015-01-01,"5 ticker full-range fetch 3.064s / 14275 rows, current 100 ticker parquet about 285k rows",3-5,8-15,30-60,price fetch itself about 1-2 minutes; indicator/context parquet rebuild dominates
+500 ticker full yfinance parquet rebuild from 2015-01-01,"5 ticker full-range fetch avg 0.613s/ticker, 50 ticker recent fetch avg 0.373s/ticker",25-45,90-180,360-720,separate price_data_yfinance_500.parquet required; worst assumes daily chunk limits/rate throttling and retries

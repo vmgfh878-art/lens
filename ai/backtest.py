@@ -10,24 +10,159 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.preprocessing import normalize_ai_timeframe
+from ai.inference_contract import resolve_execution_market_data_provider
+from ai.preprocessing import normalize_ai_timeframe, resolved_market_data_provider
 from ai.storage import fetch_run_evaluations, fetch_run_predictions, get_model_run, save_backtest_results
 from backend.collector.repositories.base import fetch_frame
 
 import pandas as pd
+
+ANCHOR_MAX_GAP_DAYS = {
+    "1D": 0,
+    "1W": 7,
+    "1M": 10,
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="저장된 예측 결과로 규칙 기반 백테스트를 실행한다")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--timeframe", default=None)
+    parser.add_argument("--market-data-provider", default=None)
     parser.add_argument("--strategy-name", default="band_breakout_v1")
     parser.add_argument("--fee-bps", type=float, default=10.0)
     parser.add_argument("--save", action="store_true")
     return parser.parse_args()
 
 
-def build_backtest_frame(run_id: str, timeframe: str | None = None) -> pd.DataFrame:
+def _filter_price_frame_by_provider(frame: pd.DataFrame, provider: str) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    if "source" not in frame.columns:
+        return frame.copy() if provider == "eodhd" else frame.iloc[0:0].copy()
+    source = frame["source"].astype("string")
+    if provider == "eodhd":
+        return frame[source.isna() | (source.str.lower() == "eodhd")].copy()
+    return frame[source.str.lower() == provider].copy()
+
+
+def _max_anchor_gap_days(timeframe: str) -> int:
+    return ANCHOR_MAX_GAP_DAYS.get(normalize_ai_timeframe(timeframe), 0)
+
+
+def _anchor_gap_distribution(gaps: list[int]) -> dict[str, int]:
+    distribution: dict[str, int] = {}
+    for gap in gaps:
+        key = str(int(gap))
+        distribution[key] = distribution.get(key, 0) + 1
+    return distribution
+
+
+def _resolve_anchor_rows(frame: pd.DataFrame, price_frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    price = price_frame.copy()
+    price["ticker"] = price["ticker"].astype(str).str.upper()
+    price["date"] = pd.to_datetime(price["date"])
+    price = price.sort_values(["ticker", "date"]).reset_index(drop=True)
+
+    exact_lookup = {
+        (str(row["ticker"]).upper(), row["date"].strftime("%Y-%m-%d")): (float(row["anchor_close"]), row["date"])
+        for _, row in price.iterrows()
+    }
+    grouped_prices = {
+        ticker: group.reset_index(drop=True)
+        for ticker, group in price.groupby("ticker", sort=False)
+    }
+
+    resolved_closes: list[float | None] = []
+    resolved_dates: list[str | None] = []
+    resolved_gaps: list[int | None] = []
+    resolved_modes: list[str] = []
+    exact_count = 0
+    resolved_count = 0
+    missing_count = 0
+    observed_gaps: list[int] = []
+
+    for _, row in frame.iterrows():
+        ticker = str(row["ticker"]).upper()
+        asof_label = str(row["asof_date"])
+        asof_ts = pd.Timestamp(asof_label)
+        exact = exact_lookup.get((ticker, asof_label))
+        if exact is not None:
+            anchor_close, anchor_date = exact
+            resolved_closes.append(anchor_close)
+            resolved_dates.append(anchor_date.strftime("%Y-%m-%d"))
+            resolved_gaps.append(0)
+            resolved_modes.append("exact")
+            exact_count += 1
+            observed_gaps.append(0)
+            continue
+
+        timeframe = normalize_ai_timeframe(str(row["timeframe"]))
+        max_gap = _max_anchor_gap_days(timeframe)
+        if timeframe not in {"1W", "1M"}:
+            resolved_closes.append(None)
+            resolved_dates.append(None)
+            resolved_gaps.append(None)
+            resolved_modes.append("missing")
+            missing_count += 1
+            continue
+
+        ticker_prices = grouped_prices.get(ticker)
+        if ticker_prices is None or ticker_prices.empty:
+            resolved_closes.append(None)
+            resolved_dates.append(None)
+            resolved_gaps.append(None)
+            resolved_modes.append("missing")
+            missing_count += 1
+            continue
+
+        candidates = ticker_prices[ticker_prices["date"] <= asof_ts]
+        if candidates.empty:
+            resolved_closes.append(None)
+            resolved_dates.append(None)
+            resolved_gaps.append(None)
+            resolved_modes.append("missing")
+            missing_count += 1
+            continue
+
+        candidate = candidates.iloc[-1]
+        gap_days = int((asof_ts - candidate["date"]).days)
+        if gap_days > max_gap:
+            resolved_closes.append(None)
+            resolved_dates.append(candidate["date"].strftime("%Y-%m-%d"))
+            resolved_gaps.append(gap_days)
+            resolved_modes.append("gap_exceeded")
+            missing_count += 1
+            continue
+
+        resolved_closes.append(float(candidate["anchor_close"]))
+        resolved_dates.append(candidate["date"].strftime("%Y-%m-%d"))
+        resolved_gaps.append(gap_days)
+        resolved_modes.append("resolved_prior_trading_date")
+        resolved_count += 1
+        observed_gaps.append(gap_days)
+
+    resolved = frame.copy()
+    resolved["anchor_close"] = resolved_closes
+    resolved["anchor_resolved_date"] = resolved_dates
+    resolved["anchor_gap_days"] = resolved_gaps
+    resolved["anchor_resolution"] = resolved_modes
+    metrics = {
+        "anchor_exact_count": exact_count,
+        "anchor_resolved_count": resolved_count,
+        "anchor_missing_count": missing_count,
+        "anchor_gap_days_distribution": _anchor_gap_distribution(observed_gaps),
+    }
+    return resolved, metrics
+
+
+def build_backtest_frame(
+    run_id: str,
+    timeframe: str | None = None,
+    *,
+    market_data_provider: str | None = None,
+) -> pd.DataFrame:
+    provider = resolved_market_data_provider(market_data_provider)
     predictions = fetch_run_predictions(run_id, timeframe)
     evaluations = fetch_run_evaluations(run_id, timeframe)
     if predictions.empty or evaluations.empty:
@@ -43,28 +178,23 @@ def build_backtest_frame(run_id: str, timeframe: str | None = None) -> pd.DataFr
     tickers = sorted(frame["ticker"].astype(str).str.upper().unique().tolist())
     min_date = frame["asof_date"].min()
     max_date = frame["asof_date"].max()
+    timeframes = [normalize_ai_timeframe(str(value)) for value in frame["timeframe"].dropna().unique().tolist()]
+    max_anchor_gap = max((_max_anchor_gap_days(value) for value in timeframes), default=0)
+    price_start_date = (pd.Timestamp(min_date) - pd.Timedelta(days=max_anchor_gap)).strftime("%Y-%m-%d")
     price_frame = fetch_frame(
         "price_data",
-        columns="ticker,date,close,adjusted_close",
-        filters=[("in", "ticker", tickers), ("gte", "date", min_date), ("lte", "date", max_date)],
+        columns="ticker,date,close,adjusted_close,source,provider",
+        filters=[("in", "ticker", tickers), ("gte", "date", price_start_date), ("lte", "date", max_date)],
         order_by="date",
     )
+    price_frame = _filter_price_frame_by_provider(price_frame, provider)
     if price_frame.empty:
         raise ValueError("anchor close를 찾을 수 없습니다. price_data를 확인하세요.")
 
-    price_frame["date"] = pd.to_datetime(price_frame["date"]).dt.strftime("%Y-%m-%d")
     if "adjusted_close" not in price_frame.columns:
         price_frame["adjusted_close"] = price_frame["close"]
     price_frame["anchor_close"] = price_frame["adjusted_close"].fillna(price_frame["close"])
-    price_lookup = {
-        (row["ticker"], row["date"]): float(row["anchor_close"])
-        for _, row in price_frame.iterrows()
-    }
-
-    frame["anchor_close"] = frame.apply(
-        lambda row: price_lookup.get((str(row["ticker"]).upper(), row["asof_date"])),
-        axis=1,
-    )
+    frame, anchor_metrics = _resolve_anchor_rows(frame, price_frame)
     frame = frame.dropna(subset=["anchor_close"]).copy()
     frame["line_last"] = frame["line_series"].apply(lambda values: float(values[-1]) if values else None)
     frame["actual_last"] = frame["actual_series"].apply(lambda values: float(values[-1]) if values else None)
@@ -72,7 +202,9 @@ def build_backtest_frame(run_id: str, timeframe: str | None = None) -> pd.DataFr
 
     frame["line_return"] = (frame["line_last"] / frame["anchor_close"]) - 1.0
     frame["realized_return"] = (frame["actual_last"] / frame["anchor_close"]) - 1.0
-    return frame.sort_values("asof_date").reset_index(drop=True)
+    result = frame.sort_values("asof_date").reset_index(drop=True)
+    result.attrs["anchor_resolution_metrics"] = anchor_metrics
+    return result
 
 
 def run_rule_based_backtest(
@@ -86,6 +218,7 @@ def run_rule_based_backtest(
         raise ValueError("백테스트 입력 데이터가 비어 있습니다.")
 
     frame = prediction_frame.sort_values(["asof_date", "ticker"]).copy()
+    anchor_resolution_metrics = prediction_frame.attrs.get("anchor_resolution_metrics")
     signal_to_position = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
     fee_rate = float(fee_bps) / 10000.0
 
@@ -151,6 +284,7 @@ def run_rule_based_backtest(
             "fee_bps": float(fee_bps),
             "gross_return_pct": gross_return_pct,
             "gross_sharpe": float(gross_strategy_return.mean() / gross_std) if gross_std else 0.0,
+            "anchor_resolution_metrics": anchor_resolution_metrics,
         },
     }
 
@@ -181,6 +315,7 @@ def run_backtest(
     strategy_name: str,
     fee_bps: float = 10.0,
     save: bool = False,
+    market_data_provider: str | None = None,
 ) -> dict[str, Any]:
     if timeframe is not None:
         normalize_ai_timeframe(timeframe)
@@ -193,7 +328,12 @@ def run_backtest(
         raise ValueError(
             f"run_id={run_id} status={run_status}: completed 상태의 run에서만 backtest를 실행할 수 있습니다."
         )
-    frame = build_backtest_frame(run_id, timeframe)
+    provider, provider_contract = resolve_execution_market_data_provider(
+        model_run.get("config") or {},
+        requested_provider=market_data_provider,
+        run_config=model_run,
+    )
+    frame = build_backtest_frame(run_id, timeframe, market_data_provider=provider)
     result = run_rule_based_backtest(frame, strategy_name=strategy_name, fee_bps=fee_bps)
     resolved_timeframe = timeframe or str(frame["timeframe"].iloc[0])
     normalize_ai_timeframe(resolved_timeframe)
@@ -202,6 +342,9 @@ def run_backtest(
     return {
         "run_id": run_id,
         "timeframe": resolved_timeframe,
+        "market_data_provider": provider,
+        "contract_metrics": provider_contract,
+        "anchor_resolution_metrics": result["meta"].get("anchor_resolution_metrics"),
         **result,
     }
 
@@ -214,5 +357,6 @@ if __name__ == "__main__":
         strategy_name=args.strategy_name,
         fee_bps=args.fee_bps,
         save=args.save,
+        market_data_provider=args.market_data_provider,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

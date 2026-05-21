@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import AppShell, { AppView } from "@/components/AppShell";
 import BacktestView from "@/components/BacktestView";
+import ReportView from "@/components/ReportView";
 import StockView from "@/components/StockView";
 import TrainingView from "@/components/TrainingView";
 
@@ -15,6 +16,7 @@ export default function DashboardPage() {
       {activeView === "stocks" ? <StockView /> : null}
       {activeView === "backtests" ? <BacktestView /> : null}
       {activeView === "training" ? <TrainingView /> : null}
+      {activeView === "report" ? <ReportView /> : null}
     </AppShell>
   );
 }

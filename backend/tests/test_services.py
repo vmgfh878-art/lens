@@ -1,15 +1,21 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pandas as pd
+
 from app.core.exceptions import InvalidRunStatusError, TimeframeDisabledError
-from app.repositories.market_repo import fetch_indicator_rows, fetch_stocks
+from app.repositories.market_repo import fetch_indicator_rows, fetch_price_rows, fetch_stocks
 from app.services.api_service import aggregate_prices, get_latest_prediction_data, resolve_price_window
 
 
 class ServiceTestCase(unittest.TestCase):
     def test_aggregate_prices_supports_daily_weekly_monthly(self):
         rows = [
+            {"date": "2026-03-31", "open": 9.0, "high": 10.0, "low": 8.0, "close": 9.5, "volume": 90},
             {"date": "2026-04-01", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100},
             {"date": "2026-04-02", "open": 10.5, "high": 12.0, "low": 10.0, "close": 11.5, "volume": 120},
             {"date": "2026-04-10", "open": 11.5, "high": 13.0, "low": 11.0, "close": 12.5, "volume": 130},
@@ -19,15 +25,90 @@ class ServiceTestCase(unittest.TestCase):
         weekly = aggregate_prices(rows, "1W")
         monthly = aggregate_prices(rows, "1M")
 
-        self.assertEqual(len(daily), 3)
+        self.assertEqual(len(daily), 4)
         self.assertEqual(len(weekly), 2)
         self.assertEqual(len(monthly), 1)
-        self.assertEqual(monthly[0]["close"], 12.5)
+        self.assertEqual(monthly[0]["close"], 9.5)
+
+    def test_aggregate_prices_drops_partial_week_and_month(self):
+        rows = [
+            {"date": "2026-04-06", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100},
+            {"date": "2026-04-07", "open": 10.5, "high": 12.0, "low": 10.0, "close": 11.5, "volume": 120},
+            {"date": "2026-04-08", "open": 11.5, "high": 13.0, "low": 11.0, "close": 12.5, "volume": 130},
+        ]
+
+        weekly = aggregate_prices(rows, "1W")
+        monthly = aggregate_prices(rows, "1M")
+
+        self.assertEqual(weekly, [])
+        self.assertEqual(monthly, [])
 
     def test_resolve_price_window_defaults_to_recent_year(self):
         start, end = resolve_price_window("2026-01-01", "2026-04-01")
         self.assertEqual(start, "2026-01-01")
         self.assertEqual(end, "2026-04-01")
+
+    def test_market_repo_uses_local_snapshot_in_local_mode(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_dir = Path(tmp_dir)
+            price_frame = pd.DataFrame(
+                {
+                    "ticker": ["AAPL"],
+                    "date": ["2026-01-02"],
+                    "open": [100.0],
+                    "high": [102.0],
+                    "low": [99.0],
+                    "close": [101.0],
+                    "volume": [1000],
+                    "source": ["yfinance"],
+                    "provider": ["yfinance"],
+                }
+            )
+            indicator_frame = pd.DataFrame(
+                {
+                    "ticker": ["AAPL"],
+                    "timeframe": ["1D"],
+                    "date": ["2026-01-02"],
+                    "rsi": [55.0],
+                    "macd_ratio": [0.01],
+                    "source": ["yfinance"],
+                    "provider": ["yfinance"],
+                }
+            )
+            stock_frame = pd.DataFrame(
+                {
+                    "ticker": ["AAPL"],
+                    "sector": ["Technology"],
+                    "industry": ["Consumer Electronics"],
+                    "market_cap": [1000],
+                }
+            )
+            try:
+                price_frame.to_parquet(snapshot_dir / "price_data_yfinance.parquet", index=False)
+                indicator_frame.to_parquet(snapshot_dir / "indicators_yfinance_1D.parquet", index=False)
+                stock_frame.to_parquet(snapshot_dir / "stock_info.parquet", index=False)
+            except Exception as exc:
+                self.skipTest(f"parquet 엔진을 사용할 수 없어 local snapshot 테스트를 건너뜁니다: {exc}")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "LENS_DATA_BACKEND": "local",
+                    "LENS_LOCAL_SNAPSHOT_DIR": str(snapshot_dir),
+                    "MARKET_DATA_PROVIDER": "yfinance",
+                },
+                clear=False,
+            ), patch(
+                "app.repositories.market_repo.get_supabase",
+                side_effect=AssertionError("Supabase REST 조회 금지"),
+            ):
+                price_rows = fetch_price_rows("AAPL", start="2026-01-01", market_data_provider="yfinance")
+                indicator_rows = fetch_indicator_rows("AAPL", timeframe="1D", market_data_provider="yfinance")
+                stock_rows = fetch_stocks(search="AAPL", limit=5, market_data_provider="yfinance")
+
+            self.assertEqual(price_rows[0]["close"], 101.0)
+            self.assertEqual(indicator_rows[0]["rsi"], 55.0)
+            self.assertEqual(stock_rows[0]["ticker"], "AAPL")
 
     def test_prediction_arrays_default_to_empty_lists(self):
         def fake_fetch(*args, **kwargs):
@@ -91,6 +172,81 @@ class ServiceTestCase(unittest.TestCase):
         self.assertEqual(payload["run_id"], "run-2")
         fetch_by_run.assert_called_once_with("AAPL", run_id="run-2")
         fetch_latest.assert_not_called()
+
+    def test_line_run_prediction_drops_band_arrays(self):
+        completed_run = {
+            "run_id": "line-run",
+            "status": "completed",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "config": {"model_role": "line_v2"},
+        }
+        prediction = {
+            "ticker": "AAPL",
+            "model_name": "patchtst",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-04-18",
+            "decision_time": "2026-04-18T00:00:00Z",
+            "run_id": "line-run",
+            "model_ver": "v1",
+            "signal": "BUY",
+            "forecast_dates": ["2026-04-19"],
+            "line_series": [104.0],
+            "upper_band_series": [110.0],
+            "lower_band_series": [100.0],
+            "conservative_series": [],
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=completed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run",
+            return_value=prediction,
+        ):
+            payload = get_latest_prediction_data("AAPL", run_id="line-run")
+
+        self.assertEqual(payload["meta"]["layer"], "line")
+        self.assertEqual(payload["line_series"], [104.0])
+        self.assertEqual(payload["upper_band_series"], [])
+        self.assertEqual(payload["lower_band_series"], [])
+
+    def test_band_run_prediction_drops_line_arrays(self):
+        completed_run = {
+            "run_id": "band-run",
+            "status": "completed",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "config": {"model_role": "band"},
+        }
+        prediction = {
+            "ticker": "AAPL",
+            "model_name": "cnn_lstm",
+            "timeframe": "1D",
+            "horizon": 5,
+            "asof_date": "2026-04-18",
+            "decision_time": "2026-04-18T00:00:00Z",
+            "run_id": "band-run",
+            "model_ver": "v1",
+            "signal": "HOLD",
+            "forecast_dates": ["2026-04-19"],
+            "line_series": [104.0],
+            "upper_band_series": [110.0],
+            "lower_band_series": [100.0],
+            "conservative_series": [104.0],
+        }
+
+        with patch("app.services.api_service.fetch_model_run", return_value=completed_run), patch(
+            "app.services.api_service.fetch_prediction_by_run",
+            return_value=prediction,
+        ):
+            payload = get_latest_prediction_data("AAPL", run_id="band-run")
+
+        self.assertEqual(payload["meta"]["layer"], "band")
+        self.assertEqual(payload["line_series"], [])
+        self.assertEqual(payload["conservative_series"], [])
+        self.assertEqual(payload["upper_band_series"], [110.0])
+        self.assertEqual(payload["lower_band_series"], [100.0])
 
     def test_prediction_latest_with_composite_run_id_preserves_meta(self):
         completed_run = {
@@ -198,6 +354,64 @@ class ServiceTestCase(unittest.TestCase):
         self.assertNotIn("atr_ratio", fake_table.selected_columns[-2])
         self.assertNotIn("volume", fake_table.selected_columns[-2])
         self.assertEqual(fake_table.selected_columns[-1], "date, volume")
+
+    def test_price_rows_are_source_aware(self):
+        class FakeTable:
+            def __init__(self):
+                self.filters = []
+                self.or_filter = None
+
+            def select(self, *args):
+                return self
+
+            def eq(self, column, value):
+                self.filters.append(("eq", column, value))
+                return self
+
+            def gte(self, column, value):
+                self.filters.append(("gte", column, value))
+                return self
+
+            def lte(self, column, value):
+                self.filters.append(("lte", column, value))
+                return self
+
+            def order(self, *args, **kwargs):
+                return self
+
+            def or_(self, value):
+                self.or_filter = value
+                return self
+
+            def execute(self):
+                rows = [
+                    {"date": "2026-04-01", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100, "source": "yfinance"},
+                    {"date": "2026-04-01", "open": 20.0, "high": 21.0, "low": 19.0, "close": 20.5, "volume": 200, "source": "eodhd"},
+                    {"date": "2026-04-02", "open": 30.0, "high": 31.0, "low": 29.0, "close": 30.5, "volume": 300, "source": None},
+                ]
+                for _, column, value in self.filters:
+                    if column == "source":
+                        rows = [row for row in rows if row.get("source") == value]
+                if self.or_filter == "source.eq.eodhd,source.is.null":
+                    rows = [row for row in rows if row.get("source") in ("eodhd", None)]
+                return SimpleNamespace(data=rows)
+
+        fake_client = SimpleNamespace(table=lambda name: FakeTable())
+
+        with patch("app.repositories.market_repo.get_supabase", return_value=fake_client):
+            yfinance_rows = fetch_price_rows(
+                "aapl",
+                start="2026-04-01",
+                market_data_provider="yfinance",
+            )
+            eodhd_rows = fetch_price_rows(
+                "aapl",
+                start="2026-04-01",
+                market_data_provider="eodhd",
+            )
+
+        self.assertEqual([row["source"] for row in yfinance_rows], ["yfinance"])
+        self.assertEqual([row["source"] for row in eodhd_rows], ["eodhd", None])
 
     def test_stock_search_falls_back_to_price_data_when_stock_info_fails(self):
         class FakeTable:

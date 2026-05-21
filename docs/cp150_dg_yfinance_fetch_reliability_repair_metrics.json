@@ -1,0 +1,1105 @@
+{
+  "actual_append": {
+    "appended_dates": [
+      "2026-05-05",
+      "2026-05-06",
+      "2026-05-07",
+      "2026-05-08"
+    ],
+    "appended_rows": 20,
+    "appended_tickers": [
+      "AAPL",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ],
+    "eodhd_500_unchanged": true,
+    "indicator_validations": {
+      "1D": {
+        "duplicate_count": 0,
+        "nonfinite_count": 0,
+        "refresh_rows": 20
+      },
+      "1W": {
+        "duplicate_count": 0,
+        "latest_complete_week_end": "2026-05-08",
+        "nonfinite_count": 0,
+        "partial_week_rows": 0,
+        "refresh_rows": 10
+      }
+    },
+    "price_after_rows": 284925,
+    "price_before_rows": 284905,
+    "price_status": "PASS_APPEND_DONE",
+    "readiness": {
+      "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+      "context_latest_dates": {
+        "company_fundamentals": "2026-04-03",
+        "company_fundamentals_filing_date": "2026-05-05",
+        "macroeconomic_indicators": "2026-05-04",
+        "market_breadth": "2026-05-01",
+        "sector_returns": "2026-05-04"
+      },
+      "eodhd_fallback_used": false,
+      "line_run_id": "patchtst-1D-efad3c29d803",
+      "local_indicator_1D_latest_date": "2026-05-08",
+      "local_indicator_1W_latest_date": "2026-05-08",
+      "local_price_latest_date": "2026-05-08",
+      "product_history_latest_asof_date": "2026-05-04",
+      "supabase_bulk_read_write": false
+    },
+    "status": "PASS_APPEND_DONE"
+  },
+  "automation_after_append": {
+    "candidate_rows": 0,
+    "price_status": "PASS_WITH_NO_NEW_DAY",
+    "readiness": {
+      "band_run_id": "cnn_lstm-1D-d0c780dee5e8",
+      "context_latest_dates": {
+        "company_fundamentals": "2026-04-03",
+        "company_fundamentals_filing_date": "2026-05-05",
+        "macroeconomic_indicators": "2026-05-04",
+        "market_breadth": "2026-05-01",
+        "sector_returns": "2026-05-04"
+      },
+      "eodhd_fallback_used": false,
+      "line_run_id": "patchtst-1D-efad3c29d803",
+      "local_indicator_1D_latest_date": "2026-05-08",
+      "local_indicator_1W_latest_date": "2026-05-08",
+      "local_price_latest_date": "2026-05-08",
+      "product_history_latest_asof_date": "2026-05-04",
+      "supabase_bulk_read_write": false
+    },
+    "status": "PASS_WITH_NO_NEW_DAY"
+  },
+  "backfill_eta_csv": "docs/cp150_dg_yfinance_backfill_eta.csv",
+  "cp": "CP150-DG",
+  "created_at": "2026-05-10T13:39:21.845138Z",
+  "final_status": "PASS_REPAIR_APPEND_DONE",
+  "forbidden_actions_observed": {
+    "db_write": false,
+    "eodhd_fallback": false,
+    "frontend_modify": false,
+    "inference_save": false,
+    "model_training": false,
+    "product_save_run": false,
+    "supabase_bulk_read_write": false
+  },
+  "measurements": {
+    "full_range_5": {
+      "avg_fetch_seconds_per_ticker": 0.613,
+      "empty_json_error_ratio": 0.0,
+      "end_date": "2026-05-10",
+      "failed_ticker_count": 0,
+      "fallback_used_count": 0,
+      "sample_size": 5,
+      "start_date": "2014-12-31",
+      "success_ticker_count": 5,
+      "ticker_per_hour": 5874.08,
+      "tickers": [
+        {
+          "elapsed_seconds": 0.8,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 2855,
+          "success": true,
+          "ticker": "AAPL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.485,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 2855,
+          "success": true,
+          "ticker": "MSFT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.571,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 2855,
+          "success": true,
+          "ticker": "NVDA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.468,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 2855,
+          "success": true,
+          "ticker": "TSLA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.449,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 2855,
+          "success": true,
+          "ticker": "NFLX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        }
+      ],
+      "total_elapsed_seconds": 3.064,
+      "total_row_count": 14275
+    },
+    "recent_20": {
+      "avg_fetch_seconds_per_ticker": 0.364,
+      "empty_json_error_ratio": 0.0,
+      "end_date": "2026-05-10",
+      "failed_ticker_count": 0,
+      "fallback_used_count": 0,
+      "sample_size": 20,
+      "start_date": "2026-04-30",
+      "success_ticker_count": 20,
+      "ticker_per_hour": 9899.98,
+      "tickers": [
+        {
+          "elapsed_seconds": 0.522,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AAPL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.342,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "MSFT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.308,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NVDA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.277,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "TSLA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.267,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NFLX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.286,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ABBV",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.343,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ABT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.288,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ACN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.279,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADBE",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.34,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADI",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.328,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADP",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.317,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMAT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.274,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMD",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.283,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMGN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.295,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.273,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMZN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.264,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ANET",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.33,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "APD",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.287,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AVGO",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.337,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AXP",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        }
+      ],
+      "total_elapsed_seconds": 7.273,
+      "total_row_count": 140
+    },
+    "recent_5": {
+      "avg_fetch_seconds_per_ticker": 0.358,
+      "empty_json_error_ratio": 0.0,
+      "end_date": "2026-05-10",
+      "failed_ticker_count": 0,
+      "fallback_used_count": 0,
+      "sample_size": 5,
+      "start_date": "2026-04-30",
+      "success_ticker_count": 5,
+      "ticker_per_hour": 10063.54,
+      "tickers": [
+        {
+          "elapsed_seconds": 0.373,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AAPL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.307,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "MSFT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.296,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NVDA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.287,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "TSLA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.266,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NFLX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        }
+      ],
+      "total_elapsed_seconds": 1.789,
+      "total_row_count": 35
+    },
+    "recent_50": {
+      "avg_fetch_seconds_per_ticker": 0.373,
+      "empty_json_error_ratio": 0.0,
+      "end_date": "2026-05-10",
+      "failed_ticker_count": 0,
+      "fallback_used_count": 0,
+      "sample_size": 50,
+      "start_date": "2026-04-30",
+      "success_ticker_count": 50,
+      "ticker_per_hour": 9644.58,
+      "tickers": [
+        {
+          "elapsed_seconds": 0.335,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AAPL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.301,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "MSFT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.301,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NVDA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.286,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "TSLA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.279,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "NFLX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.308,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ABBV",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.35,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ABT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.275,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ACN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.318,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADBE",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.284,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADI",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.357,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ADP",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.285,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMAT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.292,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMD",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.298,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMGN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.278,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.622,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AMZN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.298,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ANET",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.343,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "APD",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.292,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AVGO",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.343,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "AXP",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.352,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BA",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.326,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BAC",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.295,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BKNG",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.311,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BLK",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.391,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BMY",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.278,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BRK-B",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.272,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BSX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.309,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "BX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.316,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "C",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.346,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CAT",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.31,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CB",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.279,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CDNS",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.347,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.356,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CME",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.306,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CMG",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.314,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "COP",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.322,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "COST",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.304,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CRM",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.275,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CSCO",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.359,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "CVX",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.354,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "DE",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.304,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "DHR",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.35,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "DIS",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.306,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ELV",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.407,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "ETN",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.354,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "GE",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.281,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "GILD",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.287,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "GOOG",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.286,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "GOOGL",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        },
+        {
+          "elapsed_seconds": 0.355,
+          "errors": [],
+          "fallback_used": false,
+          "fetch_method": "yahoo_chart",
+          "provider": "yfinance",
+          "row_count": 7,
+          "success": true,
+          "ticker": "GS",
+          "yahoo_chart_host": "query1.finance.yahoo.com"
+        }
+      ],
+      "total_elapsed_seconds": 18.663,
+      "total_row_count": 350
+    }
+  },
+  "one_line_conclusion": "yfinance 0.2.40? crumb/cookie ??? 429/JSONDecodeError? ????, trust_env=False? browser-like header? ?? Yahoo chart ?? fetch? ?? JSON? ????.",
+  "package_info": {
+    "python_executable": "C:\\Users\\user\\lens\\.venv\\Scripts\\python.exe",
+    "python_version": "3.10.0",
+    "requests_version": "2.32.3",
+    "yfinance_path": "C:\\Users\\user\\lens\\.venv\\lib\\site-packages\\yfinance\\__init__.py",
+    "yfinance_version": "0.2.40"
+  },
+  "repair": {
+    "backfill_state_path": "data/parquet/yfinance_backfill_state.json",
+    "eodhd_fallback_used": false,
+    "partial_append_status_supported": [
+      "APPEND_READY_PARTIAL",
+      "PARTIAL_APPEND_DONE"
+    ],
+    "provider_fetch_method_default": "yahoo_chart direct first, yf.download fallback disabled until direct empty/failure path",
+    "source_provider_saved_as": "yfinance"
+  },
+  "root_cause": {
+    "classification": "yfinance_0_2_40_crumb_cookie_429_plus_proxy_env_risk; direct_chart_ok",
+    "endpoint_summary_query1_range_10d": [
+      {
+        "browser_headers": false,
+        "content_type": null,
+        "error": "ProxyError:HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): Max retries exceeded with url: /v8/finance/chart/AAPL?interval=1d&includePrePost=false&events=div%2Csplits&range=10d (Caused by ProxyError('Unable to connect to proxy', NewConnectionError(\"HTTPSConnection(host='127.0.0.1', port=9): Failed to establish a new connection: [WinError 10061] 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다\")))",
+        "host": "query1.finance.yahoo.com",
+        "json_error": null,
+        "json_parse_ok": null,
+        "params_name": "range_10d",
+        "status_code": null,
+        "timestamp_count": null,
+        "trust_env": true
+      },
+      {
+        "browser_headers": false,
+        "content_type": "text/html",
+        "error": null,
+        "host": "query1.finance.yahoo.com",
+        "json_error": "JSONDecodeError:Expecting value: line 1 column 1 (char 0)",
+        "json_parse_ok": false,
+        "params_name": "range_10d",
+        "status_code": 429,
+        "timestamp_count": null,
+        "trust_env": false
+      },
+      {
+        "browser_headers": true,
+        "content_type": null,
+        "error": "ProxyError:HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): Max retries exceeded with url: /v8/finance/chart/AAPL?interval=1d&includePrePost=false&events=div%2Csplits&range=10d (Caused by ProxyError('Unable to connect to proxy', NewConnectionError(\"HTTPSConnection(host='127.0.0.1', port=9): Failed to establish a new connection: [WinError 10061] 대상 컴퓨터에서 연결을 거부했으므로 연결하지 못했습니다\")))",
+        "host": "query1.finance.yahoo.com",
+        "json_error": null,
+        "json_parse_ok": null,
+        "params_name": "range_10d",
+        "status_code": null,
+        "timestamp_count": null,
+        "trust_env": true
+      },
+      {
+        "browser_headers": true,
+        "content_type": "application/json;charset=utf-8",
+        "error": null,
+        "host": "query1.finance.yahoo.com",
+        "json_error": null,
+        "json_parse_ok": true,
+        "params_name": "range_10d",
+        "status_code": 200,
+        "timestamp_count": 10,
+        "trust_env": false
+      }
+    ],
+    "yf_download_error": null,
+    "yf_download_rows": 0,
+    "yf_download_stderr_tail_contains_429": false
+  }
+}

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ai.models.blocks import AttentionPooling1D, init_weights
-from ai.models.common import ForecastOutput, MultiHeadForecastModel
+from ai.models.common import BandOutput, ForecastOutput, LineDistributionalOutput, LineMonotonicDistributionalOutput, LineRegimeOutput, LineV2Output, LineWarningOutput, MultiHeadForecastModel
 
 
 class CNNLSTM(MultiHeadForecastModel):
@@ -25,13 +25,25 @@ class CNNLSTM(MultiHeadForecastModel):
         ticker_emb_dim: int = 32,
         use_direction_head: bool = False,
         fp32_modules: str = "none",
+        output_role: str = "legacy",
+        quantile_count: int = 10,
+        quantile_center_index: int = 6,
     ) -> None:
         del seq_len
+        if output_role != "legacy" and use_direction_head:
+            raise ValueError("direction_head는 legacy 출력 역할에서만 사용할 수 있습니다.")
         self.use_ticker_embedding = num_tickers > 0
         self.use_direction_head = use_direction_head
         self.fp32_modules = self._parse_fp32_modules(fp32_modules)
         ticker_extra = ticker_emb_dim if self.use_ticker_embedding else 0
-        super().__init__(hidden_dim=lstm_hidden + ticker_extra, horizon=horizon, band_mode=band_mode)
+        super().__init__(
+            hidden_dim=lstm_hidden + ticker_extra,
+            horizon=horizon,
+            band_mode=band_mode,
+            output_role=output_role,
+            quantile_count=quantile_count,
+            quantile_center_index=quantile_center_index,
+        )
         self.dilations = (1, 2, 4, 8)
         conv_layers = []
         norm_layers = []
@@ -107,7 +119,7 @@ class CNNLSTM(MultiHeadForecastModel):
                 lstm_out, _ = self.lstm(sequence_hidden.float())
             return self.lstm_norm(lstm_out)
 
-    def _run_heads(self, pooled: torch.Tensor, ticker_id: torch.Tensor | None) -> ForecastOutput:
+    def _run_heads(self, pooled: torch.Tensor, ticker_id: torch.Tensor | None) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput:
         if self.use_ticker_embedding:
             if ticker_id is None:
                 raise ValueError("ticker embedding이 활성화된 모델은 ticker_id가 필요합니다.")
@@ -115,18 +127,18 @@ class CNNLSTM(MultiHeadForecastModel):
 
         if not self._should_force_fp32("heads", pooled):
             output = self.build_output(pooled)
-            if self.direction_head is not None:
+            if self.direction_head is not None and isinstance(output, ForecastOutput):
                 output.direction_logit = self.direction_head(pooled)
             return output
 
         with torch.autocast(device_type="cuda", enabled=False):
             pooled_fp32 = pooled.float()
             output = self.build_output(pooled_fp32)
-            if self.direction_head is not None:
+            if self.direction_head is not None and isinstance(output, ForecastOutput):
                 output.direction_logit = self.direction_head(pooled_fp32)
             return output
 
-    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput:
+    def forward(self, x: torch.Tensor, ticker_id: torch.Tensor | None = None) -> ForecastOutput | LineV2Output | LineRegimeOutput | LineWarningOutput | LineDistributionalOutput | LineMonotonicDistributionalOutput | BandOutput:
         hidden = self._run_conv_stack(x)
         sequence_hidden = hidden.permute(0, 2, 1)
         lstm_out = self._run_lstm_stack(sequence_hidden)

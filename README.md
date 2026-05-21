@@ -2,232 +2,299 @@
 
 # Lens
 
-**AI 보조지표 기반 미국 주식 분석·연구 플랫폼**
+미국 주식 보수 예측선과 위험 범위 신호 연구 플랫폼
 
-예측이 아닌, **검증 가능한 밴드와 규칙**으로 의사결정을 돕습니다.
+예측을 단언하지 않고, 보수적 line · calibrated band · 백테스트 · 실패 기록을 통해
+사용자 판단을 보조하는 학술 및 포트폴리오 프로젝트.
 
-![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)
+Live Demo: 배포 직후 URL 추가 예정
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
-![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?logo=supabase&logoColor=white)
-![Status](https://img.shields.io/badge/status-Phase%201%20research-orange)
+![License](https://img.shields.io/badge/License-MIT-blue)
+![Status](https://img.shields.io/badge/v1-ready-success)
 
 </div>
 
 ---
 
-## 개요
+## 1. 한 페이지 요약
 
-Lens는 "AI가 미래를 맞춘다"가 아니라, **calibrated 예측 밴드 + 규칙 엔진 + 투명한 백테스트**로 개인 투자자의 중기 스윙 의사결정을 돕는 연구·시연 플랫폼입니다.
+### 문제 정의
 
-- **밴드 중심 학습** — 조건부 quantile(q10·q50·q90)을 예측하고 reliability diagram으로 검증
-- **규칙 엔진** — AI 밴드 + 전통 기술지표 + 시장 regime 조합
-- **투명한 평가** — walk-forward 백테스트, regime-split 성과, conformal 후처리
+일반적인 주가 예측 모델은 점추정만 제공하며, 사용자는 그 값을 얼마나 신뢰해야 할지 알기 어렵습니다.
+Lens 는 약간 보수적인 예측선을 의도적으로 제시하여, 가격이 그 선 아래로 떨어지는 시점을
+stop-loss 신호로 해석할 수 있게 합니다.
 
-현재는 **Phase 1 연구 프로토타입** 단계이며, 공개 배포·상용화는 범위 밖입니다.
+### 세 가지 출력
+
+| 출력 | 의미 | 현재 후보 |
+|---|---|---|
+| Line | h5 보수 예측선 (5 거래일 기준) | CP175 β=5 frozen line |
+| Band | 예측 범위 (q15/q85 calibrated) | CP153 TiDE lower_focused (1D) · CP178 walk-forward lower (1W) |
+| Warning | 위험 경고 | v1 미노출. v2 에서 band uncertainty 로 흡수 검토 |
+
+### 진행 / 결과 요약
+
+- Line: CP203 까지 v2 line 검증. seed instability + multi-modal collapse 확인. v1 (CP175) 우선 ship.
+- Band: CP202 / CP202.1 결과 정상 regime 에서 GARCH 우위, stress regime 에서 동등. 예측기가 아닌 calibrated risk interval 로 한정.
+- Warning: CP196 ~ CP198 의 dvol 계열 warning detector 폐기. Phase 2 의 v2 band concept 으로 흡수.
+- 데이터: yfinance local parquet 중심. Supabase / 외부 API 의존 최소화.
 
 ---
 
-## 아키텍처
+## 2. 이 저장소를 읽는 방법
+
+이 저장소는 손으로 모든 코드를 쓴 증명이 아니라, AI 코딩 도구를 활용해 금융 시계열 ML 연구를 설계 / 검증한 기록입니다.
+
+제가 소유한 부분은 문제 정의 · 실험 방향 · 평가 기준 · 실패 분석 · 모델 승격 판단 · 제품 분리 방향입니다.
+구현 코드는 AI 도구의 도움을 받았고, 저는 그 결과가 연구 의도에 맞는지 검토하며 진행했습니다.
+
+따라서 다음 관점에서 읽어주시면 좋습니다.
+
+- 어떤 투자 판단 보조 문제를 풀려고 했는가
+- 예측값을 제품 신호로 바꾸기 위해 어떤 기준을 세웠는가
+- 어떤 결과를 실패로 판단했는가
+- 어떤 결과를 제품 후보로 남겼는가
+- 데이터 · 평가 · 모델 · 노출을 어떻게 분리했는가
+
+### 핵심 문서
+
+| 문서 | 내용 |
+|---|---|
+| [docs/current/product_development_log_2026_05.md](docs/current/product_development_log_2026_05.md) | 최근 9 일 (CP194 ~ CP204) 의 결정 / 실패 / 배운점 정리 |
+| [docs/current/research_governance_log.md](docs/current/research_governance_log.md) | 누적 의사결정 / 실패 로그 (2026-04 ~ 현재) |
+| [docs/current/phase1_project_status.md](docs/current/phase1_project_status.md) | Phase 1 스냅샷 (2026-05-11 기준) |
+| [docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md) | Band v2 설계: Conformal · CBM · Selective output · 13 metrics |
+| [docs/current/phase2_lens_signal_plan.md](docs/current/phase2_lens_signal_plan.md) | Phase 2 (signal track 분리) 계획 |
+| [docs/cp_archive/](docs/cp_archive/) | 전체 CP 실험 기록 (50+ 개) |
+
+---
+
+## 3. v1 모델 슬롯 (현재 배포 상태)
+
+| 슬롯 | 후보 | 상태 | Row count |
+|---|---|---|---|
+| 1D Line | CP175 β=5 frozen line | READY | 177,095 (full) / 112,568 (past 1y) |
+| 1D Band | CP153 TiDE q15 lower_focused (historical) | READY | 929,385 (full) / 543,615 (past 1y) |
+| 1W Band | CP178 walk-forward lower calibration (9 ensemble) | READY | 416,724 (full) / 138,908 (ensemble avg, past 2y) |
+| 1W Line | — | Deferred | v1.1 이상에서 검토 |
+
+상세 평가 / 컷 / drift 처리는 [docs/current/product_development_log_2026_05.md](docs/current/product_development_log_2026_05.md) Section 4 ~ 6 참조.
+
+---
+
+## 4. 기술 스택
+
+| 영역 | 사용 기술 |
+|---|---|
+| Frontend | Next.js 14 · React 18 · TypeScript · Tailwind · lightweight-charts |
+| Backend | FastAPI · pandas · pyarrow |
+| Models | PyTorch · PatchTST · TiDE · CNN-LSTM |
+| Evaluation | coverage · break positivity · ECE · pinball · calibration · IC · walk-forward · seed stability |
+| Baselines | Bollinger · Historical Quantile · GARCH(1,1) · Linear Regression |
+| Data | yfinance local parquet (501 ticker × 11 년) |
+| Deploy | Vercel (frontend) · Render (backend) |
+| DB | 없음 (v1 은 로컬 parquet 서빙). Supabase 는 optional. |
+
+---
+
+## 5. 아키텍처
 
 ```text
-  ┌───────────────┐      ┌─────────────────┐      ┌────────────────┐      ┌──────────────┐
-  │   Collector   │ ───▶ │    Supabase     │ ◀─── │    Backend     │ ◀─── │   Frontend   │
-  │   (Python)    │      │    Postgres     │      │    FastAPI     │      │   Next.js 14 │
-  └───────────────┘      └─────────────────┘      └────────────────┘      └──────────────┘
-          ▲                       ▲                        ▲
-          │                       │                        │
-   EODHD · FRED             배치 예측 저장            Local GPU 학습
-   FMP · SEC EDGAR        (predictions 테이블)    PatchTST·CNN-LSTM·TiDE
+[로컬]
+  └─ parquet 생성 / 평가 / 검증
+       ↓ git push
+[GitHub Repo]
+  └─ backend/data/v1/*.parquet (~18 MB)
+       ↓
+[Render — Backend (FastAPI)]
+  └─ startup 시 parquet 메모리 로드
+       └─ /api/v1/stocks/{ticker}/predictions/product-history
+       └─ /api/v1/predictions/{slot}/{ticker}
+            ↓ axios
+[Vercel — Frontend (Next.js)]
+  └─ 종목 검색 / 차트 / 백테스트
 ```
 
 ```text
 lens/
-├── ai/              모델 학습·추론·백테스트 (PatchTST · CNN-LSTM · TiDE)
-├── backend/
-│   ├── app/         FastAPI API 서비스
-│   ├── collector/   수집·백필·파생지표 계산
-│   ├── db/          Supabase 스키마 및 런타임 마이그레이션
-│   └── tests/       백엔드 테스트
-├── frontend/        Next.js 14 프론트엔드
-└── docs/            설계·진행 기록
+├─ ai/                        모델 학습 / 추론 / 평가 / 백테스트
+├─ backend/
+│  ├─ app/                    FastAPI (routers · services · repositories)
+│  ├─ data/v1/                v1 frontend serving parquets
+│  ├─ collector/              yfinance 데이터 수집 (학교 데모는 로컬에서만 실행)
+│  └─ scripts/                build / import utility scripts
+├─ frontend/                  Next.js 프론트엔드
+├─ docs/                      계획서 / 설계 / 실험 기록
+└─ data/                      로컬 parquet / 학습 캐시 (git 제외)
 ```
 
 ---
 
-## 빠른 시작
+## 6. API Endpoints
 
-### 1. 환경 변수
+### 제품 표시용 (현재 frontend 가 사용)
 
-프로젝트 루트에 `.env` 생성.
-
-**필수**
-
-| 키 | 설명 |
-|---|---|
-| `SUPABASE_URL` | Supabase 프로젝트 URL |
-| `SUPABASE_KEY` | Supabase service role key |
-| `EODHD_API_KEY` | EODHD Personal 플랜 키 |
-
-**권장**
-
-| 키 | 설명 |
-|---|---|
-| `FRED_API_KEY` | 거시지표 (FRED) |
-| `FMP_API_KEY` | 재무제표 (FMP) |
-| `WANDB_API_KEY` | 실험 추적 |
-| `BACKEND_CORS_ORIGINS` | 프론트 허용 도메인 |
-
-### 2. 초기 백필
-
-```powershell
-# 진행률 확인
-python -m backend.collector.pipelines.backfill_status
-
-# 역사 구간 일괄 백필 (중단·재개 지원)
-python -m backend.collector.pipelines.bootstrap_backfill --indicator-batch-size 25
+```
+GET  /api/v1/stocks/{ticker}/prices?timeframe=1D&limit=300
+GET  /api/v1/stocks/{ticker}/indicators?timeframe=1D
+GET  /api/v1/stocks/{ticker}/predictions/product-history?timeframe=1D&roles=all
+GET  /api/v1/stocks/{ticker}/predictions/latest?model=patchtst&timeframe=1D
+GET  /api/v1/stocks?search=AA&limit=50
 ```
 
-### 3. 일일 증분 동기화
+### v1 신규 — Local parquet 직접 서빙
 
-```powershell
-python -m backend.collector.pipelines.daily_sync
+```
+GET  /api/v1/predictions/health
+GET  /api/v1/predictions/tickers?search=AA
+GET  /api/v1/predictions/line/{ticker}?days=365
+GET  /api/v1/predictions/band/1d/{ticker}?days=365&horizon=5
+GET  /api/v1/predictions/band/1w/{ticker}?days=730&horizon=4
 ```
 
-### 4. 백엔드·프론트엔드 실행
+### 운영
+
+```
+GET  /api/v1/health/live      # liveness
+GET  /api/v1/health/ready     # readiness (Supabase optional)
+```
+
+---
+
+## 7. 로컬 실행
+
+### 1) 환경 변수
+
+`backend/.env` (없으면 root `.env` 도 가능):
+
+```
+# Optional — v1 local-parquet 모드는 Supabase 없어도 동작
+SUPABASE_URL=
+SUPABASE_KEY=
+
+# Frontend CORS
+BACKEND_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Optional — yfinance 보조
+FRED_API_KEY=
+FMP_API_KEY=
+```
+
+`frontend/.env.local`:
+
+```
+NEXT_PUBLIC_API_BASE=http://localhost:8000
+```
+
+### 2) 백엔드
 
 ```powershell
-# 터미널 1
 cd backend
-uvicorn app.main:app --reload
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
 
-# 터미널 2
+→ http://127.0.0.1:8000/docs (FastAPI 자동 문서)
+
+### 3) 프론트엔드
+
+```powershell
 cd frontend
+npm install
 npm run dev
 ```
 
-### 5. 모델 학습
+→ http://localhost:3000
 
-`indicators` 데이터가 충분히 쌓인 뒤 실행합니다.
+### 4) (선택) v1 parquet 재빌드
 
 ```powershell
-python ai/train.py `
-  --model patchtst `
-  --timeframe 1D `
-  --epochs 50 `
-  --batch-size 128 `
-  --use-wandb --save-run
+# CP204 import package → frontend serving 형태로 변환
+python backend/scripts/build_v1_predictions_local.py
+python backend/scripts/rebuild_product_history_parquet.py
 ```
 
 ---
 
-## 데이터 파이프라인
+## 8. 데이터 / 운영 원칙
 
-| 층 | 테이블 | 소스 | 갱신 주기 |
-|---|---|---|---|
-| 원천 | `price_data` | EODHD | 일일 |
-|  | `macroeconomic_indicators` | FRED | 일일 |
-|  | `market_breadth` | FMP | 일일 |
-|  | `company_fundamentals` | SEC EDGAR (XBRL) | 분기 |
-| 파생 | `indicators` | 자체 계산 | 일일 (incremental) |
-| 예측 | `predictions` | AI 배치 | 일일 |
-| 평가 | `prediction_evaluations` · `backtest_results` | walk-forward | 온디맨드 |
-
-### 피처 구성 (총 29종)
-
-- **Base (17)** — OHLCV 파생, 로그 수익률, RSI · MACD · Bollinger, rolling volatility, volume z-score
-- **Regime (3)** — VIX 기반 3단계 one-hot (`low` / `normal` / `high`)
-- **Fundamentals (6)** — revenue·net_income·EPS YoY, ROE, debt_ratio, operating_margin
-- **Presence flags (3)** — `has_macro` · `has_breadth` · `has_fundamentals`
-  - 컨텍스트 결측 구간은 0 imputation + 이진 플래그 패턴으로 모델에 명시
-
-### Leakage 방지 정책
-
-- FRED는 **publication date** 기준 as-of join
-- SEC EDGAR 재무는 **filing_date** 기준 `merge_asof(direction="backward")`
-- 당일 신호는 t-1 종가 기반 지표만 사용
-- Normalization 파라미터는 **training set에서만** 산출 (PatchTST는 RevIN per-sample)
-- Train/Val/Test 경계에 **gap = h_max** (1D=20, 1W=12)
-
----
-
-## 모델 학습
-
-### 유니버스
-
-- **S&P 500** 중 fundamentals 8-quarter gate + `seq_len` sufficiency 통과 **477 ticker**
-- 기간: 2015-01-02 ~ 현재 (약 10년, 2,840 거래일)
-- Timeframe: **1D** (seq=252, h∈{1, 5, 20}) · **1W** (seq=104, h∈{1, 4, 12})
-- **1M은 표시 전용** — AI 예측·밴드·시그널 비활성 (차트·가격·거래량·기술지표만 노출)
-
-### 아키텍처
-
-| 모델 | 특징 | 역할 |
+| 단계 | 저장 위치 | 역할 |
 |---|---|---|
-| **PatchTST** | Patch-based Transformer · RevIN | 메인 |
-| **CNN-LSTM** | Convolutional + LSTM hybrid | 비교군 |
-| **TiDE** | MLP dense encoder-decoder | 경량 선택지 |
+| raw price | local parquet | 가격 원천 |
+| indicators | local parquet | 보조지표 / context |
+| model artifacts | local | 학습 checkpoint / metrics |
+| v1 product signal | `backend/data/v1/*.parquet` (git 포함) | frontend 서빙용 (~18 MB) |
+| logs / reports | local `docs/` `logs/` | 실험 기록 |
+| Supabase | optional | v1 에선 미사용. v2 부터 thin product DB 검토 |
 
-### Loss 설계
+원칙
 
-```
-total = λ_line · line + λ_band · (q_low + q_high) + λ_width · width + λ_cross · cross
-```
-
-| 컴포넌트 | 구현 | 역할 |
-|---|---|---|
-| **Line head** | `AsymmetricHuberLoss (α=1, β=2)` | 점 예측선. 과대예측 페널티 |
-| **Band head** | `PinballLoss (q=0.1, 0.5, 0.9)` | 조건부 quantile 밴드 |
-| **Width** | 평균 밴드 폭 | 과도한 불확실성 억제 |
-| **Cross** | `ReLU(lower − upper)` | quantile crossing 방지 |
-
-하이퍼파라미터·결정 근거는 [`docs/training_hyperparameters.md`](docs/training_hyperparameters.md).
+- 학습 원천 데이터는 로컬 parquet 중심
+- v1 product signal 만 git 에 포함 (frontend deploy 와 함께 배포)
+- 대량 prediction history · CP 로그 · 원천 가격은 git / DB 제외
+- provider / source / hash / asof_date 기록으로 재현성 확보
+- 모델 결과는 product slot 에 수동 승인 후 연결 (`build_v1_predictions_local.py` → `git push`)
 
 ---
 
-## 프로젝트 상태
+## 9. Phase 2 방향 (Band v2)
 
-**Phase 1 (수업 6주)** — 연구 완성 + 시연 가능한 제품 확보가 목표.
-
-| 배치 | 내용 | 상태 |
-|---|---|:---:|
-| 1 | 기반 스키마 · regime 피처 · AI 저장 테이블 | 완료 |
-| 2 | EDGAR 다분기 · 8-quarter sufficiency gate | 완료 |
-| 3 | Loss 구현 · baseline(ARIMA·Naive·Drift) · E2E 검증 | 완료 |
-| **4** | **모델 학습 — 속도 최적화 · sufficiency · sweep · 본 학습** | **진행 중** |
-| 5 | Walk-forward 백테스트 · calibration 진단 | 대기 |
-| 6 | 연구 실험 — ablation · conformal · regime-conditional | 대기 |
-| 7 | 연구 결과 대시보드 프론트 | 대기 |
-| 8 | 보안 · 통합 테스트 · 발표 | 대기 |
-
----
-
-## 문서
-
-| 파일 | 역할 |
+| 축 | 목표 |
 |---|---|
-| [`docs/project_journal.md`](docs/project_journal.md) | 기획 변천 · 배치·CP 로그 · 결정 이력 · 블로커 (append-only) |
-| [`docs/training_hyperparameters.md`](docs/training_hyperparameters.md) | 학습 파라미터 단일 진실 소스 (결정 · 대안 · 탈락 근거) |
+| Conformal coverage | 분포 가정 약한 coverage 수학적 보장 (Vovk 2005, Romano 2019) |
+| Deep ensemble | aleatoric / epistemic uncertainty 분리 (Lakshminarayanan 2017) |
+| Selective output | 모델이 자신 없을 때 표시 안 함 또는 낮은 신뢰도 표시 (Geifman 2017) |
+| Concept Bottleneck | band 가 넓어진 이유를 사람이 이해 가능한 12 concept 으로 설명 (Koh 2020) |
+| Leading volatility | forward vol mse loss + event-aware widening regularizer (Lens-specific) |
+| 외부 데이터 | Form 4 (insider) · 8-K (item code) · cross-asset stress |
+
+목표는 단순 성능 향상이 아니라
+왜 오늘 이 종목의 band 가 넓어졌는지와 언제 모델을 믿지 말아야 하는지를 사용자에게 설명하는 것입니다.
+
+자세한 설계는 [docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md) 참조.
 
 ---
 
-## 철학
+## 10. Roadmap
 
-Lens는 다음 원칙을 유지합니다.
-
-- **AI는 보조지표**, 의사결정 주체는 사용자다.
-- **밴드 품질이 연구의 본체**, 점 예측은 참고지표다.
-- **Calibration으로 증명**할 수 없는 confidence는 제품에 넣지 않는다.
-- Survivorship bias, release lag, normalization leakage 같은 함정을 **명시적으로** 처리한다.
-- 금융 예측의 구조적 한계(낮은 SNR · non-stationarity)를 인정하고, 승부는 **밴드·규칙의 투명성**에서 본다.
+| Version | 상태 | 내용 |
+|---|---|---|
+| v1.0 | 진행 중 | 3 slot 모델 + frontend deploy (1D Line · 1D Band · 1W Band) |
+| v1.1 | 계획 | 1W Line 검토 (필요 시 신규 학습) |
+| v2.0 | 설계 완료 | Conformal Band + CBM ([docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md)) |
+| v3.0 | 후보 | Form 4 / 8-K NLP 외부 데이터 통합 |
 
 ---
 
-## 라이선스
+## 11. 면책
 
-연구·학습 목적의 비공개 프로토타입입니다. 외부 배포 계획은 Phase 1 범위 밖입니다.
+Lens 는 학술 및 포트폴리오 목적의 연구 프로젝트입니다. 모든 예측 / 신호 / 백테스트 결과는
+정보 제공 목적이며 투자 자문, 매매 권유, 수익 보장을 의미하지 않습니다.
+
+자세한 내용은 [DISCLAIMER.md](DISCLAIMER.md) 참조.
+
+---
+
+## 12. 라이선스
+
+코드는 [MIT License](LICENSE) 를 따릅니다.
+
+단, yfinance · Yahoo Finance 등 제 3 자 데이터의 이용, 데모 운영, 원천 데이터 재배포 가능 여부는
+각 데이터 제공자의 약관을 따릅니다. 본 프로젝트는 데이터 / 데모를 비상업적 학술 · 포트폴리오
+목적에 한정해 사용합니다.
+
+---
+
+## 저자
+
+김지형 (Kim Jihyeong)
+세종대학교 데이터사이언스학과
+GitHub [@vmgfh878-art](https://github.com/vmgfh878-art)
 
 <div align="center">
-<sub>Built as a 6-week research project — Lens 2026</sub>
+<sub>Lens · 2026</sub>
 </div>

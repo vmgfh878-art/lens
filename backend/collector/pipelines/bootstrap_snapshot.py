@@ -43,6 +43,8 @@ def build_indicator_records(
             continue
 
         subset = features[["ticker", "date", "timeframe", *FEATURE_COLUMNS]].copy()
+        subset["source"] = "eodhd"
+        subset["provider"] = "eodhd"
         subset["date"] = pd.to_datetime(subset["date"]).dt.strftime("%Y-%m-%d")
         all_records.extend(subset.where(pd.notnull(subset), None).to_dict(orient="records"))
         print(f"  - {timeframe}: {len(subset):,} rows 준비")
@@ -58,7 +60,7 @@ def step_indicators(source_dir: Path, timeframes: list[str], sample_tickers: lis
         return
 
     supabase = get_client()
-    chunked_upsert(supabase, "indicators", records, on_conflict="ticker,date,timeframe")
+    chunked_upsert(supabase, "indicators", records, on_conflict="ticker,timeframe,date,source")
 
 
 def parse_args() -> argparse.Namespace:

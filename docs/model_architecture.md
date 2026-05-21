@@ -1124,3 +1124,330 @@ CP54-M 이후에도 line/band/composite 역할 분리는 유지한다. 다만 ba
 | composite policy | `risk_first_upper_buffer_1.10` | 제품 표시 정책으로만 유지한다. 모델 성능 우위 근거로 쓰지 않는다 |
 
 따라서 현재 구조에서 PatchTST는 line 후보로 유지하지만, CNN-LSTM band는 “AI가 baseline을 이긴 band”가 아니다. band 계층은 baseline-aware calibration 또는 rolling quantile/Bollinger 대비 개선을 먼저 요구한다.
+
+### CP55-M 이후 후보군 해석
+
+CP55-M은 새 모델 구조를 추가하지 않고 기존 checkpoint/metrics 산출물을 후보별 동일 조건의 통계 baseline과 다시 비교했다. 실행은 경량화되어 `discover-only`, `smoke`, `max-candidates` 제한 모드로 분리됐다.
+
+모델 역할 해석은 다음처럼 고정한다.
+
+| 역할 | 현재 해석 | 근거 |
+|---|---|---|
+| line model | PatchTST h5 longer-context 유지 | `h5_longer_context_seq252_p32_s16`이 minimal line baseline 대비 IC와 severe recall에서 생존 |
+| risk-only line | PatchTST dense overlap 보조 | false-safe는 매우 낮지만 IC/spread가 음수라 주 line 후보는 아님 |
+| direct AI band | 보류 또는 탈락 | CNN-LSTM 후보는 CP52 전체 지표 부족으로 재실험 필요, TiDE/PatchTST band는 minimal 통계 baseline 대비 약함 |
+| statistical band baseline | 강한 기준선 | rolling quantile/Bollinger return band가 interval_score와 coverage_abs_error에서 계속 강함 |
+
+다음 band 구조는 “모델이 lower/upper를 직접 예측”하는 방향만 고집하지 않는다. rolling historical quantile 또는 Bollinger return band를 기본 위험 구간으로 두고, AI가 residual scale이나 regime별 보정값을 예측하는 baseline-aware band 구조를 우선 검토한다.
+
+### CP56-M line/band/composite 아키텍처 감사
+
+CP56-M 기준 아키텍처 역할은 계속 분리한다.
+
+| 역할 | 현재 후보 | 감사 결론 |
+|---|---|---|
+| line model | PatchTST h5 longer-context | 유지. 단, line 전용 run의 band output은 제품 band로 해석하지 않는다. |
+| band model | CNN-LSTM s60 q15-b2 direct, TiDE param/direct | 유지. 단, band center와 PatchTST line center 불일치를 계약상 명시해야 한다. |
+| composite policy | risk-first 계열 | 제품 표시 정책이다. 모델 성능 지표와 분리한다. |
+
+모델 출력 계약은 모두 `ForecastOutput(line, lower_band, upper_band, direction_logit optional)`로 맞아 있다. PatchTST는 RevIN denorm을 line/lower/upper에 적용하고, geometry는 checkpoint config로 복원된다. CNN-LSTM은 `fp32_modules=lstm,heads`와 cuDNN off 경로로 CUDA 안정화 계약이 있다. TiDE는 future covariate와 per-horizon decoder 경로를 checkpoint config로 복원한다.
+
+현재 아키텍처 병목은 composite 중심선 계약이다. CNN-LSTM scalar width calibration은 CNN-LSTM 자체 line을 중심으로 lower/upper 폭을 조정한 뒤 PatchTST line과 합친다. 따라서 band 단독 평가는 통과해도 composite upper breach가 커질 수 있다. 다음 구조 변경 전에는 `width_only` 또는 line-centered calibration 계약을 먼저 명확히 해야 한다.
+
+### CP57-M AI indicator layer 아키텍처
+
+CP57-M 이후 Phase 1 아키텍처에서 composite model은 본류가 아니다. 역할은 아래처럼 분리한다.
+
+| layer | 역할 | 제품 사용 output |
+|---|---|---|
+| AI line layer | 보수적 예측선 또는 line score | `line_series` |
+| AI band layer | calibrated risk interval | `lower_band_series`, `upper_band_series` |
+| overlay bundle | 여러 layer를 화면에서 동시에 표시 | layer provenance와 mismatch 표시 |
+
+`line_model`의 lower/upper는 제품 band가 아니고, `band_model`의 line은 제품 예측선이 아니다. 부수 출력은 evaluation 내부 참고로만 둔다.
+
+기존 `line_band_composite`와 composite policy 도구는 legacy/experimental 위치로 내린다. Phase 1 제품 아키텍처는 최신 completed line run과 최신 completed band run을 각각 조회하고, 화면에서 provenance와 함께 overlay하는 방향이다.
+
+### CP59-P 제품 조회 계약
+
+Phase 1 제품 기본 조회에서는 `line_band_composite`, `role=composite_model`, `deprecated_for_phase1_product_contract=true` run을 최신 completed 후보에서 제외한다. legacy composite는 삭제하지 않고 research/demo artifact로 보존하지만, 제품 기본 모델 또는 최신 정상 모델처럼 노출하지 않는다.
+
+백엔드 `/api/v1/ai/runs`는 기본적으로 legacy composite를 제외하고, `include_legacy=true`가 명시된 경우에만 포함한다. 화면은 당분간 PatchTST line 중심 기본 후보를 사용하며, overlay bundle API가 생기기 전까지 line layer와 band layer를 하나의 composite 모델처럼 설명하지 않는다.
+
+### CP60-M Composite Legacy Guard
+
+Phase 1 모델 아키텍처 계약에서 `line_band_composite`는 제품 모델이 아니다. `ai/composite_inference.py`와 `ai/composite_policy_eval.py`는 legacy/research utility이며, PatchTST line과 CNN-LSTM/TiDE band를 하나의 모델 출력으로 합치지 않는다.
+
+제품에서 사용하는 산출물은 `AI line layer`의 `line_series`와 `AI band layer`의 `lower_band_series`/`upper_band_series`다. `line_inside_band_ratio`는 표시 진단값이며 모델 탈락 기준이 아니다. `include_line_clamp`와 `risk_first_lower_preserve`는 Phase 1 본류 정책이 아니라 legacy 표시 진단 정책으로만 남긴다.
+
+### CP61-M Metric Layer Architecture
+
+평가 schema도 아키텍처 역할과 맞춰 분리했다. `line_metrics`는 line layer 전용이고 `band_metrics`는 band layer 전용이다. `legacy_overlay_diagnostics`는 overlay 표시/과거 composite 진단 전용이며 모델 랭킹에 사용하지 않는다.
+
+같은 `ForecastOutput`이 line/lower/upper를 모두 내더라도 제품 역할은 config `role`과 selector로 결정한다. `line_gate`는 IC/spread/false-safe 계열만 보고, `band_gate`는 calibration/interval/dynamic width 계열만 본다.
+
+### CP62-M Candidate Regrade Architecture
+
+기존 후보 재채점도 CP61 layer schema를 따른다. Line 후보 표는 `line_metrics`만 사용하고, band 후보 표는 `band_metrics`만 사용한다. Composite/overlay 계열 값은 `legacy_overlay_diagnostics`로만 분류하며 모델 랭킹에는 들어가지 않는다.
+
+PatchTST는 현재 line layer 후보로 남고, CNN-LSTM/TiDE/PatchTST band 후보는 통계 baseline과 별도로 비교된다. Band 후보가 line 지표를 못 내거나 line_inside_band가 낮아도 그 자체로 탈락시키지 않으며, 반대로 composite 표시 정책으로 band 후보를 살리지도 않는다.
+
+### CP63-BM Band Feature Set Architecture
+
+AI band layer의 입력 feature set은 line layer와 섞지 않는다. CP63-BM 기준 제품 band 후보는 `role=band_model`이며, 산출물은 `lower_band_series`와 `upper_band_series`다. band_model의 line 출력은 제품 예측선으로 쓰지 않고, feature pruning 판단에도 line IC/spread를 사용하지 않는다.
+
+현 36개 `MODEL_FEATURE_COLUMNS`는 8개 그룹으로 관리한다.
+
+| 그룹 | 대표 피처 | band layer 해석 |
+|---|---|---|
+| price/return | `log_return`, `open_ratio` | 직전 가격 충격과 갭 위험 |
+| volatility/range | `high_ratio`, `low_ratio` | 상하단 range와 breach 위험 |
+| volume/liquidity | `vol_change` | 정보 유입과 유동성 충격 |
+| momentum/oscillator | `ma_*_ratio`, `rsi`, `macd_ratio`, `bb_position` | squeeze, 과열, trend regime |
+| market/sector/breadth | macro, breadth, regime | 공통 volatility regime |
+| fundamentals | revenue 계열 | 장기 체질 proxy지만 원시값 노이즈 큼 |
+| calendar/future covariate | 요일, 월, 만기 | 알려진 시간 구조 |
+| missingness flag | `has_*` | 가용성 proxy이며 편향 위험 있음 |
+
+다음 band 실험의 기본 feature set은 `price_volatility`다. 이는 market/fundamentals를 제거하고 가격, range, momentum/oscillator만 남겨 CNN-LSTM s60 direct 계열이 통계 baseline 대비 약했던 원인이 feature noise인지 확인하기 위한 구조다.
+
+`atr_ratio`와 `intraday_range_ratio`는 band 폭에 직접적인 indicator-only 후보지만 현재 feature contract에는 넣지 않는다. 이를 실제 모델 입력으로 추가하려면 `FEATURE_COLUMNS`, `MODEL_FEATURE_COLUMNS`, cache digest, feature version을 함께 변경해야 하며, 기존 checkpoint와 혼합하지 않는 별도 preset이 필요하다.
+
+### CP64-BM Feature Set Smoke Architecture
+
+CP64-BM에서는 AI band layer가 full 36개 feature만 쓰는 구조에서 벗어나, CP63 feature set plan의 부분집합을 CLI로 선택할 수 있게 했다. `ai.train`은 `--feature-set` 또는 `--feature-columns-preset`을 받아 `docs/cp63_bm_feature_set_plan.json`을 로드하고, 선택된 columns가 기존 `MODEL_FEATURE_COLUMNS`의 부분집합인지 검증한다. 모델 생성 시에는 `TrainConfig.n_features`를 사용해 CNN-LSTM/TiDE 입력 차원을 맞춘다.
+
+feature set 적용은 데이터 bundle 생성 뒤 train/val/test feature tensor와 mean/std를 같은 column index로 축소하는 방식이다. 따라서 기존 full_features 기본 동작은 유지하면서도 `price_volatility`, `price_volatility_volume`, `no_fundamentals`, `technical_only` 같은 band 전용 부분집합을 같은 학습 경로에서 재사용할 수 있다.
+
+이번 smoke 결과 BM 우선순위는 CNN-LSTM 1순위, TiDE 2순위로 유지한다. CNN-LSTM은 `price_volatility` q20과 `price_volatility_volume` q15가 band_survive로 남았고, TiDE는 `technical_only` param이 survive지만 interval score가 CNN-LSTM 상위 후보보다 약하다. PatchTST band는 계속 참고 후순위다.
+
+`atr_ratio`와 `intraday_range_ratio`는 이번 CP에서 모델 feature로 추가하지 않았다. 해당 feature 승격은 feature contract, cache digest, feature_version, checkpoint 호환성 분리를 동반해야 하므로 CP64-BM architecture에는 포함하지 않고 별도 indicator/full backfill 또는 feature contract CP에서 다룬다.
+
+### CP65-LM Line Feature Set Architecture
+
+CP65-LM 기준 PatchTST line layer는 제품 `line_series` 산출물만 담당한다. 같은 `ForecastOutput`에 lower/upper가 있어도 이번 line_model 판정에는 쓰지 않고, band coverage나 lower/upper breach로 line 후보를 탈락시키지 않는다.
+
+feature pruning은 기존 `MODEL_FEATURE_COLUMNS`의 부분집합만 사용한다. `technical_only`, `price_volatility_volume`, `no_fundamentals`는 CP63 feature set plan을 그대로 읽으며, `atr_ratio`와 `intraday_range_ratio`는 모델 feature로 추가하지 않았다. `technical_only`와 `price_volatility_volume`은 현재 동일한 11개 column 정의라 line architecture 관점에서는 같은 입력 공간으로 해석한다.
+
+h5 product line은 기존 PatchTST `h5_longer_context_seq252_p32_s16` full_features를 주력 후보로 유지한다. h5 pruned 후보가 통계 baseline 기준 생존하더라도 full_features 대비 risk 지표를 개선하지 못하면 제품 line 후보를 교체하지 않는다.
+
+h20은 h5와 같은 후보군으로 섞지 않고 Phase 1.5 visual/risk branch로 분리한다. 제품에서는 h5 line을 기본 예측선으로 두고, h20 line은 중기 위험 방향 보조선 또는 horizon 토글로 표시해야 한다. 두 horizon을 평균 내거나 같은 ranking 표에서 직접 경쟁시키지 않는다.
+
+### CP64-D Indicator Architecture
+
+CP64-D 기준 `atr_ratio`는 모델 feature가 아니라 indicator-only 출력이다. `feature_svc.build_features()`는 `atr_ratio`를 `public.indicators`에 저장할 수 있도록 output에 포함하지만, `FEATURE_COLUMNS`와 `MODEL_FEATURE_COLUMNS`에는 넣지 않는다. 따라서 `MODEL_N_FEATURES=36` 계약은 유지한다.
+
+가격 파생 indicator는 adjusted OHLC 기준으로 재계산한다. raw `open/high/low/close`를 그대로 쓰지 않고 `adjusted_close / close` factor를 적용한 뒤 `open_ratio`, `high_ratio`, `low_ratio`, ATR, RSI, MACD, Bollinger 계열을 계산한다. 1D/1W/1M resample도 같은 adjusted OHLC 계약을 따른다.
+
+`compute_indicators` full backfill은 이제 `force_full_backfill=True`에서 기존 ticker/timeframe/source 범위를 정리한 뒤 현재 `build_features()` 결과를 upsert한다. 이 경로는 stale indicator row 제거용 운영 backfill 계약이며, daily incremental cron에는 적용되지 않는다.
+
+`atr_ratio`는 BM band feature 후보로는 준비됐지만 아직 architecture 상 모델 입력이 아니다. 승격하려면 indicator-only에서 feature column으로 옮기고, feature version/cache digest/checkpoint compatibility를 함께 분리해야 한다. `daily_range_ratio`와 `intraday_range_ratio`는 현재 DB column이 없으므로 먼저 이름과 계산식 계약을 정해야 한다.
+
+### CP66-LM Post-backfill Line Architecture
+
+CP66-LM 이후 line layer cache 계약은 source data hash와 feature contract를 분리해서 본다. CP64-D backfill 이후 1D source data hash는 `f7c7b101`로 바뀌었지만 feature contract는 `v3_adjusted_ohlc` 그대로다. 따라서 checkpoint 호환성 관점에서는 v4 feature contract를 만들지 않고, 같은 36개 모델 입력으로 post-backfill cache만 새로 물질화한다.
+
+PatchTST h20은 h5 product line과 같은 후보군이 아니다. h20은 중기 line 또는 visual/risk branch이며, 제품에서는 h5 기본 line과 별도 horizon 보조선으로 표시해야 한다. CP66 기준 h20 `full_features`만 false_safe_tail_rate 0.2895로 0.30 미만이고 severe_downside_recall도 CP65 full 대비 개선되어 시각/risk branch 생존 후보가 됐다.
+
+`no_fundamentals`와 `technical_only` h20은 IC/spread가 양수여도 false_safe_tail_rate가 0.30 이상이므로 제품 기본 표시는 금지한다. 이 경우 화면에 노출하더라도 기본 굵은 선이 아니라 낮은 신뢰도 점선, horizon 토글, 또는 연구용 중기 위험 보조선으로 제한한다.
+
+1W line architecture는 readiness가 열렸지만 아직 제품 후보는 아니다. 1W는 `timeframe=1W`, `horizon=12`, `seq_len=104`가 통과 가능한 기본 형태이고 split gap은 h_max=12를 사용한다. 전체 eligible ticker registry가 default registry보다 넓어졌으므로 1W line을 제품 후보로 키우기 전에 registry 갱신 또는 hashed registry 사용 계약을 먼저 정리해야 한다.
+
+### CP67-LM h20 제품 표시 Architecture
+
+CP67-LM 100티커 재검증 이후 h20 line은 제품 기본 ON 후보가 아니다. 50티커에서는 CP66 `full_features`가 false_safe_tail_rate 0.2895, severe_downside_recall 0.7120으로 생존했지만, 100티커에서는 false_safe_tail_rate 0.3918, severe_downside_recall 0.6190으로 제품 보조 line 기준을 통과하지 못했다.
+
+h20 line의 제품 표시 계약은 다음처럼 둔다.
+
+| horizon | 표시 역할 | 기본 표시 |
+|---|---|---|
+| h5 | 단기 line / 제품 기본 예측선 | 진한 실선, 기본 ON |
+| h20 | 중기 line / 위험 맥락 참고선 | CP67 기준 기본 OFF, Phase 1.5 연구 후보 |
+
+h20은 IC/spread가 양수여도 false-safe가 높으면 제품 기본 표시를 금지한다. CP67 h11_h20 bucket은 IC 0.0633, spread 0.0203으로 ranking 자체는 무너지지 않았지만 false_safe_tail_rate 0.3829라 장기 구간 안전 오판 위험이 크다. 따라서 제품에서 h20을 보여주려면 별도 토글 또는 연구용 provenance가 필요하고, 기본 차트에는 h5 line만 둔다.
+
+CP67은 모델 구조를 바꾸지 않았다. PatchTST 구조, feature contract, `MODEL_FEATURE_COLUMNS=36`, `v3_adjusted_ohlc`, `line_gate` 계약은 그대로 유지한다. `atr_ratio`는 여전히 indicator-only이며 line feature로 승격하지 않는다.
+
+### CP68-LM h20 Conservative Line Architecture
+
+CP68-LM 이후 h20은 `raw_line`과 `conservative_line`을 분리해서 해석한다. `raw_line`은 CP67 checkpoint의 기대 수익 line이며 IC 0.0667, spread 0.0280으로 cross-sectional ranking 신호는 있다. 그러나 false_safe_tail_rate 0.3918로 안전 오판이 높기 때문에 제품 위험선이나 기본 중기선으로 직접 쓰지 않는다.
+
+`conservative_line`은 모델 구조를 바꾸지 않는 display calibration layer다. validation split에서 offset을 fit하고 test에는 고정 적용한다. CP68 best 정책은 `horizon_bucket_downshift`이며 h1_h5, h6_h10, h11_h20 bucket별 offset을 따로 둔다. 이 방식은 각 horizon bucket의 sign threshold를 보수적으로 낮추지만, bucket 내부 순위는 유지하므로 IC/spread 희생이 거의 없다.
+
+제품 표시 계약은 다음처럼 갱신한다.
+
+| horizon | 산출물 | 표시 역할 | 기본 표시 |
+|---|---|---|---|
+| h5 | `line_series` | 단기 line / 제품 기본 예측선 | 진한 실선, 기본 ON |
+| h20 raw | `raw_line_series` 또는 연구 지표 | 랭킹 참고용 | 제품 위험선 사용 금지 |
+| h20 conservative | `conservative_line_series` 후보 | 중기 보수 판단선 | 기본 OFF, 사용자 선택형 |
+
+CP68은 post-hoc calibration 검증이며 PatchTST 구조, feature contract, `MODEL_FEATURE_COLUMNS=36`, `v3_adjusted_ohlc`, `line_gate`는 바꾸지 않았다. `atr_ratio`는 계속 모델 feature가 아니다. 실제 제품 연결은 아직 하지 않았고, UI/backend API도 수정하지 않았다.
+
+### CP69-LM Line Terminology Contract
+
+CP69-LM 이후 line architecture 문서에서는 “보수선”이라는 단어를 다음 세 용어로 나눠 쓴다.
+
+| 용어 | 의미 | 생성 위치 |
+|---|---|---|
+| `raw_model_line` | checkpoint가 직접 출력한 line | 모델 forward |
+| `trained_conservative_line` | alpha/beta asymmetric Huber loss로 학습된 line | 학습 loss |
+| `display_calibrated_line` | validation offset으로 아래로 이동한 표시선 | post-hoc display calibration |
+
+`AsymmetricHuberLoss`는 `prediction - target`이 양수인 과대예측에 `beta=2`를 적용한다. `ForecastCompositeLoss`는 이 손실을 `prediction.line`과 `line_target`에 직접 적용하므로, alpha=1 beta=2 config가 저장된 checkpoint의 원출력 line은 `trained_conservative_line`으로 분류한다.
+
+CP69 감사 결과 h5 longer/baseline/dense와 CP65/CP67 h20 PatchTST checkpoint는 모두 `verified_trained_conservative`다. 반대로 CP68의 `global_downshift`, `horizon_bucket_downshift`, `volatility_scaled_downshift`는 모델 학습 손실이 아니라 validation offset 표시 보정이므로 `display_calibrated_line`이다. 제품 문서와 차트 계약에서 CP68 보정선을 “학습된 보수선”이라고 부르지 않는다.
+
+### CP70-LM h20 Display Calibration Policy
+
+CP70-LM 기준 h20 제품 표시 architecture는 `trained_conservative_line` 원출력과 `display_calibrated_line` 표시선을 분리한다. h20 raw model output은 alpha=1 beta=2 loss로 학습된 `trained_conservative_line`이지만, 100티커 test에서 false_safe_tail_rate가 0.3911로 높아 제품 표시선으로 직접 쓰지 않는다.
+
+세 display calibration 후보 중 제품 후보는 `horizon_bucket_downshift`다. 이 정책은 h1_h5, h6_h10, h11_h20별 validation offset을 따로 적용한다. CP70 현재 cache 기준 test에서 IC 0.0676, spread 0.0284, false_safe_tail_rate 0.2841, severe_downside_recall 0.7186, h11_h20 false_safe_tail_rate 0.2630으로 기본 OFF 사용자 선택형 기준을 통과했다.
+
+표시 정책은 다음처럼 둔다.
+
+| line | 의미 | 제품 표시 |
+|---|---|---|
+| h5 `trained_conservative_line` | 단기 기본 line | 기본 ON, 진한 실선 |
+| h20 `raw_model_line` | 중기 ranking 참고용 원출력 | 직접 표시 금지 |
+| h20 `display_calibrated_line` | validation bucket offset 표시선 | 기본 OFF, 사용자 선택형 점선/반투명선 |
+
+CP70은 CPU-only forward-only 재평가였고 GPU를 쓰지 않았다. 단 current source hash `3ac43945`가 CP67/CP68의 `f7c7b101`과 달라, 이 결과는 동일-hash 재현이 아니라 현재 cache에서의 정책 안정성 확인으로 본다.
+
+### CP74-G W&B 초기화 계층
+
+W&B 초기화는 모델 구조나 데이터 계층이 아니라 학습 관측성 계층으로 분리한다. full training의 모델 학습, checkpoint, save-run은 W&B online init 성공 여부에 의존하지 않는다. `ai.train`은 `WandbInitOutcome`을 통해 run 객체와 `wandb_status`를 분리하고, W&B가 실패하면 `wandb_run=None`으로 진행한다.
+
+`wandb_status`는 train 결과 dict와 save-run config/meta JSON에 기록된다. `wandb_run_id`와 `wandb_run_url`은 `online_ok`일 때만 채운다. model_runs schema는 변경하지 않는다.
+
+sweep은 관측성 누락을 조용히 허용하지 않는다. `ai.sweep`은 `--wandb`가 켜져 있는 trial을 `wandb_required=True`로 실행해 W&B init 실패를 trial 학습 전에 명시적인 오류로 다룬다. 따라서 full training fallback과 sweep required 정책은 같은 helper를 쓰되 required flag로 분리된다.
+
+### CP75-G Local Training Logging Layer
+
+local training progress logger는 모델 구조가 아니라 학습 관측성 계층이다. `ai.local_logging.LocalTrainingProgressLogger`가 `logs/runs/{run_id}/` 아래에 `config.json`, `metrics.jsonl`, `summary.json`을 기록한다.
+
+`ai.train`은 epoch summary를 stdout과 W&B에 유지하면서 같은 핵심 지표를 local JSONL에도 남긴다. 파일 쓰기 실패는 학습 실패로 전파하지 않고 warning 후 local logger만 비활성화한다. 따라서 W&B optional fallback, checkpoint selection, loss, model forward 계약은 그대로 유지된다.
+
+이 계층은 장기 full run의 관측성을 위한 보조 수단이며, DB 저장 계약이나 frontend 표시 계약을 대체하지 않는다.
+
+### CP72-BM Band Gate와 Feature Set Inference
+
+CP72-BM 이후 band layer의 checkpoint gate는 fixed coverage target이 아니라 `band_metrics.nominal_coverage`를 기준으로 해석한다. q15/q85 band의 nominal coverage는 0.70이며, empirical coverage가 이 값과 얼마나 가까운지와 lower/upper tail breach error가 과도하지 않은지를 본다. 이는 band가 보수적 line이 아니라 calibrated risk interval이라는 Phase 1 계약에 맞춘 것이다.
+
+`band_gate`는 line 지표인 `spearman_ic`, `long_short_spread`, `line_inside_band`를 사용하지 않는다. `coverage_gate`와 `combined_gate`는 legacy 경로로 남아 있지만 CP72-BM 제품 후보 선택에는 사용하지 않는다.
+
+`ai.inference`는 checkpoint config의 `feature_columns`와 `n_features`를 모델 복원과 입력 tensor 양쪽에 적용한다. `price_volatility_volume` checkpoint는 11개 feature channel을 기대하므로, DataLoader 생성 전에 full 36개 feature bundle에서 해당 column만 선택한다. 이 순서가 틀리면 CNN-LSTM conv 입력 channel mismatch가 발생한다.
+
+CP72 최종 제품 후보 `cnn_lstm-1D-d0c780dee5e8`은 `role=band_model`, `feature_set=price_volatility_volume`, `n_features=11`, `band_mode=direct`, `q_low=0.15`, `q_high=0.85`, `lambda_band=2.0`인 CNN-LSTM band checkpoint다. 제품에서 쓰는 산출물은 `lower_band_series`와 `upper_band_series`이며, band_model의 line 출력은 제품 예측선으로 보지 않는다.
+### CP75-LM h5 line 저장 후보 Architecture
+
+CP75-LM의 제품 기본 line 후보는 PatchTST 1D h5 `line_model` 단독 run이다. 제품에서 사용하는 산출물은 `line_series`이며, line_model이 함께 출력하는 lower/upper 계열 값은 제품 band 후보로 쓰지 않는다. CP72 BM band 후보와 결합 저장하지 않았고, band/composite/overlay 계층도 건드리지 않았다.
+
+해당 run `patchtst-1D-efad3c29d803`의 구조 계약은 `timeframe=1D`, `horizon=5`, `seq_len=252`, `patch_len=32`, `patch_stride=16`, `feature_set=full_features`, `n_features=36`, `feature_version=v3_adjusted_ohlc`, `checkpoint_selection=line_gate`, `target=raw_future_return`, `line_target_type=raw_future_return`이다. `atr_ratio`와 `intraday_range_ratio`는 indicator/cache에는 존재할 수 있어도 모델 feature로 승격하지 않았다.
+
+loss 해석은 CP69 계약을 따른다. 이 후보는 alpha=1, beta=2, delta=1의 asymmetric Huber line loss로 학습된 `trained_conservative_line`이다. 다만 CP75 결과 기준으로 순위/수익 예측선 신호는 양수지만 false-safe 계열이 높으므로, 현재 architecture 문서에서는 제품 기본 h5 line 저장 후보이되 위험 회피선 품질은 `watch`로 분류한다.
+
+저장 계약은 `model_runs.status=completed`, `config.role=line_model`, checkpoint 존재, `predictions.line_series` 저장, `prediction_evaluations` 저장으로 닫았다. `predictions` 전체 count는 DB statement timeout 때문에 inference stdout count와 샘플 `line_series` 조회로 검증했다.
+
+## 2026-05-03 Phase 1 제품 표시 구조
+
+Phase 1 제품 구조는 composite model이 아니라 AI indicator layer 구조다. line model과 band model은 서로 다른 보조지표로 취급한다. RSI와 MACD가 서로 다른 해석을 갖는 것처럼, 보수적 예측선과 AI 밴드도 하나의 중심선으로 억지 결합하지 않는다.
+
+### 제품 layer 계약
+
+| layer | 제품 이름 | 현재 run | 역할 |
+|---|---|---|---|
+| line layer | 1D 보수적 예측선 v1 | `patchtst-1D-efad3c29d803` | 향후 수익 방향과 보수적 판단선을 참고하는 line 지표 |
+| band layer | 1D AI 밴드 v1 | `cnn_lstm-1D-d0c780dee5e8` | 예상 변동 범위와 위험 구간을 참고하는 band 지표 |
+| 1W line | 1W 보수적 예측선 | 없음 | 준비 중 |
+| 1W band | 1W AI 밴드 | 없음 | 준비 중 |
+
+`line_band_composite`는 Phase 1 제품 기본 구조에서 제외한다. 과거 composite 저장/평가 유틸리티는 legacy 연구용으로만 남긴다. `line_inside_band` 같은 composite 진단 지표는 제품 품질 기준이 아니다.
+
+### 차트 표시 구조
+
+주식 보기 화면은 다음 layer로 구성된다.
+
+| 화면 layer | 데이터 |
+|---|---|
+| 가격 차트 | OHLC 또는 line price |
+| 보수적 예측선 | line model의 `conservative_series` 우선, 없으면 `line_series` |
+| AI 밴드 | band model의 `lower_band_series`, `upper_band_series` |
+| rolling history | 과거 저장 prediction history의 line/band series |
+| 거래량 | 가격 차트 하단 bar, 토글 가능 |
+| 하단 보조지표 | RSI, MACD, ATR, AI band width 등 |
+
+CP79 이후 모든 chart input은 렌더 직전에 time/date 오름차순 정렬, 중복 제거, invalid 제거를 통과한다. 이 계약은 1W/1M 전환 때 lightweight-charts의 `data must be asc ordered by time` 오류를 막기 위한 필수 방어선이다.
+
+예측 시작 marker는 prediction 기준일이 아니라 오늘 날짜 기준으로 표시한다. 모델 기준일은 우측 정보 패널에서 별도로 보여준다. 오늘 marker는 현재 viewport에서 오늘 날짜가 벗어나면 함께 사라진다.
+
+### AI 모델 화면 구조
+
+기존 `모델 학습` 화면은 run 콘솔처럼 보였기 때문에 `AI 모델` 화면으로 바꿨다. 기본 화면은 제품 모델 현황 4슬롯만 보여준다. 제품 슬롯을 클릭하면 같은 상세 패널에서 모델 구조, 사용 데이터, 목표 대비 실제 품질, 아쉬운 점을 설명한다.
+
+이전 실험은 기본 노출하지 않는다. 사용자가 `예측선 실험 보기` 또는 `밴드 실험 보기`를 눌렀을 때만 실험 목록을 보여준다. 실험 row를 클릭하면 제품 모델과 같은 상세 패널 위치에서 해당 실험의 설명을 보여준다. NaN 실패, 계산 불가, composite 실험은 기본 제품 UI에서 숨긴다.
+
+### 백테스트 화면 구조
+
+백테스트는 Phase 1에서 포트폴리오 리밸런싱 실험이 아니라 단일 티커 룰 기반 전략 실험이다. 현재 Risk Guard v1과 Trend Guard v1은 UI/흐름 확인용 데모 전략이다. 실제 투자 전략 후보로 확정하지 않는다.
+
+현재 전략 구조는 가격, RSI, 60일 추세, 보수적 예측선, AI 밴드 하단을 읽어 단일 티커에 대해 보유/현금 상태를 바꾸는 방식이다. 여러 종목 포트폴리오, 리밸런싱, 최적화는 Phase 2 backlog다.
+
+### 남은 구조 과제
+
+- Bollinger overlay를 제품 차트에 넣으려면 API에 `bb_upper`, `bb_middle`, `bb_lower` 가격 series가 필요하다. 현재 `bb_position`만으로는 가격 위 overlay를 만들지 않는다.
+- 1W line/band 모델은 readiness와 데이터 계약은 봤지만 제품 후보가 없다.
+- AI 모델 상세 설명은 아직 metric 표 중심이다. 목표/실제/차이 외에 실패 이유와 개선 방향을 더 자연어 리포트처럼 생성할 필요가 있다.
+- 보조지표 패널은 기능적으로는 동작하지만, 밀도와 위계는 추가 UX 개선이 필요하다.
+
+### CP86-D market data provider 구조
+
+CP86-D 이후 가격 수집은 provider abstraction을 통한다. 현재 provider는 `yfinance`와 `eodhd`이며, 로컬 primary는 `MARKET_DATA_PROVIDER=yfinance`, fallback은 `MARKET_DATA_FALLBACK_PROVIDER=eodhd`로 지정한다. EODHD provider는 삭제하지 않고 검증/장애 대응용으로 유지한다.
+
+yfinance provider는 `auto_adjust=False`를 고정해 raw `Open/High/Low/Close/Volume`과 `Adj Close`를 함께 가져온다. 모델 feature contract는 여전히 `v3_adjusted_ohlc`이며, `adjusted_factor = adjusted_close / close`로 adjusted OHLC를 재구성한 뒤 `log_return`, OHLC ratio, MA, RSI, MACD, Bollinger, ATR ratio를 계산한다. `MODEL_FEATURE_COLUMNS`와 feature 수 36은 변경하지 않았다.
+
+가격 저장 전에는 adjusted factor finite/양수, adjusted high/low 정합성, 날짜 중복, required price finite, ratio p99/max sanity를 통과해야 한다. `price_data`에는 provider/source 컬럼이 없으므로 row-level provenance는 현재 schema로는 남기지 못하고, `sync_state` meta와 CP86 metrics JSON에 provider/fallback_used/quality gate 결과를 남긴다.
+### CP96-D source-aware feature/cache guard
+
+CP96-D 이후 feature cache fingerprint는 가격 row provenance뿐 아니라 indicator 값 checksum도 포함한다. 같은 ticker/date/count라도 indicator numeric value가 바뀌면 `source_data_hash`가 달라지고 기존 `features_*.pt`와 `feature_index_*.pt`가 재사용되지 않는다. 이 계약은 모델 구조 변경이 아니라 데이터 입력 신뢰성 계약이다.
+
+모델 입력 feature 계약은 계속 `v3_adjusted_ohlc`, `MODEL_N_FEATURES=36`이다. `atr_ratio`는 indicator checksum과 차트 보조지표 검증에는 포함될 수 있지만, 아직 `MODEL_FEATURE_COLUMNS`에는 포함하지 않는다.
+
+provider/source 계약은 다음과 같다.
+
+| provider | price/indicator read source |
+|---|---|
+| yfinance | `source='yfinance'` |
+| eodhd | `source='eodhd'` 또는 legacy `source IS NULL` |
+
+backtest anchor close와 product price/indicator API도 같은 provider source를 본다. 따라서 yfinance/EODHD 병렬 row가 같은 ticker/date에 있어도 모델 평가와 화면 가격이 섞이지 않아야 한다.
+
+1W/1M resample은 최신 일봉 기준으로 완성된 period만 사용한다. 현재 진행 중인 주/월 bucket은 feature build와 API display 양쪽에서 제외한다.
+
+### CP116-S torch-first import 계약
+
+Windows 제품/학습 환경에서는 torch를 쓰는 AI entrypoint가 `pandas`/`numpy`보다 먼저 `ai.torch_bootstrap.bootstrap_torch()`를 호출한다. 이 계약은 모델 구조 변경이 아니라 native CUDA DLL 로드 안정성 계약이다.
+
+하위 모델 모듈(`ai.models`, loss, postprocess 등)은 torch library module로 유지하되, 제품 스크립트와 학습 스크립트는 bootstrap entrypoint를 통과해야 한다. data-only CP runner는 torch를 직접 또는 간접 import하지 않아야 하며, 데이터 확인과 모델 inference가 섞이는 리허설은 장기적으로 subprocess 분리 대상이다.
+
+### CP124-BM band loss guard 구조
+
+1W band layer의 손실 구조는 여전히 `ForecastCompositeLoss`를 사용한다. 기본 구성은 line Huber loss, lower/upper quantile pinball band loss, direct 모드에서만 쓰는 band cross penalty, 선택적 direction 보조 손실이다. 제품 band 평가는 line metric이나 composite metric이 아니라 band_metrics만 사용한다.
+
+CP124에서 lower/upper quantile pinball loss에 선택적 가중치를 추가했다. `lower_band_loss_weight=1.0`, `upper_band_loss_weight=1.0`이 기본이라 기존 checkpoint와 학습 기본 동작은 유지된다. 하방 guard 실험은 lower quantile loss만 1.5 또는 2.0으로 키워 lower breach를 줄일 수 있는지 확인하는 방식이며, target 구조와 feature contract는 바꾸지 않았다.
+
+width alignment는 아직 모델 구조에 연결하지 않았다. 기존 `lambda_width`는 호환용 설정값이고 실제 손실 계산에는 포함되지 않는다. dynamic width alignment나 downside width alignment를 제품 후보 검증에 쓰려면 별도 CP에서 명시적인 width target 또는 differentiable alignment loss를 설계해야 한다.
+### Phase 1 모델 슬롯 구조
+
+Phase 1 모델 아키텍처는 네 슬롯으로 단순화한다.
+
+| 슬롯 | 역할 | Phase 1 기준 |
+|---|---|---|
+| 1D line | 단기 보수적 예측선 | 500티커 기준 v1 필요 |
+| 1D band | 단기 AI 위험 범위 | 500티커 기준 v1 필요 |
+| 1W line | 주간 보수적 예측선 | 500티커 기준 v1 필요 |
+| 1W band | 주간 AI 위험 범위 | 500티커 기준 v1 필요 |
+
+line layer와 band layer는 계속 분리한다. line model의 lower/upper 출력은 제품 band로 해석하지 않고, band model의 line 출력은 제품 예측선으로 해석하지 않는다. composite는 Phase 1 제품 기본 구조에서 제외한다.
+
+500티커 기준을 통과하지 못한 기존 100티커 모델은 데모/초기 후보로만 남긴다. 개별 실험의 모델군, feature_set, metric, 실패 분류는 각 실험 계획서에서 관리한다. 프로젝트 전체 기준은 `docs/phase1_project_status.md`를 따른다.

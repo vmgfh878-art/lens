@@ -16,6 +16,34 @@ BACKTEST_COLUMNS = (
     "run_id, strategy_name, timeframe, return_pct, mdd, sharpe, win_rate, "
     "profit_factor, num_trades, meta, created_at"
 )
+LEGACY_COMPOSITE_MODEL_NAMES = {"line_band_composite"}
+
+
+def _as_dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "deprecated", "legacy"}
+    return bool(value)
+
+
+def is_legacy_composite_run(row: dict) -> bool:
+    config = _as_dict(row.get("config"))
+    model_name = str(row.get("model_name") or "").strip().lower()
+    role = str(row.get("role") or config.get("role") or config.get("model_role") or "").strip().lower()
+    if model_name in LEGACY_COMPOSITE_MODEL_NAMES:
+        return True
+    if role == "composite_model":
+        return True
+    if _truthy(config.get("deprecated_for_phase1_product_contract")):
+        return True
+    if config.get("indicator_layer_replacement") is not None and model_name in LEGACY_COMPOSITE_MODEL_NAMES:
+        return True
+    return False
 
 
 def fetch_model_runs(
@@ -23,6 +51,7 @@ def fetch_model_runs(
     model_name: str | None = None,
     timeframe: str | None = None,
     status: str | None = "completed",
+    include_legacy: bool = False,
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
@@ -35,8 +64,22 @@ def fetch_model_runs(
             query = query.eq("timeframe", timeframe)
         if status is not None:
             query = query.eq("status", status)
-        end = offset + limit - 1
-        return query.range(offset, end).execute().data or []
+        if include_legacy:
+            end = offset + limit - 1
+            rows = query.range(offset, end).execute().data or []
+            return rows
+        filtered_rows: list[dict] = []
+        scan_offset = 0
+        scan_page_size = max(limit * 3, 50)
+        while len(filtered_rows) < offset + limit:
+            rows = query.range(scan_offset, scan_offset + scan_page_size - 1).execute().data or []
+            if not rows:
+                break
+            filtered_rows.extend(row for row in rows if not is_legacy_composite_run(row))
+            if len(rows) < scan_page_size:
+                break
+            scan_offset += scan_page_size
+        return filtered_rows[offset : offset + limit]
     except ConfigError:
         raise
     except Exception as exc:

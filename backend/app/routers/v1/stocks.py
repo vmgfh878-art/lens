@@ -6,8 +6,21 @@ from fastapi import APIRouter, Query, Request, Response
 
 from app.core.http import success_response
 from app.schemas.common import ApiResponse, ErrorResponse
-from app.schemas.stocks import IndicatorResponseData, PredictionData, PriceResponseData, StockSummary
-from app.services.api_service import get_indicator_response_data, get_latest_prediction_data, get_price_response_data, get_stocks
+from app.schemas.stocks import (
+    IndicatorResponseData,
+    PredictionData,
+    PriceResponseData,
+    ProductPredictionHistoryResponseData,
+    StockSummary,
+)
+from app.services.api_service import (
+    get_indicator_response_data,
+    get_latest_prediction_data,
+    get_prediction_history_data,
+    get_price_response_data,
+    get_stocks,
+)
+from app.services.product_prediction_history_svc import get_product_prediction_history_data
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -93,3 +106,48 @@ def get_latest_prediction(
     data = get_latest_prediction_data(ticker, model=model, timeframe=timeframe, horizon=horizon, run_id=run_id)
     response.headers["Cache-Control"] = "public, max-age=3600"
     return success_response(request, data)
+
+
+@router.get(
+    "/{ticker}/predictions/product-history",
+    response_model=ApiResponse[ProductPredictionHistoryResponseData],
+    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_product_prediction_history(
+    request: Request,
+    response: Response,
+    ticker: str,
+    timeframe: str = Query(default="1D", description="제품 rolling history timeframe"),
+    roles: str = Query(default="all", description="all, line, band 또는 line,band"),
+    run_id: str | None = Query(default=None, description="선택 run_id 필터"),
+    limit: int | None = Query(default=None, ge=1, le=1500, description="role별 최근 history row 수"),
+    lookback_days: int | None = Query(default=None, ge=1, le=1500, description="최근 N일 history"),
+):
+    data = get_product_prediction_history_data(
+        ticker,
+        timeframe=timeframe,
+        roles=roles,
+        run_id=run_id,
+        limit=limit,
+        lookback_days=lookback_days,
+    )
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    total = len(data["line_history"]) + len(data["band_history"])
+    return success_response(request, data, total=total)
+
+
+@router.get(
+    "/{ticker}/predictions/history",
+    response_model=ApiResponse[list[PredictionData]],
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+def get_prediction_history(
+    request: Request,
+    response: Response,
+    ticker: str,
+    run_id: str = Query(description="AI run ID"),
+    limit: int = Query(default=90, ge=1, le=200, description="최근 prediction row 수"),
+):
+    data = get_prediction_history_data(ticker, run_id=run_id, limit=limit)
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return success_response(request, data, total=len(data))

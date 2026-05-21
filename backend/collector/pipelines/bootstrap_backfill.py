@@ -141,6 +141,7 @@ def _run_indicator_backfill(
                 batch,
                 force_full_backfill=True,
                 full_start_date=settings.default_price_start,
+                provider=settings.market_data_provider,
             )
             processed_batches += 1
             processed_tickers += len(batch)
@@ -201,7 +202,7 @@ def main() -> None:
                 raise SystemExit(f"[preflight] {preflight.message}")
             log("사전 점검 완료", event="preflight_ok", job="bootstrap_backfill", message_text=preflight.message)
 
-        if not settings.eodhd_api_key:
+        if settings.market_data_provider == "eodhd" and not settings.eodhd_api_key:
             raise SystemExit("EODHD_API_KEY가 없어 초기 가격 백필을 시작할 수 없습니다.")
 
         target_tickers = resolve_target_tickers(
@@ -266,6 +267,8 @@ def main() -> None:
                 sleep_seconds=settings.price_sleep_seconds,
                 allow_yahoo_fallback=settings.allow_yahoo_fallback,
                 require_fundamentals=False,
+                provider=settings.market_data_provider,
+                fallback_provider=settings.market_data_fallback_provider,
             )
             quota_hit = quota_hit or results["prices"].get("quota_hit", False)
 

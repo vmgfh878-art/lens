@@ -2,7 +2,7 @@
 
 import { ReactNode, useState } from "react";
 
-export type AppView = "stocks" | "backtests" | "training";
+export type AppView = "stocks" | "backtests" | "training" | "report";
 
 interface AppShellProps {
   activeView: AppView;
@@ -39,20 +39,19 @@ type IconName =
 const NAV_SECTIONS: NavSection[] = [
   {
     label: "분석",
-    items: [
-      { id: "stocks", label: "주식 보기", icon: "chart" },
-    ],
+    items: [{ id: "stocks", label: "주식 보기", icon: "chart" }],
   },
   {
     label: "리서치",
     items: [
       { id: "backtests", label: "백테스트", icon: "beaker" },
-      { id: "training", label: "모델 학습", icon: "cpu" },
+      { id: "training", label: "AI 모델", icon: "cpu" },
+      { id: "report", label: "지표 가이드", icon: "doc" },
     ],
   },
 ];
 
-const ACTIVE_VIEWS = new Set<string>(["stocks", "backtests", "training"]);
+const ACTIVE_VIEWS = new Set<string>(["stocks", "backtests", "training", "report"]);
 
 function Icon({ name }: { name: IconName }) {
   const props = {
@@ -156,7 +155,8 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
   const [collapsed, setCollapsed] = useState(false);
 
   const activeLabel =
-    NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.id === activeView)?.label ?? "Lens";
+    NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.id === activeView)?.label ??
+    "Lens";
 
   return (
     <main className={`app-shell${collapsed ? " app-shell--collapsed" : ""}`}>
@@ -191,9 +191,7 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
                       <Icon name={item.icon} />
                     </span>
                     <span className="nav-item__label">{item.label}</span>
-                    {item.badge ? (
-                      <span className="nav-item__badge">{item.badge}</span>
-                    ) : null}
+                    {item.badge ? <span className="nav-item__badge">{item.badge}</span> : null}
                   </button>
                 ))}
               </div>
@@ -205,7 +203,7 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
           <button
             className="nav-collapse"
             type="button"
-            onClick={() => setCollapsed((v) => !v)}
+            onClick={() => setCollapsed((value) => !value)}
             aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"}
           >
             <Icon name="panel-left" />

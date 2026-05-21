@@ -7,7 +7,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import torch
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

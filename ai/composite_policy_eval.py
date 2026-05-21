@@ -6,14 +6,18 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import torch
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai.torch_bootstrap import bootstrap_torch  # noqa: E402
+
+torch = bootstrap_torch()  # noqa: E402
+
 from ai.composite_inference import (  # noqa: E402
+    COMPOSITION_PHASE1_NOTICE,
+    COMPOSITION_TOOL_STATUS,
+    LEGACY_POLICY_NOTES,
     _apply_scalar_width,
     _json_safe,
     _repo_path,
@@ -70,29 +74,29 @@ def _policy_bounds(
     upside_width = torch.clamp(calibrated_upper - band_line, min=1e-6)
 
     if policy == "raw_composite":
-        return calibrated_lower, calibrated_upper, "CP42 방식 그대로: PatchTST line과 CNN-LSTM calibrated band를 중심 재정렬 없이 조합"
+        return calibrated_lower, calibrated_upper, "legacy diagnostic: 보정 없이 line과 band를 나란히 비교"
     if policy == "include_line_clamp":
         return (
             torch.minimum(calibrated_lower, patch_line),
             torch.maximum(calibrated_upper, patch_line),
-            "line이 항상 밴드 안에 들어오도록 하방/상방을 필요한 만큼 확장",
+            "legacy display diagnostic: line을 band 안에 포함하도록 표시 폭 확장",
         )
     if policy == "line_centered_asymmetric":
         return (
             patch_line - downside_width,
             patch_line + upside_width,
-            "CNN-LSTM의 보정된 하방폭/상방폭은 유지하고 중심만 PatchTST line으로 이동",
+            "legacy research diagnostic: band 폭은 유지하고 중심만 line으로 재배치",
         )
     if policy == "risk_first_lower_preserve":
         return (
             torch.minimum(calibrated_lower, patch_line),
             torch.maximum(calibrated_upper, patch_line),
-            "하방은 더 보수적인 쪽을 채택하고 상방도 line 포함을 보장",
+            "legacy alias diagnostic: 현재 구현은 include_line_clamp와 동일",
         )
     raise ValueError(f"알 수 없는 composite policy입니다: {policy}")
 
 
-def _passes_cp43(metrics: dict[str, Any]) -> dict[str, bool]:
+def _diagnostic_thresholds(metrics: dict[str, Any]) -> dict[str, bool]:
     coverage = float(metrics["coverage"])
     lower_breach = float(metrics["lower_breach_rate"])
     upper_breach = float(metrics["upper_breach_rate"])
@@ -211,13 +215,18 @@ def evaluate_composite_policies(
         width_ratio = float(summary["avg_band_width"]) / raw_width if raw_width else 1.0
         summary["width_ratio_vs_raw"] = width_ratio
         summary["description"] = description
-        summary["cp43_pass_flags"] = _passes_cp43(summary)
-        summary["cp43_all_pass"] = all(summary["cp43_pass_flags"].values())
+        summary["policy_note"] = LEGACY_POLICY_NOTES.get(policy)
+        summary["diagnostic_flags"] = _diagnostic_thresholds(summary)
+        summary["diagnostic_all_thresholds_met"] = all(summary["diagnostic_flags"].values())
         policy_results[policy] = summary
 
     result = {
         "cp": "CP43-M",
-        "scope": "PatchTST line + CNN-LSTM calibrated band composite policy comparison",
+        "scope": "legacy composite diagnostic comparison",
+        "phase1_contract_status": COMPOSITION_TOOL_STATUS,
+        "deprecated_for_phase1_product_contract": True,
+        "phase1_notice": COMPOSITION_PHASE1_NOTICE,
+        "interpretation": "diagnostic comparison only; 모델 후보 통과/탈락 판정으로 사용하지 않습니다.",
         "line_checkpoint": _repo_path(line_checkpoint),
         "band_checkpoint": _repo_path(band_checkpoint),
         "split": split,
@@ -237,7 +246,7 @@ def evaluate_composite_policies(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CP43 composite band 정책 비교")
+    parser = argparse.ArgumentParser(description="Legacy composite policy diagnostic comparison")
     parser.add_argument("--line-checkpoint", required=True)
     parser.add_argument("--band-checkpoint", required=True)
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
@@ -282,7 +291,7 @@ def main() -> None:
                 "spearman_ic",
                 "long_short_spread",
                 "fee_adjusted_return",
-                "cp43_all_pass",
+                "diagnostic_all_thresholds_met",
             )
         }
         for name, metrics in result["policy_results"].items()

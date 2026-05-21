@@ -199,6 +199,41 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.json()["data"]["run_id"], "run-2")
         fetch.assert_called_once_with("AAPL", model="patchtst", timeframe="1D", horizon=None, run_id="run-2")
 
+    def test_prediction_history_with_run_id_returns_rows(self):
+        payload = [
+            {
+                "ticker": "AAPL",
+                "model_name": "cnn_lstm",
+                "timeframe": "1D",
+                "horizon": 5,
+                "asof_date": "2026-04-17",
+                "decision_time": "2026-04-17T00:00:00Z",
+                "run_id": "band-run",
+                "model_ver": "v1",
+                "signal": "HOLD",
+                "forecast_dates": ["2026-04-18"],
+                "line_series": [],
+                "upper_band_series": [110.0],
+                "lower_band_series": [100.0],
+                "conservative_series": [],
+                "band_quantile_low": 0.15,
+                "band_quantile_high": 0.85,
+                "meta": {},
+            }
+        ]
+        with patch("app.routers.v1.stocks.get_prediction_history_data", return_value=payload) as fetch:
+            response = self.client.get(
+                "/api/v1/stocks/AAPL/predictions/history",
+                params={"run_id": "band-run", "limit": 60},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["run_id"], "band-run")
+        self.assertEqual(body["data"][0]["upper_band_series"], [110.0])
+        self.assertEqual(body["meta"]["total"], 1)
+        fetch.assert_called_once_with("AAPL", run_id="band-run", limit=60)
+
     def test_prediction_latest_not_found(self):
         with patch(
             "app.routers.v1.stocks.get_latest_prediction_data",
@@ -262,6 +297,77 @@ class ApiTestCase(unittest.TestCase):
             model_name="patchtst",
             timeframe=None,
             status="completed",
+            include_legacy=False,
+            limit=20,
+            offset=0,
+        )
+
+    def test_ai_runs_default_query_excludes_legacy_composite(self):
+        rows = [
+            {
+                "run_id": "composite-run",
+                "status": "completed",
+                "model_name": "line_band_composite",
+                "timeframe": "1D",
+                "horizon": 5,
+                "created_at": "2026-04-18T01:00:00Z",
+                "config": {"role": "composite_model", "deprecated_for_phase1_product_contract": True},
+                "val_metrics": {},
+                "test_metrics": {},
+                "checkpoint_path": None,
+            },
+            {
+                "run_id": "patchtst-run",
+                "status": "completed",
+                "model_name": "patchtst",
+                "timeframe": "1D",
+                "horizon": 5,
+                "created_at": "2026-04-18T00:00:00Z",
+                "config": {},
+                "val_metrics": {},
+                "test_metrics": {},
+                "checkpoint_path": "ai/artifacts/run.pt",
+            },
+        ]
+        with patch("app.routers.v1.ai.fetch_model_runs", return_value=rows):
+            response = self.client.get("/api/v1/ai/runs", params={"model_name": "", "status": "completed"})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual([row["run_id"] for row in data], ["patchtst-run"])
+        self.assertFalse(data[0]["is_legacy"])
+
+    def test_ai_runs_can_include_legacy_composite_when_explicit(self):
+        rows = [
+            {
+                "run_id": "composite-run",
+                "status": "completed",
+                "model_name": "line_band_composite",
+                "timeframe": "1D",
+                "horizon": 5,
+                "created_at": "2026-04-18T01:00:00Z",
+                "config": {"role": "composite_model", "deprecated_for_phase1_product_contract": True},
+                "val_metrics": {},
+                "test_metrics": {},
+                "checkpoint_path": None,
+            }
+        ]
+        with patch("app.routers.v1.ai.fetch_model_runs", return_value=rows) as fetch:
+            response = self.client.get(
+                "/api/v1/ai/runs",
+                params={"model_name": "", "status": "completed", "include_legacy": "true"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data[0]["run_id"], "composite-run")
+        self.assertTrue(data[0]["is_legacy"])
+        self.assertEqual(data[0]["role"], "composite_model")
+        fetch.assert_called_once_with(
+            model_name="",
+            timeframe=None,
+            status="completed",
+            include_legacy=True,
             limit=20,
             offset=0,
         )
@@ -290,6 +396,7 @@ class ApiTestCase(unittest.TestCase):
             model_name="patchtst",
             timeframe=None,
             status="failed_nan",
+            include_legacy=False,
             limit=20,
             offset=0,
         )

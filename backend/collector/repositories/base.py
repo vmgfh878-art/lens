@@ -9,6 +9,10 @@ from supabase import Client
 
 from backend.app.db import get_supabase
 from backend.db.bootstrap import chunked_upsert
+from backend.collector.repositories.local_snapshots import local_snapshots_required
+
+
+BULK_READ_GUARDED_TABLES = {"price_data", "indicators"}
 
 
 def get_client() -> Client:
@@ -28,6 +32,8 @@ def _apply_filters(query, filters: list[tuple[str, str, Any]] | None):
             query = query.lte(column, value)
         elif operator == "in":
             query = query.in_(column, value)
+        elif operator == "is":
+            query = query.is_(column, value)
         else:
             raise ValueError(f"지원하지 않는 필터 연산자입니다: {operator}")
     return query
@@ -43,6 +49,11 @@ def fetch_all_rows(
     limit: int | None = None,
 ) -> list[dict]:
     """Supabase REST를 페이지 단위로 순회해 전체 행을 읽는다."""
+    if local_snapshots_required() and table in BULK_READ_GUARDED_TABLES and limit is None:
+        raise RuntimeError(
+            f"LENS_DATA_BACKEND=local 상태에서는 {table} Supabase REST 대량 조회를 차단합니다. "
+            "로컬 parquet snapshot을 사용하거나 명시적 limit을 지정하세요."
+        )
     client = get_client()
     start = 0
     rows: list[dict] = []

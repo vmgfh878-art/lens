@@ -1,0 +1,144 @@
+{
+  "context_hash": "1aa6452d82369cc6",
+  "context_sources": {
+    "fundamentals": {
+      "checksum": "70b9865066b111f7",
+      "date_max": "2026-04-03",
+      "date_min": "2014-12-31",
+      "name": "fundamentals",
+      "non_null_rate": {
+        "debt_ratio": 0.6334801762114537,
+        "eps": 0.9039647577092511,
+        "equity": 0.9127753303964757,
+        "net_income": 0.9330396475770925,
+        "revenue": 1.0,
+        "roe": 0.8678414096916299
+      },
+      "non_zero_rate": {
+        "debt_ratio": 0.6334801762114537,
+        "eps": 0.9039647577092511,
+        "equity": 0.9127753303964757,
+        "net_income": 0.9330396475770925,
+        "revenue": 1.0,
+        "roe": 0.8678414096916299
+      },
+      "provider_values": [
+        "sec_edgar"
+      ],
+      "rows": 1135,
+      "source_values": [
+        "sec_edgar"
+      ],
+      "status": "PASS",
+      "ticker_count": 98
+    },
+    "macro": {
+      "checksum": "54103d865b8979d8",
+      "date_max": "2026-05-04",
+      "date_min": "1976-06-01",
+      "name": "macro",
+      "non_null_rate": {
+        "credit_spread_hy": 0.06014114759128567,
+        "us10y": 0.2174746854863455,
+        "vix_close": 0.7040503221847192,
+        "yield_spread": 0.2174746854863455
+      },
+      "non_zero_rate": {
+        "credit_spread_hy": 0.06014114759128567,
+        "us10y": 0.2174746854863455,
+        "vix_close": 0.7040503221847192,
+        "yield_spread": 0.21693771095428047
+      },
+      "provider_values": [
+        "fred"
+      ],
+      "rows": 13036,
+      "source_values": [
+        "fred"
+      ],
+      "status": "PASS"
+    },
+    "market_breadth": {
+      "checksum": "d83ee81d532b5e27",
+      "date_max": "2026-05-05",
+      "date_min": "2015-10-16",
+      "min_ticker_count": 100,
+      "name": "market_breadth",
+      "non_null_rate": {
+        "ma200_pct": 1.0,
+        "nh_nl_index": 1.0
+      },
+      "non_zero_rate": {
+        "ma200_pct": 1.0,
+        "nh_nl_index": 0.9864253393665159
+      },
+      "provider_values": [
+        "eodhd"
+      ],
+      "rows": 2652,
+      "source_values": [
+        "local_eodhd_500_universe"
+      ],
+      "status": "PASS",
+      "total_count_max": 502,
+      "total_count_min": 463
+    },
+    "sector_returns": {
+      "checksum": "e18c4879a0e07abd",
+      "date_max": "2026-05-05",
+      "date_min": "2015-01-05",
+      "name": "sector_returns",
+      "non_null_rate": {
+        "close": 1.0,
+        "return": 1.0
+      },
+      "non_zero_rate": {
+        "close": 1.0,
+        "return": 1.0
+      },
+      "note": "현재 MODEL_FEATURE_COLUMNS 36개에는 sector_returns가 직접 포함되지 않는다.",
+      "provider_values": [
+        "eodhd"
+      ],
+      "rows": 34202,
+      "sector_count": 12,
+      "source_values": [
+        "local_eodhd_500_universe"
+      ],
+      "status": "PASS"
+    }
+  },
+  "context_version": "cp145_eodhd_500_context_v1",
+  "created_at": "2026-05-06T14:12:18.599215Z",
+  "files": {
+    "company_fundamentals": {
+      "bytes": 82307,
+      "path": "data\\parquet\\context\\eodhd_500\\company_fundamentals.parquet",
+      "sha256": "70ee03f01850bb64bd4639a2b12df0cac9e11f6dff4a704b081429baca77009e"
+    },
+    "macro": {
+      "bytes": 284609,
+      "path": "data\\parquet\\context\\eodhd_500\\macroeconomic_indicators.parquet",
+      "sha256": "253a5e333b111b952c57e17d5ff98366b6107b01f7d590b1925062925f8cdbab"
+    },
+    "market_breadth": {
+      "bytes": 75507,
+      "path": "data\\parquet\\context\\eodhd_500\\market_breadth.parquet",
+      "sha256": "1f419f217fd04849f8c0de2fb6dc8c60e1049297b1a2690153d003d78ab19ac5"
+    },
+    "sector_returns": {
+      "bytes": 750935,
+      "path": "data\\parquet\\context\\eodhd_500\\sector_returns.parquet",
+      "sha256": "e5426f2fe36405c07b540a0cc17431b9f00367099d24a8463669d4a44d72e0d2"
+    }
+  },
+  "lookahead_policy": {
+    "breadth": "EODHD 500 price로 해당 날짜까지 계산 가능한 값만 사용한다.",
+    "fundamentals": "SEC filing_date 기준 backward merge만 허용한다.",
+    "macro": "observation/asof date 기준으로만 merge한다.",
+    "sector_returns": "동일 EODHD 500 universe 가격에서 날짜별 sector 평균 수익률을 계산한다. 현재 모델 36개 feature에는 직접 포함되지 않는다."
+  },
+  "price_provider": "eodhd",
+  "price_source": "eodhd",
+  "price_source_data_hash": "80dde8302f9e87befb0e60b0d666f13f863c0529a7f361a5d2d8119c50ffb9ce"
+}

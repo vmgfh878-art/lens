@@ -1,14 +1,18 @@
 import unittest
 
-import torch  # noqa: F401
+from ai.torch_bootstrap import bootstrap_torch
+
+torch = bootstrap_torch()
 import pandas as pd
 
 from ai.preprocessing import (
     CALENDAR_FEATURE_COLUMNS,
     MODEL_N_FEATURES,
+    SequenceDatasetBundle,
     build_calendar_feature_frame,
     build_sequence_dataset,
     default_horizon,
+    split_sequence_dataset_calendar_aligned,
     split_sequence_dataset,
 )
 
@@ -74,8 +78,9 @@ class PreprocessingTestCase(unittest.TestCase):
     def test_default_horizon_matches_plan(self):
         self.assertEqual(default_horizon("1D"), 5)
         self.assertEqual(default_horizon("1W"), 4)
+        self.assertEqual(default_horizon("1M"), 3)
         with self.assertRaises(ValueError):
-            default_horizon("1M")
+            default_horizon("5M")
 
     def test_build_sequence_dataset_shapes(self):
         feature_df, price_df = _build_feature_rows()
@@ -126,6 +131,47 @@ class PreprocessingTestCase(unittest.TestCase):
         future_cov = dataset.future_covariates[0]
         self.assertEqual(future_cov.shape[-1], len(CALENDAR_FEATURE_COLUMNS))
         self.assertTrue(float(future_cov.abs().max().item()) <= 1.0)
+
+    def test_calendar_aligned_dataset_split_keeps_same_date_in_one_bucket(self):
+        dates = pd.bdate_range("2026-01-02", periods=90).strftime("%Y-%m-%d").tolist()
+        rows = []
+        for ticker in ("A", "B", "C"):
+            for index, date in enumerate(dates):
+                rows.append(
+                    {
+                        "ticker": ticker,
+                        "timeframe": "1D",
+                        "asof_date": date,
+                        "forecast_dates": [date],
+                        "sample_index": index,
+                    }
+                )
+        metadata = pd.DataFrame(rows)
+        sample_count = len(metadata)
+        bundle = SequenceDatasetBundle(
+            features=torch.zeros(sample_count, 2, MODEL_N_FEATURES),
+            line_targets=torch.zeros(sample_count, 1),
+            band_targets=torch.zeros(sample_count, 1),
+            raw_future_returns=torch.zeros(sample_count, 1),
+            anchor_closes=torch.ones(sample_count),
+            ticker_ids=torch.zeros(sample_count, dtype=torch.long),
+            future_covariates=torch.zeros(sample_count, 1, len(CALENDAR_FEATURE_COLUMNS)),
+            metadata=metadata,
+        )
+
+        train_bundle, val_bundle, test_bundle, plan = split_sequence_dataset_calendar_aligned(
+            bundle,
+            purge_gap_trading_days=3,
+            min_fold_samples=1,
+        )
+
+        train_dates = set(train_bundle.metadata["asof_date"].tolist())
+        val_dates = set(val_bundle.metadata["asof_date"].tolist())
+        test_dates = set(test_bundle.metadata["asof_date"].tolist())
+        self.assertFalse(train_dates & val_dates)
+        self.assertFalse(train_dates & test_dates)
+        self.assertFalse(val_dates & test_dates)
+        self.assertEqual(plan.cross_split_date_overlap_count, 0)
 
 
 if __name__ == "__main__":

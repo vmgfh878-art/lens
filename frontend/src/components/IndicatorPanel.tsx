@@ -33,10 +33,28 @@ interface IndicatorPanelProps {
 }
 
 const SVG_WIDTH = 640;
-const SVG_HEIGHT = 112;
+const SVG_HEIGHT = 96;
 const PAD_X = 22;
-const PAD_TOP = 12;
-const PAD_BOTTOM = 18;
+const PAD_TOP = 10;
+const PAD_BOTTOM = 16;
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function sortUniqueDates(dates: string[]) {
+  return Array.from(new Set(dates.filter(isValidDate))).sort((left, right) => left.localeCompare(right));
+}
+
+function sortUniquePoints(points: IndicatorChartPoint[]) {
+  const deduped = new Map<string, IndicatorChartPoint>();
+  points.forEach((point) => {
+    if (isValidDate(point.date) && Number.isFinite(point.value)) {
+      deduped.set(point.date, point);
+    }
+  });
+  return Array.from(deduped.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
 
 function formatAxis(value: number) {
   if (Math.abs(value) >= 100) {
@@ -50,14 +68,14 @@ function formatAxis(value: number) {
 
 function getTimelineDates(series: IndicatorChartSeries, timelineDates?: string[]) {
   if (timelineDates && timelineDates.length > 0) {
-    return timelineDates;
+    return sortUniqueDates(timelineDates);
   }
-  return series.points.map((point) => point.date);
+  return sortUniqueDates(series.points.map((point) => point.date));
 }
 
 function getVisibleValues(series: IndicatorChartSeries, timelineDates?: string[]) {
   const visibleDateSet = timelineDates && timelineDates.length > 0 ? new Set(timelineDates) : null;
-  return series.points
+  return sortUniquePoints(series.points)
     .filter((point) => !visibleDateSet || visibleDateSet.has(point.date))
     .map((point) => point.value)
     .filter(Number.isFinite);
@@ -97,7 +115,7 @@ function yForValue(value: number, min: number, max: number) {
 function buildPath(series: IndicatorChartSeries, timelineDates: string[], min: number, max: number) {
   const plotWidth = SVG_WIDTH - PAD_X * 2;
   const denominator = Math.max(timelineDates.length - 1, 1);
-  const pointByDate = new Map(series.points.map((point) => [point.date, point.value]));
+  const pointByDate = new Map(sortUniquePoints(series.points).map((point) => [point.date, point.value]));
   let path = "";
   let segmentOpen = false;
 
@@ -154,9 +172,6 @@ function IndicatorChart({ series, timelineDates: inputTimelineDates }: { series:
       <path d={buildPath(series, timelineDates, min, max)} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
       <text x={PAD_X} y={10} className="indicator-axis-label">
         {formatAxis(max)}
-      </text>
-      <text x={PAD_X} y={SVG_HEIGHT - 3} className="indicator-axis-label">
-        {formatAxis(min)}
       </text>
       <text x={PAD_X} y={SVG_HEIGHT - 3} className="indicator-date-label">
         {getDateLabel(timelineDates, "start")}

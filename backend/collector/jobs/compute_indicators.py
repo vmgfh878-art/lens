@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta
 from typing import Iterable
 
 import pandas as pd
 
 from backend.app.services.feature_svc import build_features
-from backend.collector.repositories.base import fetch_frame, upsert_records
+from backend.collector.repositories.base import fetch_frame, get_client, upsert_records
 from backend.collector.repositories.sync_state_repo import get_job_state_map, upsert_job_state
+from backend.collector.sources.market_data_providers import normalize_provider_name, provider_adjustment_policy
 from backend.collector.utils.logging import log
 
 TIMEFRAME_CONFIG = {
@@ -27,6 +29,44 @@ def _build_filters(start_date: str, tickers: list[str] | None = None) -> list[tu
     if tickers:
         filters.append(("in", "ticker", tickers))
     return filters
+
+
+def _source_matches_provider(source: object, provider: str) -> bool:
+    if source is None or pd.isna(source):
+        return provider == "eodhd"
+    return str(source).strip().lower() == provider
+
+
+def _filter_frame_by_source(frame: pd.DataFrame, provider: str) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    if "source" not in frame.columns:
+        return frame.copy() if provider == "eodhd" else frame.iloc[0:0].copy()
+    return frame[frame["source"].apply(lambda value: _source_matches_provider(value, provider))].copy()
+
+
+def _fetch_price_frame(
+    *,
+    start_date: str,
+    tickers: list[str] | None,
+    provider: str,
+) -> pd.DataFrame:
+    base_columns = "ticker,date,open,high,low,close,adjusted_close,volume,amount,per,pbr"
+    try:
+        price_frame = fetch_frame(
+            "price_data",
+            columns=f"{base_columns},source,provider,provider_adjustment_policy,updated_at",
+            filters=_build_filters(start_date, tickers),
+            order_by="date",
+        )
+    except Exception:
+        price_frame = fetch_frame(
+            "price_data",
+            columns=base_columns,
+            filters=_build_filters(start_date, tickers),
+            order_by="date",
+        )
+    return _filter_frame_by_source(price_frame, provider)
 
 
 def _resolve_source_start_date(
@@ -72,6 +112,21 @@ def _fetch_context_frame(table: str, columns: str, start_date: str) -> pd.DataFr
     )
 
 
+def _prune_full_backfill_rows(
+    *,
+    ticker: str,
+    timeframe: str,
+    source_start_date: str,
+    source: str,
+) -> None:
+    """강제 전체 백필 때 기존 indicator 범위를 지우고 현재 계산 결과로 다시 채운다."""
+
+    get_client().table("indicators").delete().eq("ticker", ticker).eq("timeframe", timeframe).eq("source", source).gte(
+        "date",
+        source_start_date,
+    ).execute()
+
+
 def _chunked(values: list[str], size: int) -> list[list[str]]:
     if not values:
         return []
@@ -85,19 +140,22 @@ def run(
     force_full_backfill: bool = False,
     full_start_date: str = "2015-01-01",
     timeframes: Iterable[str] | None = None,
+    provider: str | None = None,
 ) -> dict:
     """지표를 증분 또는 전체 백필 기준으로 계산한다."""
 
     target_tickers = tickers or []
     summary: dict[str, dict] = {}
     total_records = 0
+    provider_name = normalize_provider_name(provider or os.environ.get("MARKET_DATA_PROVIDER", "eodhd"))
+    source_name = provider_name
     resolved_timeframes = tuple(timeframes or ("1D", "1W", "1M"))
     unsupported = [timeframe for timeframe in resolved_timeframes if timeframe not in TIMEFRAME_CONFIG]
     if unsupported:
         raise ValueError(f"지원하지 않는 indicator timeframe 입니다: {unsupported}")
 
     for timeframe in resolved_timeframes:
-        state_job_name = f"compute_indicators:{timeframe}"
+        state_job_name = f"compute_indicators:{source_name}:{timeframe}"
         state_map = get_job_state_map(state_job_name)
         source_start_date = _resolve_source_start_date(
             timeframe,
@@ -112,6 +170,8 @@ def run(
             event="compute_indicators_started",
             job="compute_indicators",
             timeframe=timeframe,
+            provider=provider_name,
+            source=source_name,
             source_start_date=source_start_date,
             ticker_count=len(target_tickers),
             force_full_backfill=force_full_backfill,
@@ -147,11 +207,10 @@ def run(
             )
 
         for ticker_batch in ticker_batches:
-            price_frame = fetch_frame(
-                "price_data",
-                columns="ticker,date,open,high,low,close,adjusted_close,volume,amount,per,pbr",
-                filters=_build_filters(source_start_date, ticker_batch or None),
-                order_by="date",
+            price_frame = _fetch_price_frame(
+                start_date=source_start_date,
+                tickers=ticker_batch or None,
+                provider=provider_name,
             )
             if price_frame.empty:
                 continue
@@ -179,6 +238,8 @@ def run(
             )
             if features.empty:
                 continue
+            features["source"] = source_name
+            features["provider"] = provider_name
 
             for ticker, ticker_frame in features.groupby("ticker", sort=True):
                 ticker_state = state_map.get(ticker, {})
@@ -198,12 +259,19 @@ def run(
 
                 # 같은 날짜가 중복되면 Supabase upsert가 실패하므로 마지막 값만 남긴다.
                 output_frame = (
-                    output_frame.sort_values(["ticker", "timeframe", "date"])
-                    .drop_duplicates(subset=["ticker", "timeframe", "date"], keep="last")
+                    output_frame.sort_values(["ticker", "timeframe", "date", "source"])
+                    .drop_duplicates(subset=["ticker", "timeframe", "date", "source"], keep="last")
                 )
+                if force_full_backfill:
+                    _prune_full_backfill_rows(
+                        ticker=ticker,
+                        timeframe=timeframe,
+                        source_start_date=source_start_date,
+                        source=source_name,
+                    )
                 output_frame["date"] = output_frame["date"].dt.strftime("%Y-%m-%d")
                 records = output_frame.where(pd.notnull(output_frame), None).to_dict(orient="records")
-                upsert_records("indicators", records, on_conflict="ticker,timeframe,date")
+                upsert_records("indicators", records, on_conflict="ticker,timeframe,date,source")
                 timeframe_records += len(records)
                 per_ticker_counts[ticker] = len(records)
 
@@ -216,6 +284,9 @@ def run(
                     message=f"stored={len(records)}",
                     meta={
                         "timeframe": timeframe,
+                        "provider": provider_name,
+                        "source": source_name,
+                        "provider_adjustment_policy": provider_adjustment_policy(provider_name),
                         "upsert_cutoff": upsert_cutoff.isoformat() if upsert_cutoff else None,
                         "force_full_backfill": force_full_backfill,
                     },
@@ -223,6 +294,8 @@ def run(
 
         summary[timeframe] = {
             "stored": timeframe_records,
+            "provider": provider_name,
+            "source": source_name,
             "source_start_date": source_start_date,
             "ticker_count": len(per_ticker_counts),
             "force_full_backfill": force_full_backfill,
@@ -234,6 +307,12 @@ def run(
         status="success",
         last_cursor_date=datetime.now().date(),
         message=f"stored={total_records}",
-        meta={"force_full_backfill": force_full_backfill, "timeframes": summary},
+        meta={
+            "provider": provider_name,
+            "source": source_name,
+            "provider_adjustment_policy": provider_adjustment_policy(provider_name),
+            "force_full_backfill": force_full_backfill,
+            "timeframes": summary,
+        },
     )
-    return {"stored": total_records, "timeframes": summary}
+    return {"stored": total_records, "timeframes": summary, "provider": provider_name, "source": source_name}
