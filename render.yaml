@@ -11,31 +11,36 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_KEY
-        sync: false
       - key: BACKEND_CORS_ORIGINS
         sync: false
-
-  - type: cron
-    name: lens-daily-market-sync
-    runtime: python
-    plan: starter
-    schedule: "30 22 * * 1-5"
-    buildCommand: pip install -r backend/requirements.txt && pip install -r backend/collector/requirements.txt
-    startCommand: python -m backend.collector.pipelines.daily_market_sync --indicator-lookback-days 60
-    autoDeploy: true
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
+      # v1 local-parquet 모드는 Supabase 없어도 동작.
+      # Supabase 사용 시 아래 두 키를 Render dashboard 에서 설정.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
         sync: false
-      - key: FRED_API_KEY
-        sync: false
-      - key: FMP_API_KEY
-        sync: false
-      - key: EODHD_API_KEY
-        sync: false
+
+# Cron 비활성 — v1 학교 데모는 로컬에서 parquet 빌드 + git push 로 갱신.
+# 필요 시 아래 cron 블록 다시 활성화하고 환경변수 채워주세요.
+#
+#  - type: cron
+#    name: lens-daily-market-sync
+#    runtime: python
+#    plan: starter
+#    schedule: "0 23 * * 1-5"
+#    buildCommand: pip install -r backend/requirements.txt && pip install -r backend/collector/requirements.txt
+#    startCommand: python -m backend.collector.pipelines.daily_market_sync --indicator-lookback-days 60
+#    autoDeploy: true
+#    envVars:
+#      - key: PYTHON_VERSION
+#        value: 3.11.11
+#      - key: SUPABASE_URL
+#        sync: false
+#      - key: SUPABASE_KEY
+#        sync: false
+#      - key: MARKET_DATA_PROVIDER
+#        value: yahoo
+#      - key: FRED_API_KEY
+#        sync: false
+#      - key: FMP_API_KEY
+#        sync: false

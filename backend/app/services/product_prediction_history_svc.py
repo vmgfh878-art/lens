@@ -12,7 +12,11 @@ from app.core.exceptions import UpstreamUnavailableError
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
-DEFAULT_SNAPSHOT_DIR = ROOT_DIR / "data" / "parquet"
+# Render rootDir=backend 호환을 위해 backend/data/v1 우선, 기존 data/parquet 폴백 지원.
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+V1_SNAPSHOT_DIR = BACKEND_DIR / "data" / "v1"
+LEGACY_SNAPSHOT_DIR = ROOT_DIR / "data" / "parquet"
+DEFAULT_SNAPSHOT_DIR = V1_SNAPSHOT_DIR if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists() else LEGACY_SNAPSHOT_DIR
 PRODUCT_HISTORY_PARQUET_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.parquet"
 PRODUCT_HISTORY_MANIFEST_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.manifest.json"
 PRODUCT_HISTORY_RESPONSE_SOURCE = "product_rolling_replay"
@@ -20,7 +24,13 @@ SUPPORTED_TIMEFRAME = "1D"
 
 
 def _snapshot_dir() -> Path:
-    return Path(os.environ.get("LENS_LOCAL_SNAPSHOT_DIR") or DEFAULT_SNAPSHOT_DIR)
+    override = os.environ.get("LENS_LOCAL_SNAPSHOT_DIR")
+    if override:
+        return Path(override)
+    # 우선 v1, 없으면 legacy
+    if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists():
+        return V1_SNAPSHOT_DIR
+    return LEGACY_SNAPSHOT_DIR
 
 
 def _history_paths() -> tuple[Path, Path]:

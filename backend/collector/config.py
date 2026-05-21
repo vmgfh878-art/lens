@@ -38,11 +38,11 @@ class CollectorSettings:
 
 
 def get_settings() -> CollectorSettings:
-    market_data_provider = os.environ.get("MARKET_DATA_PROVIDER", "eodhd").strip().lower()
+    market_data_provider = os.environ.get("MARKET_DATA_PROVIDER", "yahoo").strip().lower()
     fallback_raw = os.environ.get("MARKET_DATA_FALLBACK_PROVIDER")
     market_data_fallback_provider = fallback_raw.strip().lower() if fallback_raw is not None and fallback_raw.strip() else None
-    if market_data_provider != "eodhd" and market_data_fallback_provider is None:
-        market_data_fallback_provider = "eodhd" if fallback_raw is None else None
+    if market_data_provider != "yahoo" and market_data_fallback_provider is None:
+        market_data_fallback_provider = "yahoo" if fallback_raw is None else None
     return CollectorSettings(
         fred_api_key=os.environ.get("FRED_API_KEY"),
         fmp_api_key=os.environ.get("FMP_API_KEY"),

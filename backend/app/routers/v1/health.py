@@ -32,10 +32,12 @@ def live(request: Request):
 )
 def ready(request: Request):
     checks = check_supabase_ready()
+    # local-parquet 모드 (Supabase skipped) 도 ok 로 본다.
+    status = "ok" if (checks.get("database") or checks.get("skipped")) else "degraded"
     return success_response(
         request,
         {
-            "status": "ok",
+            "status": status,
             "service": "lens-backend",
             "checks": checks,
         },

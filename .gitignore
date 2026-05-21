@@ -36,6 +36,8 @@ ai/cache/*.pt.manifest.json
 
 backend/data/parquet/
 *.parquet
+# v1 frontend serving parquets — must ship with backend deploy
+!backend/data/v1/*.parquet
 tmp/
 .claude/
 backend/logs/
