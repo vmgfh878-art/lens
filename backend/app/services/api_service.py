@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from app.core.exceptions import InvalidRunStatusError, ResourceNotFoundError
+from app.db import supabase_is_configured
 from app.repositories.ai_repo import fetch_model_run
 from app.repositories.market_repo import (
     fetch_indicator_rows,
@@ -13,6 +14,11 @@ from app.repositories.market_repo import (
     resolve_market_data_provider,
 )
 from app.repositories.prediction_repo import fetch_latest_prediction, fetch_prediction_by_run, fetch_prediction_history_by_run
+from app.services.local_market_svc import (
+    fetch_indicator_rows_local,
+    fetch_price_rows_local,
+    fetch_stocks_local,
+)
 from app.services.model_svc import (
     normalize_display_timeframe,
     normalize_model_name,
@@ -66,6 +72,8 @@ def resolve_price_window(start: str | None, end: str | None) -> tuple[str, str]:
 
 
 def get_stocks(*, search: str | None = None, limit: int = 50) -> list[dict]:
+    if not supabase_is_configured():
+        return fetch_stocks_local(search=search, limit=limit)
     provider = resolve_market_data_provider()
     return fetch_stocks(search=search, limit=limit, market_data_provider=provider)
 
@@ -80,8 +88,11 @@ def get_price_response_data(
 ) -> dict:
     normalized_timeframe = normalize_display_timeframe(timeframe)
     resolved_start, resolved_end = resolve_price_window(start, end)
-    provider = resolve_market_data_provider()
-    rows = fetch_price_rows(ticker, start=resolved_start, end=resolved_end, market_data_provider=provider)
+    if not supabase_is_configured():
+        rows = fetch_price_rows_local(ticker, start=resolved_start, end=resolved_end)
+    else:
+        provider = resolve_market_data_provider()
+        rows = fetch_price_rows(ticker, start=resolved_start, end=resolved_end, market_data_provider=provider)
     if not rows:
         raise ResourceNotFoundError(f"종목 '{ticker.upper()}'의 가격 데이터를 찾을 수 없습니다.")
 
@@ -105,13 +116,16 @@ def get_indicator_response_data(
     limit: int = 300,
 ) -> dict:
     normalized_timeframe = normalize_display_timeframe(timeframe)
-    provider = resolve_market_data_provider()
-    rows = fetch_indicator_rows(
-        ticker,
-        timeframe=normalized_timeframe,
-        limit=limit,
-        market_data_provider=provider,
-    )
+    if not supabase_is_configured():
+        rows = fetch_indicator_rows_local(ticker, timeframe=normalized_timeframe, limit=limit)
+    else:
+        provider = resolve_market_data_provider()
+        rows = fetch_indicator_rows(
+            ticker,
+            timeframe=normalized_timeframe,
+            limit=limit,
+            market_data_provider=provider,
+        )
     return {
         "ticker": ticker.upper(),
         "timeframe": normalized_timeframe,
