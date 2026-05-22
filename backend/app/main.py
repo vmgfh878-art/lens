@@ -43,7 +43,15 @@ app.include_router(predict.router, prefix="/predict", tags=["predict"])
 
 @app.on_event("startup")
 def _load_v1_predictions_cache() -> None:
-    """Startup 시 v1 predictions parquet 메모리 로드."""
+    """Startup 시 v1 predictions parquet 메모리 로드.
+    Render free tier (512MB) 메모리 제약 때문에 startup 일괄 로드 비활성.
+    각 endpoint 가 첫 호출 시 lazy load 하도록 두면 됨 (현재 frontend 가
+    /api/v1/predictions/* 미사용이라 사실상 로드 안 됨).
+    필요 시 LENS_EAGER_V1_CACHE=1 로 강제 활성.
+    """
+    if os.environ.get("LENS_EAGER_V1_CACHE", "0") != "1":
+        logger.info("v1 predictions cache eager load disabled (set LENS_EAGER_V1_CACHE=1 to enable)")
+        return
     base = Path(__file__).resolve().parent.parent / "data" / "v1"
     try:
         summary = v1_predictions.load_caches(base)
