@@ -18,8 +18,23 @@ logger = logging.getLogger("lens.api")
 
 
 def _parse_cors_origins() -> list[str]:
-    raw = os.environ.get("BACKEND_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    # 기본: 로컬 dev + Vercel production 도메인 + Render preview.
+    # Production 배포 시 환경변수로 명시 override 가능.
+    default_origins = ",".join([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://lens-kimjihyeong-s-projects.vercel.app",
+    ])
+    raw = os.environ.get("BACKEND_CORS_ORIGINS", default_origins)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+# Vercel 의 deployment 별 URL (예: lens-3hurhvz04-kimjihyeong-s-projects.vercel.app)
+# 도 같이 허용하기 위한 regex. lens-*-kimjihyeong-s-projects.vercel.app 패턴.
+_CORS_ORIGIN_REGEX = os.environ.get(
+    "BACKEND_CORS_ORIGIN_REGEX",
+    r"^https://lens-[a-z0-9]+-kimjihyeong-s-projects\.vercel\.app$",
+)
 
 
 app = FastAPI(title="Lens API", version="0.1.0")
@@ -27,8 +42,10 @@ app = FastAPI(title="Lens API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_parse_cors_origins(),
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=False,
 )
 app.add_middleware(GZipMiddleware, minimum_size=512)
 app.middleware("http")(request_id_middleware)

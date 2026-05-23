@@ -1,11 +1,21 @@
 import axios from "axios";
 
-const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
+// 우선순위: NEXT_PUBLIC_BACKEND_URL > NEXT_PUBLIC_API_BASE > runtime host 기반 default.
+// Production fallback = Render backend URL. env var 가 안 잡힌 build 도 동작.
+const PRODUCTION_BACKEND_URL = "https://lens-backend-7stj.onrender.com";
+const LOCAL_BACKEND_URL = "http://127.0.0.1:8000";
+
+function pickDefaultBackendUrl(): string {
+  if (typeof window === "undefined") return PRODUCTION_BACKEND_URL;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return LOCAL_BACKEND_URL;
+  return PRODUCTION_BACKEND_URL;
+}
 
 function resolveBackendUrl(value: string | undefined) {
   const raw = value?.trim().replace(/^["']|["']$/g, "");
   if (!raw) {
-    return DEFAULT_BACKEND_URL;
+    return pickDefaultBackendUrl();
   }
 
   const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
@@ -13,12 +23,14 @@ function resolveBackendUrl(value: string | undefined) {
     const parsed = new URL(withProtocol);
     return parsed.toString().replace(/\/$/, "");
   } catch {
-    return DEFAULT_BACKEND_URL;
+    return pickDefaultBackendUrl();
   }
 }
 
 const api = axios.create({
-  baseURL: resolveBackendUrl(process.env.NEXT_PUBLIC_BACKEND_URL),
+  baseURL: resolveBackendUrl(
+    process.env.NEXT_PUBLIC_BACKEND_URL ?? process.env.NEXT_PUBLIC_API_BASE,
+  ),
 });
 
 export type DisplayTimeframe = "1D" | "1W" | "1M";
