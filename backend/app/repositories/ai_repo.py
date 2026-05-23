@@ -1,7 +1,38 @@
 from __future__ import annotations
 
+import json
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
-from app.db import get_supabase
+from app.db import get_supabase, supabase_is_configured
+
+
+_MOCK_PATH = Path(__file__).resolve().parents[2] / "data" / "v1" / "ai_runs_mock.json"
+
+
+@lru_cache(maxsize=1)
+def _load_mock() -> dict[str, Any]:
+    """v1 학교 데모용 mock AI runs. Supabase 미설정 시 사용."""
+    if not _MOCK_PATH.exists():
+        return {"runs": [], "evaluations": {}, "backtests": {}}
+    try:
+        return json.loads(_MOCK_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {"runs": [], "evaluations": {}, "backtests": {}}
+
+
+def _mock_runs() -> list[dict]:
+    return list(_load_mock().get("runs", []))
+
+
+def _mock_evaluations(run_id: str) -> list[dict]:
+    return list(_load_mock().get("evaluations", {}).get(run_id, []))
+
+
+def _mock_backtests(run_id: str) -> list[dict]:
+    return list(_load_mock().get("backtests", {}).get(run_id, []))
 
 
 RUN_COLUMNS = (
@@ -55,6 +86,17 @@ def fetch_model_runs(
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
+    if not supabase_is_configured():
+        rows = _mock_runs()
+        if model_name:
+            rows = [r for r in rows if (r.get("model_name") or "").lower() == model_name.lower()]
+        if timeframe:
+            rows = [r for r in rows if (r.get("timeframe") or "") == timeframe]
+        if status is not None:
+            rows = [r for r in rows if (r.get("status") or "") == status]
+        if not include_legacy:
+            rows = [r for r in rows if not is_legacy_composite_run(r)]
+        return rows[offset : offset + limit]
     try:
         client = get_supabase()
         query = client.table("model_runs").select(RUN_COLUMNS).order("created_at", desc=True)
@@ -87,6 +129,11 @@ def fetch_model_runs(
 
 
 def fetch_model_run(run_id: str) -> dict | None:
+    if not supabase_is_configured():
+        for r in _mock_runs():
+            if r.get("run_id") == run_id:
+                return r
+        return None
     try:
         client = get_supabase()
         rows = (
@@ -112,6 +159,13 @@ def fetch_run_evaluations(
     timeframe: str | None = None,
     limit: int = 100,
 ) -> list[dict]:
+    if not supabase_is_configured():
+        rows = _mock_evaluations(run_id)
+        if ticker:
+            rows = [r for r in rows if (r.get("ticker") or "").upper() == ticker.upper()]
+        if timeframe:
+            rows = [r for r in rows if (r.get("timeframe") or "") == timeframe]
+        return rows[:limit]
     try:
         client = get_supabase()
         query = (
@@ -138,6 +192,13 @@ def fetch_run_backtests(
     timeframe: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
+    if not supabase_is_configured():
+        rows = _mock_backtests(run_id)
+        if strategy_name:
+            rows = [r for r in rows if (r.get("strategy_name") or "") == strategy_name]
+        if timeframe:
+            rows = [r for r in rows if (r.get("timeframe") or "") == timeframe]
+        return rows[:limit]
     try:
         client = get_supabase()
         query = (
