@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AiRunDetail, AiRunSummary, fetchAiRun, fetchAiRuns } from "@/api/client";
+import { PRODUCT_RUN_IDS, PRODUCT_SLOTS as PRODUCT_SLOT_CONFIGS } from "@/lib/productSlots";
+import type { ProductSlotId } from "@/lib/productSlots";
 
-type ProductSlotId = "line-1d" | "band-1d" | "line-1w" | "band-1w";
 type ProductSlotKind = "line" | "band" | "preparing-line" | "preparing-band";
 type ProductSlotStatus = "사용 중" | "데이터 확인 중" | "연결 필요" | "준비 중";
 type ExperimentCategory = "previous" | "quality_failed";
@@ -76,58 +77,20 @@ interface DetailField {
   monospace?: boolean;
 }
 
-const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
-const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
-const PRODUCT_BAND_1W_RUN_ID = "tide-1W-walk-forward-lower";
-const PRODUCT_RUN_IDS = new Set([
-  PRODUCT_LINE_RUN_ID,
-  PRODUCT_BAND_RUN_ID,
-  PRODUCT_BAND_1W_RUN_ID,
-]);
 const TRAINING_RUN_MODELS = new Set(["patchtst", "cnn_lstm", "tide", "line_band_composite"]);
 
-const PRODUCT_SLOTS: ProductSlot[] = [
-  {
-    id: "line-1d",
-    kind: "line",
-    title: "1D 보수적 예측선",
-    model: "PatchTST",
-    version: "v1",
-    timeframe: "1D",
-    runId: PRODUCT_LINE_RUN_ID,
-    summary: "수익 방향과 종목 순위를 참고하는 방어적 예측선입니다.",
-  },
-  {
-    id: "band-1d",
-    kind: "band",
-    title: "1D AI 밴드",
-    model: "CNN-LSTM",
-    version: "v1",
-    timeframe: "1D",
-    runId: PRODUCT_BAND_RUN_ID,
-    summary: "향후 5거래일의 예상 변동 범위를 보여줍니다.",
-  },
-  {
-    id: "line-1w",
-    kind: "preparing-line",
-    title: "1W 보수적 예측선",
-    model: "준비 중",
-    version: null,
-    timeframe: "1W",
-    runId: null,
-    summary: "주간 보수적 예측선은 다음 wave 에서 학습 예정입니다.",
-  },
-  {
-    id: "band-1w",
-    kind: "band",
-    title: "1W AI 밴드",
-    model: "TiDE",
-    version: "v1",
-    timeframe: "1W",
-    runId: PRODUCT_BAND_1W_RUN_ID,
-    summary: "주간 4 horizon 예상 범위. CP178 walk-forward lower calibration 9-checkpoint ensemble.",
-  },
-];
+const PRODUCT_SLOTS: ProductSlot[] = PRODUCT_SLOT_CONFIGS.map((slot) => ({
+  id: slot.id,
+  kind: slot.status === "deferred" ? (slot.kind === "line" ? "preparing-line" : "preparing-band") : slot.kind,
+  title: slot.title,
+  model: slot.modelName,
+  version: slot.version,
+  timeframe: slot.timeframe,
+  runId: slot.runId,
+  summary: slot.summary,
+}));
+const PRODUCT_LINE_1D_RUN_ID = PRODUCT_SLOTS.find((slot) => slot.id === "line-1d")?.runId ?? null;
+const PRODUCT_BAND_1D_RUN_ID = PRODUCT_SLOTS.find((slot) => slot.id === "band-1d")?.runId ?? null;
 
 const CONFIG_KEYS_COMMON = ["role", "model_role", "feature_set", "checkpoint_selection", "seq_len", "horizon", "wandb_status"];
 const CONFIG_KEYS_LINE = ["patch_len", "stride", "patch_stride"];
@@ -301,7 +264,7 @@ function formatConfigLabel(key: string) {
 function extractErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) {
     if (error.message === "Network Error" || error.message.includes("ECONNREFUSED")) {
-      return "백엔드에 연결할 수 없습니다. 127.0.0.1:8000 서버가 켜져 있는지 확인해주세요.";
+      return "백엔드에 연결할 수 없습니다. NEXT_PUBLIC_BACKEND_URL 설정과 백엔드 상태를 확인해주세요.";
     }
     return error.message;
   }
@@ -361,6 +324,9 @@ function getProductSlotStatus(slot: ProductSlot, detail: AiRunDetail | null, isL
   }
   if (isLoading) {
     return "데이터 확인 중";
+  }
+  if (slot.id === "band-1w") {
+    return "사용 중";
   }
   if (slot.id === "line-1w" && detail) {
     return "사용 중";
@@ -543,10 +509,10 @@ function getRunRole(run: AiRunSummary | AiRunDetail | null): string | null {
   if (!run) {
     return null;
   }
-  if (run.run_id === PRODUCT_LINE_RUN_ID) {
+  if (run.run_id === PRODUCT_LINE_1D_RUN_ID) {
     return "line_model";
   }
-  if (run.run_id === PRODUCT_BAND_RUN_ID) {
+  if (run.run_id === PRODUCT_BAND_1D_RUN_ID) {
     return "band_model";
   }
   if ("config_summary" in run) {
@@ -1783,11 +1749,11 @@ export default function TrainingView() {
       const filteredCompletedRuns = filterModelRuns(completedRuns);
       const filteredQualityRuns = filterModelRuns(qualityRuns);
       const [productLineResult, productBandResult] = await Promise.allSettled([
-        fetchAiRun(PRODUCT_LINE_RUN_ID, { includeConfig: false }),
-        fetchAiRun(PRODUCT_BAND_RUN_ID, { includeConfig: false }),
+        PRODUCT_LINE_1D_RUN_ID ? fetchAiRun(PRODUCT_LINE_1D_RUN_ID, { includeConfig: false }) : Promise.resolve(null),
+        PRODUCT_BAND_1D_RUN_ID ? fetchAiRun(PRODUCT_BAND_1D_RUN_ID, { includeConfig: false }) : Promise.resolve(null),
       ]);
-      const nextProductLineDetail = productLineResult.status === "fulfilled" ? productLineResult.value.data : null;
-      const nextProductBandDetail = productBandResult.status === "fulfilled" ? productBandResult.value.data : null;
+      const nextProductLineDetail = productLineResult.status === "fulfilled" ? productLineResult.value?.data ?? null : null;
+      const nextProductBandDetail = productBandResult.status === "fulfilled" ? productBandResult.value?.data ?? null : null;
       const nextProductWeeklyLineDetail = null;
       const experimentCandidates = [...filteredCompletedRuns, ...filteredQualityRuns]
         .filter((run) => !PRODUCT_RUN_IDS.has(run.run_id))
@@ -1814,7 +1780,9 @@ export default function TrainingView() {
       setProductBandDetail(nextProductBandDetail);
       setProductWeeklyLineDetail(nextProductWeeklyLineDetail);
       setExperimentDetails(nextExperimentDetails);
-      await loadDetail({ kind: "slot", slotId: "line-1d" }, PRODUCT_LINE_RUN_ID);
+      if (PRODUCT_LINE_1D_RUN_ID) {
+        await loadDetail({ kind: "slot", slotId: "line-1d" }, PRODUCT_LINE_1D_RUN_ID);
+      }
     } catch (error) {
       setRuns([]);
       setFailedQualityRuns([]);

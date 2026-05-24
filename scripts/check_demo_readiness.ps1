@@ -4,8 +4,9 @@
   [string]$CorsOrigin = "http://127.0.0.1:3000",
   [string]$Ticker = "AAPL",
   [string]$Timeframe = "1D",
-  [string]$LineRunId = "patchtst-1D-efad3c29d803",
-  [string]$BandRunId = "cnn_lstm-1D-d0c780dee5e8"
+  [string]$LineModelId = "line_b_cp175_beta5_frozen_eval",
+  [string]$Band1dModelId = "tide-1D-ea54dcae654d",
+  [string]$Band1wModelId = "tide_s60_q10_q90_param"
 )
 
 $ErrorActionPreference = "Stop"
@@ -289,124 +290,37 @@ if ($legacyRunsResponse.Ok -and $legacyCompositeRuns.Count -gt 0) {
 }
 
 Write-Host ""
-Write-Host "Product line/band layer candidates"
+Write-Host "Product v1 line/band layer candidates"
 
-$lineRun = Invoke-DemoGet -Name "LM line run" -Path ("/api/v1/ai/runs/{0}" -f $LineRunId)
-if ($lineRun.Ok -and $lineRun.Body.data.status -eq "completed") {
-  $lineRole = $lineRun.Body.data.role
-  if (-not $lineRole) {
-    $lineRole = $lineRun.Body.data.config_summary.role
-  }
-  Write-Check -State "OK" -Label "LM run" -Detail "$LineRunId status=completed role=$lineRole"
-} elseif ($lineRun.Ok) {
-  Write-Check -State "WARN" -Label "LM run" -Detail "$LineRunId status=$($lineRun.Body.data.status)"
+$v1LinePath = "/api/v1/predictions/line/{0}?days=30" -f $Ticker
+$v1Line = Invoke-DemoGet -Name "1D line CP175" -Path $v1LinePath
+$v1LineCount = if ($v1Line.Ok) { [int]$v1Line.Body.data.rows } else { 0 }
+if ($v1Line.Ok -and $v1LineCount -gt 0) {
+  Write-Check -State "OK" -Label "1D line CP175" -Detail "$LineModelId rows=$v1LineCount"
 } else {
-  Write-Check -State "FAIL" -Label "LM run" -Detail "$($lineRun.StatusCode) $($lineRun.ErrorCode) $($lineRun.ErrorMessage)"
+  Write-Check -State "FAIL" -Label "1D line CP175" -Detail "$($v1Line.StatusCode) $($v1Line.ErrorCode) $($v1Line.ErrorMessage)"
 }
 
-$linePredictionPath = "/api/v1/stocks/{0}/predictions/latest?run_id={1}" -f $Ticker, $LineRunId
-$linePrediction = Invoke-DemoGet -Name "LM prediction" -Path $linePredictionPath
-if ($linePrediction.Ok -and $linePrediction.Body.data) {
-  $forecastCount = Get-Count -Value $linePrediction.Body.data.forecast_dates
-  $lineCount = Get-Count -Value $linePrediction.Body.data.line_series
-  if ($lineCount -eq 0) {
-    $lineCount = Get-Count -Value $linePrediction.Body.data.conservative_series
-  }
-  if ($forecastCount -gt 0 -and $forecastCount -eq $lineCount) {
-    Write-Check -State "OK" -Label "LM prediction" -Detail "forecast=$forecastCount line=$lineCount"
-  } else {
-    Write-Check -State "WAITING" -Label "LM prediction" -Detail "row exists but line shape not usable forecast=$forecastCount line=$lineCount"
-  }
-} elseif ($linePrediction.StatusCode -eq 404) {
-  Write-Check -State "WAITING" -Label "LM prediction" -Detail "prediction row not stored yet"
+$v1Band1dPath = "/api/v1/predictions/band/1d/{0}?days=30&horizon=5" -f $Ticker
+$v1Band1d = Invoke-DemoGet -Name "1D band CP153" -Path $v1Band1dPath
+$v1Band1dCount = if ($v1Band1d.Ok) { [int]$v1Band1d.Body.data.rows } else { 0 }
+if ($v1Band1d.Ok -and $v1Band1dCount -gt 0) {
+  Write-Check -State "OK" -Label "1D band CP153" -Detail "$Band1dModelId rows=$v1Band1dCount"
 } else {
-  Write-Check -State "WAITING" -Label "LM prediction" -Detail "$($linePrediction.StatusCode) $($linePrediction.ErrorCode) $($linePrediction.ErrorMessage)"
+  Write-Check -State "FAIL" -Label "1D band CP153" -Detail "$($v1Band1d.StatusCode) $($v1Band1d.ErrorCode) $($v1Band1d.ErrorMessage)"
 }
 
-$lineEvaluationPath = "/api/v1/ai/runs/{0}/evaluations?ticker={1}&timeframe={2}&limit=1" -f $LineRunId, $Ticker, $Timeframe
-$lineEvaluations = Invoke-DemoGet -Name "LM evaluations" -Path $lineEvaluationPath
-$lineEvaluationCount = Get-Count -Value $lineEvaluations.Body.data
-if ($lineEvaluations.Ok -and $lineEvaluationCount -gt 0) {
-  Write-Check -State "OK" -Label "LM evaluation" -Detail "$lineEvaluationCount rows"
-} elseif ($lineEvaluations.Ok) {
-  Write-Check -State "WAITING" -Label "LM evaluation" -Detail "evaluation row not stored yet"
+$v1Band1wPath = "/api/v1/predictions/band/1w/{0}?days=120&horizon=4" -f $Ticker
+$v1Band1w = Invoke-DemoGet -Name "1W band CP178" -Path $v1Band1wPath
+$v1Band1wCount = if ($v1Band1w.Ok) { [int]$v1Band1w.Body.data.rows } else { 0 }
+if ($v1Band1w.Ok -and $v1Band1wCount -gt 0) {
+  Write-Check -State "OK" -Label "1W band CP178" -Detail "$Band1wModelId rows=$v1Band1wCount"
 } else {
-  Write-Check -State "WAITING" -Label "LM evaluation" -Detail "$($lineEvaluations.StatusCode) $($lineEvaluations.ErrorCode) $($lineEvaluations.ErrorMessage)"
+  Write-Check -State "FAIL" -Label "1W band CP178" -Detail "$($v1Band1w.StatusCode) $($v1Band1w.ErrorCode) $($v1Band1w.ErrorMessage)"
 }
 
-$lineHistoryPath = "/api/v1/stocks/{0}/predictions/history?run_id={1}&limit=90" -f $Ticker, $LineRunId
-$lineHistory = Invoke-DemoGet -Name "LM rolling history" -Path $lineHistoryPath
-$lineHistoryCount = Get-Count -Value $lineHistory.Body.data
-if ($lineHistory.Ok -and $lineHistoryCount -ge 20) {
-  Write-Check -State "OK" -Label "LM history" -Detail "$lineHistoryCount rows"
-} elseif ($lineHistory.Ok -and $lineHistoryCount -gt 0) {
-  Write-Check -State "WARN" -Label "LM history" -Detail "$lineHistoryCount rows, rolling history is shallow"
-} else {
-  Write-Check -State "WAITING" -Label "LM history" -Detail "$($lineHistory.StatusCode) $($lineHistory.ErrorCode) $($lineHistory.ErrorMessage)"
-}
-
-$bandRun = Invoke-DemoGet -Name "BM band run" -Path ("/api/v1/ai/runs/{0}" -f $BandRunId)
-if ($bandRun.Ok -and $bandRun.Body.data.status -eq "completed") {
-  $bandRole = $bandRun.Body.data.role
-  if (-not $bandRole) {
-    $bandRole = $bandRun.Body.data.config_summary.role
-  }
-  Write-Check -State "OK" -Label "BM run" -Detail "$BandRunId status=completed role=$bandRole"
-} elseif ($bandRun.Ok) {
-  Write-Check -State "WARN" -Label "BM run" -Detail "$BandRunId status=$($bandRun.Body.data.status)"
-} else {
-  Write-Check -State "FAIL" -Label "BM run" -Detail "$($bandRun.StatusCode) $($bandRun.ErrorCode) $($bandRun.ErrorMessage)"
-}
-
-$bandPredictionPath = "/api/v1/stocks/{0}/predictions/latest?run_id={1}" -f $Ticker, $BandRunId
-$bandPrediction = Invoke-DemoGet -Name "BM prediction" -Path $bandPredictionPath
-if ($bandPrediction.Ok -and $bandPrediction.Body.data) {
-  $forecastCount = Get-Count -Value $bandPrediction.Body.data.forecast_dates
-  $upperCount = Get-Count -Value $bandPrediction.Body.data.upper_band_series
-  $lowerCount = Get-Count -Value $bandPrediction.Body.data.lower_band_series
-  if ($forecastCount -gt 0 -and $forecastCount -eq $upperCount -and $upperCount -eq $lowerCount) {
-    Write-Check -State "OK" -Label "BM prediction" -Detail "forecast=$forecastCount upper=$upperCount lower=$lowerCount"
-  } else {
-    Write-Check -State "FAIL" -Label "BM prediction" -Detail "band shape mismatch forecast=$forecastCount upper=$upperCount lower=$lowerCount"
-  }
-} else {
-  Write-Check -State "FAIL" -Label "BM prediction" -Detail "$($bandPrediction.StatusCode) $($bandPrediction.ErrorCode) $($bandPrediction.ErrorMessage)"
-}
-
-$bandEvaluationPath = "/api/v1/ai/runs/{0}/evaluations?ticker={1}&timeframe={2}&limit=1" -f $BandRunId, $Ticker, $Timeframe
-$bandEvaluations = Invoke-DemoGet -Name "BM evaluations" -Path $bandEvaluationPath
-$bandEvaluationCount = Get-Count -Value $bandEvaluations.Body.data
-if ($bandEvaluations.Ok -and $bandEvaluationCount -gt 0) {
-  Write-Check -State "OK" -Label "BM evaluation" -Detail "$bandEvaluationCount rows"
-} elseif ($bandEvaluations.Ok) {
-  Write-Check -State "WARN" -Label "BM evaluation" -Detail "$Ticker evaluation row missing"
-} else {
-  Write-Check -State "FAIL" -Label "BM evaluation" -Detail "$($bandEvaluations.StatusCode) $($bandEvaluations.ErrorCode) $($bandEvaluations.ErrorMessage)"
-}
-
-$bandHistoryPath = "/api/v1/stocks/{0}/predictions/history?run_id={1}&limit=90" -f $Ticker, $BandRunId
-$bandHistory = Invoke-DemoGet -Name "BM rolling history" -Path $bandHistoryPath
-$bandHistoryCount = Get-Count -Value $bandHistory.Body.data
-if ($bandHistory.Ok -and $bandHistoryCount -ge 20) {
-  Write-Check -State "OK" -Label "BM history" -Detail "$bandHistoryCount rows"
-} elseif ($bandHistory.Ok -and $bandHistoryCount -gt 0) {
-  Write-Check -State "WARN" -Label "BM history" -Detail "$bandHistoryCount rows, rolling history is shallow"
-} else {
-  Write-Check -State "FAIL" -Label "BM history" -Detail "$($bandHistory.StatusCode) $($bandHistory.ErrorCode) $($bandHistory.ErrorMessage)"
-}
-
-$bandWidthRows = @($bandHistory.Body.data | Where-Object {
-  (Get-Count -Value $_.upper_band_series) -gt 0 -and
-  (Get-Count -Value $_.lower_band_series) -gt 0
-})
-if ($bandHistory.Ok -and $bandWidthRows.Count -gt 0) {
-  Write-Check -State "OK" -Label "band width" -Detail "calculable from $($bandWidthRows.Count) BM rows"
-} elseif ($bandHistory.Ok) {
-  Write-Check -State "WARN" -Label "band width" -Detail "upper/lower band rows missing"
-} else {
-  Write-Check -State "FAIL" -Label "band width" -Detail "BM history unavailable"
-}
+Write-Check -State "OK" -Label "1W line" -Detail "deferred, frontend does not call line endpoint"
 
 Write-Host ""
-Write-Host "WAITING means the product run exists but the row is not stored yet. This script does not create fake data."
+Write-Host "v1 product slots: 1D Line=CP175, 1D Band=CP153, 1W Band=CP178, 1W Line=Deferred."
 Write-Host "참고: npm run build 후에는 기존 next dev 서버를 재시작해야 frontend-static 404를 피할 수 있습니다."

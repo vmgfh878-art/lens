@@ -30,6 +30,11 @@ _CACHE: dict[str, pd.DataFrame | None] = {
     "band_1d": None,
     "band_1w": None,
 }
+_SLOT_FILES = {
+    "line_1d": "predictions_line_1d.parquet",
+    "band_1d": "predictions_band_1d.parquet",
+    "band_1w": "predictions_band_1w.parquet",
+}
 
 
 def load_caches(base_dir: Path) -> dict[str, Any]:
@@ -37,11 +42,7 @@ def load_caches(base_dir: Path) -> dict[str, Any]:
     base = Path(base_dir)
     summary: dict[str, Any] = {}
 
-    for slot, fname in [
-        ("line_1d", "predictions_line_1d.parquet"),
-        ("band_1d", "predictions_band_1d.parquet"),
-        ("band_1w", "predictions_band_1w.parquet"),
-    ]:
+    for slot, fname in _SLOT_FILES.items():
         path = base / fname
         if not path.exists():
             _CACHE[slot] = None
@@ -58,8 +59,26 @@ def load_caches(base_dir: Path) -> dict[str, Any]:
     return summary
 
 
+def _default_v1_data_dir() -> Path:
+    return Path(__file__).resolve().parents[3] / "data" / "v1"
+
+
+def _load_slot(slot: str) -> pd.DataFrame | None:
+    fname = _SLOT_FILES.get(slot)
+    if not fname:
+        return None
+    path = _default_v1_data_dir() / fname
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
+    _CACHE[slot] = df
+    return df
+
+
 def _get_df(slot: str) -> pd.DataFrame:
     df = _CACHE.get(slot)
+    if df is None:
+        df = _load_slot(slot)
     if df is None:
         raise HTTPException(
             status_code=503,

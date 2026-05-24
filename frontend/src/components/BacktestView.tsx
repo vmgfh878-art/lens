@@ -14,9 +14,10 @@ import {
   StockSummary,
 } from "@/api/client";
 import MetricCard from "@/components/MetricCard";
+import { PRODUCT_SLOT_BY_ID } from "@/lib/productSlots";
 
-const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
-const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
+const PRODUCT_LINE_RUN_ID = PRODUCT_SLOT_BY_ID["line-1d"].runId ?? "";
+const PRODUCT_BAND_RUN_ID = PRODUCT_SLOT_BY_ID["band-1d"].runId ?? "";
 const DEFAULT_PRICE_LOOKBACK_DAYS = 365;
 const PREDICTION_HISTORY_LIMIT = 200;
 const DEFAULT_FEE_BPS = 10;
@@ -219,7 +220,7 @@ const STRATEGIES: StrategyDefinition[] = [
     label: "지표 기준선 v1",
     shortLabel: "지표 기준선",
     description:
-      "AI 예측을 쓰지 않고 60일 추세, 20일 추세, MACD, RSI, ATR만으로 진입과 방어를 판단하는 보조지표 기준 전략입니다.",
+      "AI 제품 슬롯과 분리해, 60일 추세, 20일 추세, MACD, RSI, ATR만으로 비교하는 연구 기준선입니다.",
     ruleRows: [
       ["사용 지표", "60일 추세, 20일 추세, MACD, RSI, ATR, Bollinger 위치"],
       ["진입", "60일 추세 +2% 이상, 20일 추세 -2% 이상, MACD 양수, RSI 75 미만"],
@@ -228,7 +229,7 @@ const STRATEGIES: StrategyDefinition[] = [
       ["변동성 방어", "ATR 7% 이상이고 20일 추세가 약하면 청산 후보"],
       ["확인일", "진입 2일 확인, 청산 3일 확인"],
       ["포지션", "단일 티커 100% 또는 현금 100%"],
-      ["판정", "AI 없이 비교하기 위한 보조지표-only 기준선"],
+      ["판정", "제품 provenance가 아닌 연구 기준선"],
     ],
     visibleFactors: ["ma60Trend", "ma20Trend", "macd", "rsi", "atr"],
     validationRows: INDICATOR_BASELINE_VALIDATION,
@@ -241,11 +242,11 @@ const STRATEGIES: StrategyDefinition[] = [
     label: "Lens Balance v1",
     shortLabel: "Lens Balance",
     description:
-      "보수적 예측선으로 방향을 보고, AI 밴드로 불확실성과 하방 위험을 확인해 진입과 청산을 조절하는 단일 티커 실험 전략입니다.",
+      "보수적 예측선과 AI 밴드를 함께 읽는 단일 티커 연구 전략입니다. 현재 제품 슬롯과 실험 기준선은 분리해서 봅니다.",
     ruleRows: [
       ["사용 지표", "보수적 예측선 v1, AI 밴드 v1"],
-      ["예측선 버전", `보수적 예측선 v1 (${PRODUCT_LINE_RUN_ID})`],
-      ["밴드 버전", `AI 밴드 v1 (${PRODUCT_BAND_RUN_ID})`],
+      ["제품 예측선 슬롯", `${PRODUCT_SLOT_BY_ID["line-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["line-1d"].sourceCp}`],
+      ["제품 밴드 슬롯", `${PRODUCT_SLOT_BY_ID["band-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["band-1d"].sourceCp}`],
       ["진입", "보수적 예측선 >= -0.2%, 밴드 폭 급확장 아님"],
       ["보유", "보수적 예측선 >= -1.4%, line 약화와 밴드 위험이 동시에 확정되지 않음"],
       ["청산", "line 약화 + 밴드 하단 위험 또는 밴드 폭 확장"],
@@ -303,7 +304,7 @@ function formatCompact(value: number | null | undefined) {
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (error.message === "Network Error" || error.message.includes("ECONNREFUSED")) {
-      return "백엔드에 연결할 수 없습니다. 127.0.0.1:8000 서버가 켜져 있는지 확인해주세요.";
+      return "백엔드에 연결할 수 없습니다. NEXT_PUBLIC_BACKEND_URL 설정과 백엔드 상태를 확인해주세요.";
     }
     return "백테스트 데이터를 불러오는 중 문제가 생겼습니다.";
   }

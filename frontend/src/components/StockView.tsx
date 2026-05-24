@@ -6,11 +6,12 @@ import {
   DisplayTimeframe,
   EvaluationSummary,
   fetchIndicators,
-  fetchPrediction,
-  fetchProductPredictionHistory,
   fetchPrices,
-  fetchRunEvaluations,
   fetchTickers,
+  fetchV1Band1dPrediction,
+  fetchV1Band1wPrediction,
+  fetchV1LinePrediction,
+  getBackendConfigWarning,
   IndicatorPoint,
   isPredictionTimeframeEnabled,
   PredictionResult,
@@ -18,10 +19,13 @@ import {
   ProductBandHistoryPoint,
   ProductLineHistoryPoint,
   StockSummary,
+  V1BandPredictionResult,
+  V1LinePredictionResult,
 } from "@/api/client";
 import Chart from "@/components/Chart";
 import IndicatorPanel, { IndicatorChartPoint, IndicatorChartSeries } from "@/components/IndicatorPanel";
 import LayerToggle from "@/components/LayerToggle";
+import { getProductBandSlot, getProductLineSlot, PRODUCT_SLOT_BY_ID } from "@/lib/productSlots";
 
 type ChartType = "candles" | "line";
 type IndicatorId =
@@ -83,10 +87,6 @@ const TIMEFRAME_OPTIONS: Array<{ value: DisplayTimeframe; label: string }> = [
   { value: "1M", label: "1M" },
 ];
 
-const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
-const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
-const LINE_MODEL_DISPLAY_NAME = "보수적 예측선 모델 v1";
-const BAND_MODEL_DISPLAY_NAME = "AI 밴드 모델 v1";
 const DEFAULT_INDICATORS: IndicatorId[] = ["rsi", "macd_ratio", "ai_band_width"];
 const PRODUCT_HISTORY_LOOKBACK_DAYS = 370;
 const DEFAULT_PRICE_LOOKBACK_DAYS = 365;
@@ -311,7 +311,7 @@ function extractErrorMessage(error: unknown) {
   }
   if (error instanceof Error) {
     if (error.message === "Network Error" || error.message.includes("ECONNREFUSED")) {
-      return "백엔드에 연결할 수 없습니다. 127.0.0.1:8000 서버가 켜져 있는지 확인해주세요.";
+      return "백엔드에 연결할 수 없습니다. NEXT_PUBLIC_BACKEND_URL 설정과 백엔드 상태를 확인해주세요.";
     }
     if (error.message.includes("Failed to construct 'URL'") || error.message.includes("Invalid URL")) {
       return "백엔드 주소 설정을 확인할 수 없습니다. NEXT_PUBLIC_BACKEND_URL 값을 확인해주세요.";
@@ -355,10 +355,6 @@ function getLastFinite(values: number[] | null | undefined) {
 
 function getLastPoint(points: IndicatorChartPoint[]) {
   return points.length > 0 ? points[points.length - 1] : null;
-}
-
-function selectEvaluation(rows: EvaluationSummary[], prediction: PredictionResult) {
-  return rows.find((row) => row.asof_date === prediction.asof_date) ?? rows[0] ?? null;
 }
 
 function buildAiState(timeframe: DisplayTimeframe): AiState {
@@ -430,6 +426,16 @@ function sortUniqueByDate<T extends { date: string }>(rows: T[]) {
   return Array.from(deduped.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function sortUniqueByAsofDate<T extends { asof_date: string }>(rows: T[]) {
+  const deduped = new Map<string, T>();
+  rows.forEach((row) => {
+    if (isValidDate(row.asof_date)) {
+      deduped.set(row.asof_date, row);
+    }
+  });
+  return Array.from(deduped.values()).sort((left, right) => left.asof_date.localeCompare(right.asof_date));
+}
+
 function sortPriceRows(rows: PriceBar[]) {
   return sortUniqueByDate(rows.filter((row) => Number.isFinite(row.close)));
 }
@@ -457,6 +463,131 @@ function buildFullPriceWindows() {
       end: `${year}-12-31`,
     };
   });
+}
+
+function addDays(date: string, days: number) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function finiteOrNull(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function buildLineHistoryFromV1(response: V1LinePredictionResult): ProductLineHistoryPoint[] {
+  const slot = PRODUCT_SLOT_BY_ID["line-1d"];
+  return sortUniqueByAsofDate(
+    response.data
+      .map((row) => {
+        const value = finiteOrNull(row.safe_line_score) ?? finiteOrNull(row.line_score);
+        if (!isValidDate(row.asof_date) || value == null) {
+          return null;
+        }
+        return {
+          asof_date: row.asof_date,
+          display_horizon: slot.horizon ?? 5,
+          value,
+          run_id: row.model_id ?? slot.runId ?? slot.sourceCp ?? "CP175",
+        };
+      })
+      .filter((row): row is ProductLineHistoryPoint => row !== null)
+  );
+}
+
+function selectBandDisplayRows(response: V1BandPredictionResult, preferredHorizon: number) {
+  const byAsof = new Map<string, V1BandPredictionResult["data"]>();
+  response.data.forEach((row) => {
+    if (!isValidDate(row.asof_date)) {
+      return;
+    }
+    const rows = byAsof.get(row.asof_date) ?? [];
+    rows.push(row);
+    byAsof.set(row.asof_date, rows);
+  });
+
+  return Array.from(byAsof.entries())
+    .map(([asofDate, rows]) => {
+      const preferred = rows.find((row) => row.horizon_step === preferredHorizon);
+      const fallback = rows.sort((left, right) => right.horizon_step - left.horizon_step)[0];
+      return preferred ?? fallback ?? null;
+    })
+    .filter((row): row is V1BandPredictionResult["data"][number] => row !== null);
+}
+
+function buildBandHistoryFromV1(response: V1BandPredictionResult, preferredHorizon: number): ProductBandHistoryPoint[] {
+  return sortUniqueByAsofDate(
+    selectBandDisplayRows(response, preferredHorizon)
+      .map((row) => {
+        const lower = finiteOrNull(row.band_lower);
+        const upper = finiteOrNull(row.band_upper);
+        if (!isValidDate(row.asof_date) || lower == null || upper == null) {
+          return null;
+        }
+        return {
+          asof_date: row.asof_date,
+          display_horizon: row.horizon_step,
+          lower,
+          upper,
+          run_id: row.model_id ?? response.model_id ?? response.source_cp ?? response.slot,
+        };
+      })
+      .filter((row): row is ProductBandHistoryPoint => row !== null)
+  );
+}
+
+function buildBandPredictionFromV1(
+  response: V1BandPredictionResult,
+  timeframe: "1D" | "1W",
+  preferredHorizon: number
+): PredictionResult | null {
+  const sortedRows = [...response.data].filter((row) => isValidDate(row.asof_date)).sort((left, right) => {
+    const byDate = left.asof_date.localeCompare(right.asof_date);
+    return byDate !== 0 ? byDate : left.horizon_step - right.horizon_step;
+  });
+  const latestAsof = sortedRows.at(-1)?.asof_date;
+  if (!latestAsof) {
+    return null;
+  }
+  const latestRows = sortedRows
+    .filter((row) => row.asof_date === latestAsof)
+    .sort((left, right) => left.horizon_step - right.horizon_step);
+  const rows = latestRows.filter((row) => row.horizon_step <= preferredHorizon);
+  const forecastDates = rows.map((row) => row.forecast_date ?? addDays(row.asof_date, timeframe === "1W" ? row.horizon_step * 7 : row.horizon_step));
+  const upper = rows.map((row) => finiteOrNull(row.band_upper));
+  const lower = rows.map((row) => finiteOrNull(row.band_lower));
+  if (forecastDates.length === 0 || upper.some((value) => value == null) || lower.some((value) => value == null)) {
+    return null;
+  }
+  const slot = timeframe === "1W" ? PRODUCT_SLOT_BY_ID["band-1w"] : PRODUCT_SLOT_BY_ID["band-1d"];
+  return {
+    ticker: response.ticker,
+    model_name: slot.modelName,
+    timeframe,
+    horizon: preferredHorizon,
+    asof_date: latestAsof,
+    decision_time: latestAsof,
+    run_id: response.model_id ?? slot.runId ?? slot.sourceCp ?? response.slot,
+    model_ver: slot.version ?? "v1",
+    signal: "HOLD",
+    forecast_dates: forecastDates,
+    upper_band_series: upper as number[],
+    lower_band_series: lower as number[],
+    conservative_series: [],
+    line_series: [],
+    band_quantile_low: null,
+    band_quantile_high: null,
+    meta: {
+      role: "band_model",
+      layer: "band",
+      source_cp: response.source_cp ?? slot.sourceCp,
+      model_id: response.model_id ?? slot.modelId,
+      value_unit: timeframe === "1W" ? "return" : "price",
+    },
+  };
 }
 
 async function fetchPriceHistory(ticker: string, timeframe: DisplayTimeframe, fullHistory = false) {
@@ -790,106 +921,58 @@ export default function StockView() {
         return;
       }
 
-      if (nextTimeframe === "1W") {
-        setLinePredictionHistory([]);
-        setBandPredictionHistory([]);
-        setPrediction(null);
-        setBandPrediction(null);
-        setBandEvaluation(null);
-        setPredictionProvenance({
-          latestRunId: null,
-          selectedRunId: null,
-          isFallback: false,
-        });
-        setAiState({
-          kind: "empty",
-          message:
-            priceRows.length === 0
-              ? "1W 화면은 가격 데이터가 연결되면 차트가 표시됩니다."
-              : "1W 보수적 예측선은 준비 중이며, 1W AI 밴드는 AI 모델 페이지에서 평가 결과를 확인할 수 있습니다. 차트 overlay 는 다음 버전에서 추가 예정입니다.",
-        });
-        return;
-      }
+      const lineSlot = getProductLineSlot(nextTimeframe);
+      const bandSlot = getProductBandSlot(nextTimeframe);
+      const linePromise =
+        nextTimeframe === "1D" && lineSlot?.status === "active"
+          ? fetchV1LinePrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS }).catch(() => null)
+          : Promise.resolve(null);
+      const bandPromise =
+        bandSlot?.status === "active"
+          ? nextTimeframe === "1W"
+            ? fetchV1Band1wPrediction(nextTicker, { days: 730, horizon: bandSlot.horizon ?? undefined }).catch(() => null)
+            : fetchV1Band1dPrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS, horizon: bandSlot.horizon ?? undefined }).catch(() => null)
+          : Promise.resolve(null);
 
-      if (nextTimeframe !== "1D") {
-        setAiState(
-          priceRows.length === 0
-            ? { kind: "empty", message: "주간 AI 차트 overlay 는 다음 버전 예정. 가격 데이터 연결 후 표시됩니다." }
-            : { kind: "empty", message: "1W AI 밴드 모델은 활성화됨 (AI 모델 페이지에서 확인). 차트 overlay 는 다음 버전 예정." }
-        );
-        return;
-      }
+      const [lineResponse, bandResponse] = await Promise.all([linePromise, bandPromise]);
+      const lineHistory = lineResponse ? buildLineHistoryFromV1(lineResponse.data) : [];
+      const bandHistory = bandResponse ? buildBandHistoryFromV1(bandResponse.data, bandSlot?.horizon ?? 5) : [];
+      const bandLatest = bandResponse ? buildBandPredictionFromV1(bandResponse.data, nextTimeframe, bandSlot?.horizon ?? 5) : null;
+      const bandReady = Boolean(bandLatest && isActualBandPrediction(bandLatest) && checkBandOverlay(bandLatest).ok);
+      const lineReady = lineSlot?.status === "active" && lineHistory.length > 0;
 
-      const [linePredictionResponse, bandPredictionResponse, productHistoryResponse] = await Promise.all([
-        fetchPrediction(nextTicker, {
-          timeframe: nextTimeframe,
-          runId: PRODUCT_LINE_RUN_ID,
-        }).catch(() => null),
-        fetchPrediction(nextTicker, {
-          timeframe: nextTimeframe,
-          runId: PRODUCT_BAND_RUN_ID,
-        }).catch(() => null),
-        fetchProductPredictionHistory(nextTicker, {
-          timeframe: "1D",
-          roles: "all",
-          lookbackDays: PRODUCT_HISTORY_LOOKBACK_DAYS,
-        }).catch(() => null),
-      ]);
+      setLinePredictionHistory(lineHistory);
+      setBandPredictionHistory(bandHistory);
+      setPrediction(null);
+      setBandPrediction(bandReady ? bandLatest : null);
+      setBandEvaluation(null);
+      setPredictionProvenance({
+        latestRunId: lineSlot?.runId ?? null,
+        selectedRunId: lineHistory.at(-1)?.run_id ?? bandLatest?.run_id ?? null,
+        isFallback: false,
+      });
 
-      setLinePredictionHistory(productHistoryResponse?.data.line_history ?? []);
-      setBandPredictionHistory(productHistoryResponse?.data.band_history ?? []);
-
-      const lineOverlayCheck = linePredictionResponse ? checkLineOverlay(linePredictionResponse.data) : null;
-      const bandOverlayCheck = bandPredictionResponse ? checkBandOverlay(bandPredictionResponse.data) : null;
-      const lineReady = Boolean(linePredictionResponse && lineOverlayCheck?.ok);
-      const bandReady = Boolean(bandPredictionResponse && isActualBandPrediction(bandPredictionResponse.data) && bandOverlayCheck?.ok);
-
-      if (lineReady && linePredictionResponse) {
-        setPrediction(linePredictionResponse.data);
-        setPredictionProvenance({
-          latestRunId: PRODUCT_LINE_RUN_ID,
-          selectedRunId: linePredictionResponse.data.run_id,
-          isFallback: false,
-        });
-      } else {
-        setPrediction(null);
-        setPredictionProvenance({
-          latestRunId: PRODUCT_LINE_RUN_ID,
-          selectedRunId: null,
-          isFallback: false,
-        });
-      }
-
-      if (bandReady && bandPredictionResponse) {
-        setBandPrediction(bandPredictionResponse.data);
-        try {
-          const evaluationsResponse = await fetchRunEvaluations(bandPredictionResponse.data.run_id, {
-            ticker: nextTicker,
-            timeframe: nextTimeframe,
-            limit: 20,
-          });
-          setBandEvaluation(selectEvaluation(evaluationsResponse.data, bandPredictionResponse.data));
-        } catch {
-          setBandEvaluation(null);
-        }
-      } else {
-        setBandPrediction(null);
-        setBandEvaluation(null);
-      }
-
-      if (priceRows.length === 0 && (lineReady || bandReady)) {
+      if (priceRows.length === 0 && (lineReady || bandReady || bandHistory.length > 0)) {
         setAiState({
           kind: "empty",
           message: "예측 결과는 저장되어 있지만 가격 데이터가 없어 차트 위에 표시할 수 없습니다. 가격 데이터가 연결되면 표시됩니다.",
         });
-      } else if (lineReady && bandReady) {
-        setAiState({ kind: "ready", message: "보수적 예측선과 AI 밴드가 저장된 모델 결과에서 연결되었습니다." });
-      } else if (!lineReady && bandReady) {
-        setAiState({ kind: "ready", message: "보수적 예측선 모델은 준비됨, 예측 저장 대기. AI 밴드는 표시 중입니다." });
+      } else if (nextTimeframe === "1W" && bandReady) {
+        setAiState({ kind: "ready", message: "1W AI 밴드가 활성화되었습니다. 1W 보수적 예측선은 준비 중입니다." });
+      } else if (lineReady && (bandReady || bandHistory.length > 0)) {
+        setAiState({ kind: "ready", message: "1D 보수적 예측선과 1D AI 밴드가 v1 제품 슬롯에서 연결되었습니다." });
+      } else if (!lineReady && (bandReady || bandHistory.length > 0)) {
+        setAiState({ kind: "ready", message: nextTimeframe === "1W" ? "1W AI 밴드가 활성화되었습니다. 1W 보수적 예측선은 준비 중입니다." : "AI 밴드는 표시 중입니다. 보수적 예측선 데이터는 아직 없습니다." });
       } else if (lineReady && !bandReady) {
-        setAiState({ kind: "ready", message: "보수적 예측선은 표시 중입니다. AI 밴드는 저장 대기 상태입니다." });
+        setAiState({ kind: "ready", message: "보수적 예측선은 표시 중입니다. AI 밴드 데이터는 아직 없습니다." });
       } else {
-        setAiState({ kind: "empty", message: "모델 후보는 준비됐지만 표시 가능한 저장 예측이 없습니다." });
+        setAiState({
+          kind: "empty",
+          message:
+            nextTimeframe === "1W"
+              ? "1W AI 밴드 데이터가 아직 없습니다. 1W 보수적 예측선은 준비 중입니다."
+              : "v1 제품 슬롯은 준비됐지만 표시 가능한 예측 데이터가 없습니다.",
+        });
       }
     } catch (error) {
       setPriceData([]);
@@ -952,21 +1035,30 @@ export default function StockView() {
 
   const latestPrice = getLastPrice(priceData);
   const changePercent = getChangePercent(priceData);
+  const backendConfigWarning = getBackendConfigWarning();
   const hasPriceData = priceData.length > 0;
   const aiDisabled = timeframe === "1M";
-  const activeLineModelDisplayName = timeframe === "1W" ? "1W 보수적 예측선 비워둠" : LINE_MODEL_DISPLAY_NAME;
-  const activeBandModelDisplayName = timeframe === "1W" ? "1W AI 밴드 비워둠" : BAND_MODEL_DISPLAY_NAME;
+  const currentLineSlot = getProductLineSlot(timeframe);
+  const currentBandSlot = getProductBandSlot(timeframe);
+  const activeLineModelDisplayName =
+    currentLineSlot?.status === "deferred" ? `${currentLineSlot.title} 준비 중` : currentLineSlot?.displayName ?? "-";
+  const activeBandModelDisplayName = currentBandSlot?.displayName ?? "-";
   const forecastUnitLabel = timeframe === "1W" ? "주" : "거래일";
   const rawActivePrediction = prediction && timeframe !== "1M" && checkLineOverlay(prediction).ok ? prediction : null;
-  const lineOutOfPriceRange = Boolean(hasPriceData && rawActivePrediction && !isPredictionLineWithinPriceRange(rawActivePrediction, priceData));
+  const lineOutOfPriceRange = Boolean(
+    hasPriceData &&
+      rawActivePrediction &&
+      rawActivePrediction.meta?.value_unit !== "return" &&
+      !isPredictionLineWithinPriceRange(rawActivePrediction, priceData)
+  );
   const activePrediction = rawActivePrediction && !lineOutOfPriceRange ? rawActivePrediction : null;
   const activeBandPrediction =
-    bandPrediction && timeframe === "1D" && isActualBandPrediction(bandPrediction) && checkBandOverlay(bandPrediction).ok
+    bandPrediction && timeframe !== "1M" && isActualBandPrediction(bandPrediction) && checkBandOverlay(bandPrediction).ok
       ? bandPrediction
       : null;
   const activeLineHistory = useMemo(
     () =>
-      timeframe !== "1D"
+      timeframe === "1M"
         ? []
         : linePredictionHistory
             .filter((item) => isValidDate(item.asof_date) && Number.isFinite(item.value)),
@@ -974,7 +1066,7 @@ export default function StockView() {
   );
   const activeBandHistory = useMemo(
     () =>
-      timeframe !== "1D"
+      timeframe === "1M"
         ? []
         : bandPredictionHistory.filter(
             (item) => isValidDate(item.asof_date) && Number.isFinite(item.lower) && Number.isFinite(item.upper)
@@ -1000,8 +1092,8 @@ export default function StockView() {
   );
   const conservativeValue = getLastFinite(getPredictionLineValues(activePrediction));
   const changeClass = changePercent == null ? "is-flat" : changePercent < 0 ? "is-down" : "is-up";
-  const bandLayerDisabled = aiDisabled || !hasPriceData || !activeBandPrediction;
-  const lineLayerDisabled = aiDisabled || !hasPriceData || !activePrediction;
+  const bandLayerDisabled = aiDisabled || !hasPriceData || (!activeBandPrediction && activeBandHistory.length === 0);
+  const lineLayerDisabled = aiDisabled || !hasPriceData || (!activePrediction && activeLineHistory.length === 0);
   const volumeLayerDisabled = priceData.every((row) => !Number.isFinite(row.volume) || row.volume == null || row.volume <= 0);
   const aiBandWidthPoints = useMemo(
     () => buildAiBandWidthPoints(activeBandHistory, activeBandPrediction).filter((point) => chartActualDateSet.has(point.date)),
@@ -1010,7 +1102,7 @@ export default function StockView() {
   const availableIndicatorDefinitions = useMemo(() => {
     const dbDefinitions = INDICATOR_DEFINITIONS.filter((definition) => hasIndicatorValues(indicatorRowsInChartRange, definition));
     const aiBandWidthDefinition = INDICATOR_DEFINITIONS.find((definition) => definition.id === "ai_band_width");
-    if (timeframe === "1D" && aiBandWidthDefinition && (aiBandWidthPoints.length > 0 || selectedIndicators.includes("ai_band_width"))) {
+    if (timeframe !== "1M" && aiBandWidthDefinition && (aiBandWidthPoints.length > 0 || selectedIndicators.includes("ai_band_width"))) {
       return [...dbDefinitions, aiBandWidthDefinition];
     }
     return dbDefinitions;
@@ -1031,40 +1123,47 @@ export default function StockView() {
   const isLegacyArtifact = isLegacyPrediction(activePrediction);
   const lineStatusLabel = aiDisabled
     ? "-"
-    : !hasPriceData && rawActivePrediction
+    : currentLineSlot?.status === "deferred"
+    ? "준비 중"
+    : !hasPriceData && (rawActivePrediction || activeLineHistory.length > 0)
     ? "가격 데이터 연결 대기"
     : lineOutOfPriceRange
     ? "보수적 예측선 후보(차트 숨김)"
-    : activePrediction
+    : activePrediction || activeLineHistory.length > 0
     ? "보수적 예측선 후보"
-    : "예측 저장 대기";
+    : "데이터 없음";
   const bandStatusLabel = aiDisabled
     ? "-"
-    : timeframe === "1W"
-    ? "검증 중"
-    : !hasPriceData && activeBandPrediction
+    : !hasPriceData && (activeBandPrediction || activeBandHistory.length > 0)
     ? "가격 데이터 연결 대기"
-    : activeBandPrediction
+    : activeBandPrediction || activeBandHistory.length > 0
     ? "위험 범위 후보"
-    : "예측 저장 대기";
+    : currentBandSlot?.status === "active"
+    ? "데이터 없음"
+    : "-";
   const provenanceLabel = isLegacyArtifact
     ? "이전 실험 결과"
     : predictionProvenance.isFallback
     ? "저장된 예측 결과"
-    : activePrediction || activeBandPrediction
-    ? "제품 후보"
+    : activePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0
+    ? "v1 제품 슬롯"
     : "-";
   const provenanceSummary =
-    rawActivePrediction || activeBandPrediction
+    rawActivePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0
       ? activeBandPrediction
         ? `${activeLineModelDisplayName}${lineOutOfPriceRange ? " 차트 숨김" : ""} / ${activeBandModelDisplayName}`
         : `${activeLineModelDisplayName}${lineOutOfPriceRange ? " 차트 숨김" : ""}`
       : "표시 중인 예측 결과가 없습니다.";
   const forecastDates = activePrediction?.forecast_dates ?? activeBandPrediction?.forecast_dates ?? [];
-  const forecastBaseDate = activePrediction?.asof_date ?? activeBandPrediction?.asof_date ?? "-";
+  const forecastBaseDate =
+    activePrediction?.asof_date ??
+    activeBandPrediction?.asof_date ??
+    activeLineHistory.at(-1)?.asof_date ??
+    activeBandHistory.at(-1)?.asof_date ??
+    "-";
   const displayNotice = lineOutOfPriceRange
     ? "보수적 예측선 후보가 현재 가격 범위를 벗어나 차트에서는 숨겼습니다. AI 밴드는 유지합니다."
-    : !hasPriceData && (rawActivePrediction || activeBandPrediction)
+    : !hasPriceData && (rawActivePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0)
     ? "예측 결과는 저장되어 있지만 가격 데이터가 없어 차트 위에 표시할 수 없습니다. 가격 데이터가 연결되면 표시됩니다."
     : aiState.message;
   const emptyIndicatorMessage =
@@ -1159,6 +1258,7 @@ export default function StockView() {
         {searchErrorMessage ? <div className="compact-note compact-note--warning">{searchErrorMessage}</div> : null}
       </section>
 
+      {backendConfigWarning ? <div className="notice">{backendConfigWarning}</div> : null}
       {errorMessage && priceData.length === 0 ? <div className="notice notice--error">{errorMessage}</div> : null}
 
       <section className="market-layout">
@@ -1182,7 +1282,7 @@ export default function StockView() {
               <div className="empty-state empty-state--stacked">
                 <strong>가격 데이터 없음</strong>
                 <span>{priceState.message}</span>
-                {rawActivePrediction || activeBandPrediction ? (
+                {rawActivePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0 ? (
                   <span>저장된 AI 예측은 확인됐지만, 가격 데이터가 연결되면 차트 위에 표시됩니다.</span>
                 ) : null}
               </div>
@@ -1216,7 +1316,7 @@ export default function StockView() {
               <span>예측 기간</span>
               <strong>{forecastDates.length > 0 ? `${forecastDates.length}${forecastUnitLabel}` : "-"}</strong>
             </div>
-            {!aiDisabled && (rawActivePrediction || activeBandPrediction) ? (
+            {!aiDisabled && (rawActivePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0) ? (
               <details className="provenance-details">
                 <summary>상세 정보</summary>
                 <div className="provenance-grid provenance-grid--composite">
@@ -1227,9 +1327,9 @@ export default function StockView() {
                   <span>밴드 상태</span>
                   <strong>{bandStatusLabel}</strong>
                   <span>보수적 예측선 실행 ID</span>
-                  <strong>{rawActivePrediction?.run_id ?? (timeframe === "1W" ? "비워둠" : PRODUCT_LINE_RUN_ID)}</strong>
+                  <strong>{rawActivePrediction?.run_id ?? currentLineSlot?.runId ?? "준비 중"}</strong>
                   <span>밴드 실행 ID</span>
-                  <strong>{activeBandPrediction?.run_id ?? (timeframe === "1W" ? "검증 중" : PRODUCT_BAND_RUN_ID)}</strong>
+                  <strong>{activeBandPrediction?.run_id ?? activeBandHistory.at(-1)?.run_id ?? currentBandSlot?.runId ?? "-"}</strong>
                 </div>
               </details>
             ) : null}
@@ -1251,7 +1351,7 @@ export default function StockView() {
               onChange={(checked) => setLayers((previous) => ({ ...previous, aiBand: checked }))}
             />
             <p className="layer-description">
-              {timeframe === "1W" ? "1W AI 밴드는 검증 중입니다. 저장된 1W 예측은 보수적 예측선만 표시합니다." : "예상 변동 범위를 보여주는 리스크 참고 지표입니다."}
+              {timeframe === "1W" ? "1W 예상 변동 범위를 보여주는 주간 리스크 참고 지표입니다." : "예상 변동 범위를 보여주는 리스크 참고 지표입니다."}
             </p>
             {!bandLayerDisabled && layers.aiBand ? (
               <div className="layer-metrics">

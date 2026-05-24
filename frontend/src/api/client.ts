@@ -1,37 +1,74 @@
 import axios from "axios";
 
-// 우선순위: NEXT_PUBLIC_BACKEND_URL > NEXT_PUBLIC_API_BASE > runtime host 기반 default.
-// Production fallback = Render backend URL. env var 가 안 잡힌 build 도 동작.
+// 우선순위: NEXT_PUBLIC_BACKEND_URL > 배포 기본 Render URL.
+// 배포 화면에서는 localhost fallback 에 기대지 않도록 명시적 상태를 노출한다.
 const PRODUCTION_BACKEND_URL = "https://lens-backend-7stj.onrender.com";
 const LOCAL_BACKEND_URL = "http://127.0.0.1:8000";
 
-function pickDefaultBackendUrl(): string {
-  if (typeof window === "undefined") return PRODUCTION_BACKEND_URL;
-  const host = window.location.hostname;
-  if (host === "localhost" || host === "127.0.0.1") return LOCAL_BACKEND_URL;
-  return PRODUCTION_BACKEND_URL;
+type BackendUrlSource = "env" | "local-default" | "production-default" | "invalid-env";
+
+interface BackendUrlResolution {
+  url: string;
+  source: BackendUrlSource;
+  warning: string | null;
 }
 
-function resolveBackendUrl(value: string | undefined) {
+function isLocalBrowserHost() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1";
+}
+
+function resolveBackendUrl(value: string | undefined): BackendUrlResolution {
   const raw = value?.trim().replace(/^["']|["']$/g, "");
   if (!raw) {
-    return pickDefaultBackendUrl();
+    if (isLocalBrowserHost()) {
+      return {
+        url: LOCAL_BACKEND_URL,
+        source: "local-default",
+        warning: "NEXT_PUBLIC_BACKEND_URL이 비어 있어 로컬 백엔드로 연결합니다. 배포 환경에서는 환경변수를 반드시 설정해야 합니다.",
+      };
+    }
+    return {
+      url: PRODUCTION_BACKEND_URL,
+      source: "production-default",
+      warning: "NEXT_PUBLIC_BACKEND_URL이 설정되지 않아 Render 기본 백엔드로 연결합니다. 배포 설정에서 환경변수를 확인해주세요.",
+    };
   }
 
   const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
   try {
     const parsed = new URL(withProtocol);
-    return parsed.toString().replace(/\/$/, "");
+    return {
+      url: parsed.toString().replace(/\/$/, ""),
+      source: "env",
+      warning: null,
+    };
   } catch {
-    return pickDefaultBackendUrl();
+    const fallback = isLocalBrowserHost() ? LOCAL_BACKEND_URL : PRODUCTION_BACKEND_URL;
+    return {
+      url: fallback,
+      source: "invalid-env",
+      warning: `NEXT_PUBLIC_BACKEND_URL 값이 올바르지 않아 ${fallback}로 연결합니다.`,
+    };
   }
 }
 
+const backendUrlResolution = resolveBackendUrl(process.env.NEXT_PUBLIC_BACKEND_URL);
+
 const api = axios.create({
-  baseURL: resolveBackendUrl(
-    process.env.NEXT_PUBLIC_BACKEND_URL ?? process.env.NEXT_PUBLIC_API_BASE,
-  ),
+  baseURL: backendUrlResolution.url,
 });
+
+export function getBackendBaseUrl() {
+  return backendUrlResolution.url;
+}
+
+export function getBackendConfigWarning() {
+  return backendUrlResolution.warning;
+}
 
 export type DisplayTimeframe = "1D" | "1W" | "1M";
 export type PredictionTimeframe = "1D" | "1W";
@@ -144,6 +181,52 @@ export interface ProductPredictionHistoryResult {
   band_history: ProductBandHistoryPoint[];
   manifest_summary: ProductPredictionHistoryManifestSummary;
   empty_reason: string | null;
+}
+
+export interface V1LinePredictionPoint {
+  ticker: string;
+  asof_date: string;
+  line_score: number | null;
+  safe_line_score: number | null;
+  line_rank_by_date?: number | null;
+  safe_line_rank_by_date?: number | null;
+  line_top_decile_flag?: boolean | number | null;
+  safe_line_top_decile_flag?: boolean | number | null;
+  actual_h5_return?: number | null;
+  model_id?: string | null;
+  source_cp?: string | null;
+}
+
+export interface V1BandPredictionPoint {
+  ticker: string;
+  asof_date: string;
+  forecast_date?: string | null;
+  horizon_step: number;
+  band_lower: number | null;
+  band_upper: number | null;
+  actual_return?: number | null;
+  actual_return_available?: boolean | null;
+  model_id?: string | null;
+  source_cp?: string | null;
+}
+
+export interface V1LinePredictionResult {
+  ticker: string;
+  slot: string;
+  model_id: string | null;
+  source_cp: string | null;
+  rows: number;
+  data: V1LinePredictionPoint[];
+}
+
+export interface V1BandPredictionResult {
+  ticker: string;
+  slot: string;
+  model_id: string | null;
+  source_cp: string | null;
+  horizons: number[];
+  rows: number;
+  data: V1BandPredictionPoint[];
 }
 
 export type AiRunStatus = "completed" | "failed_nan" | "failed_quality_gate";
@@ -312,6 +395,41 @@ export async function fetchProductPredictionHistory(
     `/api/v1/stocks/${ticker}/predictions/product-history`,
     { params }
   );
+  return res.data;
+}
+
+export async function fetchV1LinePrediction(
+  ticker: string,
+  options?: { days?: number }
+): Promise<ApiResponse<V1LinePredictionResult>> {
+  const params = {
+    days: options?.days ?? 365,
+  };
+  const res = await api.get<ApiResponse<V1LinePredictionResult>>(`/api/v1/predictions/line/${ticker}`, { params });
+  return res.data;
+}
+
+export async function fetchV1Band1dPrediction(
+  ticker: string,
+  options?: { days?: number; horizon?: number }
+): Promise<ApiResponse<V1BandPredictionResult>> {
+  const params = {
+    days: options?.days ?? 365,
+    horizon: options?.horizon,
+  };
+  const res = await api.get<ApiResponse<V1BandPredictionResult>>(`/api/v1/predictions/band/1d/${ticker}`, { params });
+  return res.data;
+}
+
+export async function fetchV1Band1wPrediction(
+  ticker: string,
+  options?: { days?: number; horizon?: number }
+): Promise<ApiResponse<V1BandPredictionResult>> {
+  const params = {
+    days: options?.days ?? 730,
+    horizon: options?.horizon,
+  };
+  const res = await api.get<ApiResponse<V1BandPredictionResult>>(`/api/v1/predictions/band/1w/${ticker}`, { params });
   return res.data;
 }
 

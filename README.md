@@ -187,10 +187,12 @@ FMP_API_KEY=
 `frontend/.env.local`:
 
 ```
-# Frontend 가 호출할 backend URL. 안 지정하면:
-#   - 로컬 (localhost/127.0.0.1) → http://127.0.0.1:8000 자동
-#   - 배포 (vercel.app 등) → Render 의 lens-backend 자동
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+# Frontend 가 호출할 backend URL.
+# 배포 환경은 반드시 Render URL을 명시한다.
+NEXT_PUBLIC_BACKEND_URL=https://lens-backend-7stj.onrender.com
+
+# 로컬 개발 시에는 아래처럼 바꿔서 사용한다.
+# NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000
 ```
 
 ### 2) 백엔드
