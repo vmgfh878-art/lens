@@ -78,8 +78,13 @@ interface DetailField {
 
 const PRODUCT_LINE_RUN_ID = "patchtst-1D-efad3c29d803";
 const PRODUCT_BAND_RUN_ID = "cnn_lstm-1D-d0c780dee5e8";
-const PRODUCT_RUN_IDS = new Set([PRODUCT_LINE_RUN_ID, PRODUCT_BAND_RUN_ID]);
-const TRAINING_RUN_MODELS = new Set(["patchtst", "cnn_lstm", "line_band_composite"]);
+const PRODUCT_BAND_1W_RUN_ID = "tide-1W-walk-forward-lower";
+const PRODUCT_RUN_IDS = new Set([
+  PRODUCT_LINE_RUN_ID,
+  PRODUCT_BAND_RUN_ID,
+  PRODUCT_BAND_1W_RUN_ID,
+]);
+const TRAINING_RUN_MODELS = new Set(["patchtst", "cnn_lstm", "tide", "line_band_composite"]);
 
 const PRODUCT_SLOTS: ProductSlot[] = [
   {
@@ -110,17 +115,17 @@ const PRODUCT_SLOTS: ProductSlot[] = [
     version: null,
     timeframe: "1W",
     runId: null,
-    summary: "주간 보수적 예측선은 제품 화면에서 비워둔 상태입니다.",
+    summary: "주간 보수적 예측선은 다음 wave 에서 학습 예정입니다.",
   },
   {
     id: "band-1w",
-    kind: "preparing-band",
+    kind: "band",
     title: "1W AI 밴드",
-    model: "준비 중",
-    version: null,
+    model: "TiDE",
+    version: "v1",
     timeframe: "1W",
-    runId: null,
-    summary: "주간 AI 밴드는 별도 검증이 필요합니다.",
+    runId: PRODUCT_BAND_1W_RUN_ID,
+    summary: "주간 4 horizon 예상 범위. CP178 walk-forward lower calibration 9-checkpoint ensemble.",
   },
 ];
 
@@ -1197,8 +1202,8 @@ function ExperimentDisclosure({
 function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
   const description =
     slot.id === "line-1w"
-      ? "주간 예측선은 아직 준비 중입니다. 1D 모델이 안정화된 뒤 별도 검증을 진행할 예정입니다."
-      : "주간 AI 밴드는 아직 준비 중입니다. 데이터 수와 검증 기준을 따로 잡아야 하므로 Phase 1.5 이후 검토합니다.";
+      ? "주간 보수적 예측선은 다음 wave 에서 학습 예정입니다. 1W AI 밴드 (CP178 walk-forward lower calibration 9-ensemble) 는 활성 상태로 별도 카드에서 확인할 수 있습니다."
+      : "이 슬롯은 다음 학습 단계에서 채울 예정입니다.";
 
   return (
     <div className="model-detail-stack">
@@ -1214,7 +1219,7 @@ function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
           target="검증 완료"
           actual="아직 없음"
           diff="검증 필요"
-          description="현재 주식 보기 화면에서는 주간 AI 예측을 오류가 아니라 준비 중 상태로 표시합니다."
+          description="현재는 주간 AI 밴드만 활성 상태입니다. 주간 보수적 예측선은 v1.1 이후 학습 예정입니다."
           tone="neutral"
         />
       </div>
@@ -1569,7 +1574,7 @@ function getComparisonVerdictTag(detail: AiRunDetail, rows: ComparisonRow[], cat
 
 function getFinalJudgement(detail: AiRunDetail, rows: ComparisonRow[], category: ExperimentCategory) {
   if (detail.timeframe === "1W") {
-    return "1W 제품 모델은 아직 준비 중이므로, 이 실험을 현재 제품 모델 대비 우열로 과장하지 않습니다. 제품 기준이 확정되면 다시 비교해야 합니다.";
+    return "1W 보수적 예측선은 준비 중이지만 1W AI 밴드는 활성 (CP178 walk-forward lower calibration). 이 실험 결과를 현재 1W 제품 모델 대비 우열로 과장하지 않습니다.";
   }
   const kind = getExperimentKind(detail);
   const weakRows = rows.filter((row) => row.result === "worse");

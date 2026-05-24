@@ -805,8 +805,8 @@ export default function StockView() {
           kind: "empty",
           message:
             priceRows.length === 0
-              ? "1W 화면은 현재 가격과 보조지표만 표시합니다. 가격 데이터가 연결되면 차트가 표시됩니다."
-              : "1W 보수적 예측선과 AI 밴드는 비워둔 상태입니다. 현재는 가격과 보조지표만 표시합니다.",
+              ? "1W 화면은 가격 데이터가 연결되면 차트가 표시됩니다."
+              : "1W 보수적 예측선은 준비 중이며, 1W AI 밴드는 AI 모델 페이지에서 평가 결과를 확인할 수 있습니다. 차트 overlay 는 다음 버전에서 추가 예정입니다.",
         });
         return;
       }
@@ -814,8 +814,8 @@ export default function StockView() {
       if (nextTimeframe !== "1D") {
         setAiState(
           priceRows.length === 0
-            ? { kind: "empty", message: "주간 AI 예측은 준비 중입니다. 가격 데이터가 연결되면 차트가 표시됩니다." }
-            : { kind: "empty", message: "주간 AI 예측은 준비 중입니다." }
+            ? { kind: "empty", message: "주간 AI 차트 overlay 는 다음 버전 예정. 가격 데이터 연결 후 표시됩니다." }
+            : { kind: "empty", message: "1W AI 밴드 모델은 활성화됨 (AI 모델 페이지에서 확인). 차트 overlay 는 다음 버전 예정." }
         );
         return;
       }
