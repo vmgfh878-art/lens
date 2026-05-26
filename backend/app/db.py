@@ -12,7 +12,13 @@ _client: Client | None = None
 
 
 def supabase_is_configured() -> bool:
-    """Supabase 환경변수 두 개가 설정됐는가."""
+    """Supabase 환경변수 두 개가 설정됐는가.
+
+    LENS_FORCE_LOCAL=1 이면 SUPABASE_URL/KEY 가 있어도 강제로 local parquet 경로를 탄다.
+    Supabase quota 소진 / Render redeploy 시 보험.
+    """
+    if os.environ.get("LENS_FORCE_LOCAL", "0").strip().lower() in {"1", "true", "yes"}:
+        return False
     return bool(os.environ.get("SUPABASE_URL")) and bool(os.environ.get("SUPABASE_KEY"))
 
 
@@ -36,21 +42,17 @@ def reset_supabase_client() -> None:
 
 
 def check_supabase_ready() -> dict[str, bool]:
-    """환경변수와 Supabase 읽기 가능 여부를 확인한다.
-    Supabase 미사용 모드면 skipped 응답."""
+    """환경변수와 Supabase 읽기 가능 여부를 확인한다."""
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
     checks = {
         "supabase_url": bool(url),
         "supabase_key": bool(key),
         "database": False,
-        "skipped": False,
     }
 
     if not url or not key:
-        # v1 local-parquet 모드: Supabase 미설정도 정상으로 본다.
-        checks["skipped"] = True
-        return checks
+        raise ConfigError("SUPABASE_URL 또는 SUPABASE_KEY가 설정되지 않았습니다.", details=checks)
 
     try:
         client = get_supabase()

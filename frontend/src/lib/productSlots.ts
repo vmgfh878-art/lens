@@ -3,6 +3,7 @@ import type { DisplayTimeframe, PredictionTimeframe } from "@/api/client";
 export type ProductSlotId = "line-1d" | "band-1d" | "line-1w" | "band-1w";
 export type ProductSlotKind = "line" | "band";
 export type ProductSlotStatus = "active" | "deferred";
+export type ProductSlotRefreshPolicy = "static" | "auto" | "deferred";
 
 export interface ProductSlot {
   id: ProductSlotId;
@@ -17,6 +18,9 @@ export interface ProductSlot {
   modelId: string | null;
   runId: string | null;
   status: ProductSlotStatus;
+  refreshPolicy: ProductSlotRefreshPolicy;
+  freshAfterDays: number | null;
+  staleAfterDays: number | null;
   summary: string;
   endpoint: string | null;
 }
@@ -25,17 +29,20 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
   "line-1d": {
     id: "line-1d",
     kind: "line",
-    title: "1D 보수적 예측선",
-    displayName: "보수적 예측선 v1",
-    modelName: "Line v2",
+    title: "1D 보수적 기준선",
+    displayName: "보수적 기준선",
+    modelName: "F4 β=4 ensemble",
     version: "v1",
     timeframe: "1D",
     horizon: 5,
-    sourceCp: "CP175",
-    modelId: "line_b_cp175_beta5_frozen_eval",
-    runId: "line_b_cp175_beta5_frozen_eval",
+    sourceCp: "CP208Z/CP209 F4 β=4",
+    modelId: "cp210_F4_b4_ensemble_mean",
+    runId: "cp210_F4_b4_ensemble_mean",
     status: "active",
-    summary: "1D 방향과 하방 위험을 보수적으로 보기 위한 예측선입니다.",
+    refreshPolicy: "auto",
+    freshAfterDays: 1,
+    staleAfterDays: 5,
+    summary: "활성 1D 보수적 기준선입니다. raw output은 가격이 아니라 safe_line_score이며, asof 종가에 곱해 가격으로 환산합니다.",
     endpoint: "/api/v1/predictions/line/{ticker}",
   },
   "band-1d": {
@@ -51,14 +58,17 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     modelId: "tide-1D-ea54dcae654d",
     runId: "tide-1D-ea54dcae654d",
     status: "active",
-    summary: "1D 예상 변동 범위를 보여주는 리스크 참고 밴드입니다.",
+    refreshPolicy: "auto",
+    freshAfterDays: 1,
+    staleAfterDays: 5,
+    summary: "자동 갱신된 1D AI 밴드입니다. 최신 parquet 결과를 읽어 예상 변동 범위를 가격 차트에 표시합니다.",
     endpoint: "/api/v1/predictions/band/1d/{ticker}",
   },
   "line-1w": {
     id: "line-1w",
     kind: "line",
-    title: "1W 보수적 예측선",
-    displayName: "1W 보수적 예측선",
+    title: "1W 보수적 기준선",
+    displayName: "1W 보수적 기준선",
     modelName: "준비 중",
     version: null,
     timeframe: "1W",
@@ -67,7 +77,10 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     modelId: null,
     runId: null,
     status: "deferred",
-    summary: "1W 보수적 예측선은 아직 제품 슬롯에 연결하지 않았습니다.",
+    refreshPolicy: "deferred",
+    freshAfterDays: null,
+    staleAfterDays: null,
+    summary: "1W 보수적 기준선은 v1에서 제공하지 않습니다.",
     endpoint: null,
   },
   "band-1w": {
@@ -83,7 +96,10 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     modelId: "tide_s60_q10_q90_param",
     runId: "tide_s60_q10_q90_param",
     status: "active",
-    summary: "1W 예상 변동 범위를 보여주는 주간 리스크 참고 밴드입니다.",
+    refreshPolicy: "auto",
+    freshAfterDays: 7,
+    staleAfterDays: 14,
+    summary: "자동 갱신된 1W AI 밴드입니다. asof 가격에 밴드 수익률을 곱해 주간 위험 범위를 가격 차트에 표시합니다.",
     endpoint: "/api/v1/predictions/band/1w/{ticker}",
   },
 };

@@ -105,6 +105,9 @@ def main():
         "row_count": int(len(unified)),
         "source": "v1_local_parquet",
         "built_at": NOW_ISO,
+        "cp": "CP212",
+        "line_policy": "current_predictions_line_1d_serving_rows",
+        "band_policy": "current_predictions_band_1d_serving_rows",
     }
     MANIFEST_OUT.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"  → {MANIFEST_OUT}")

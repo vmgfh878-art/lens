@@ -4,7 +4,7 @@
   [string]$CorsOrigin = "http://127.0.0.1:3000",
   [string]$Ticker = "AAPL",
   [string]$Timeframe = "1D",
-  [string]$LineModelId = "line_b_cp175_beta5_frozen_eval",
+  [string]$LineModelId = "cp210_F4_b4_ensemble_mean",
   [string]$Band1dModelId = "tide-1D-ea54dcae654d",
   [string]$Band1wModelId = "tide_s60_q10_q90_param"
 )
@@ -293,12 +293,12 @@ Write-Host ""
 Write-Host "Product v1 line/band layer candidates"
 
 $v1LinePath = "/api/v1/predictions/line/{0}?days=30" -f $Ticker
-$v1Line = Invoke-DemoGet -Name "1D line CP175" -Path $v1LinePath
+$v1Line = Invoke-DemoGet -Name "1D line F4 beta4 ensemble" -Path $v1LinePath
 $v1LineCount = if ($v1Line.Ok) { [int]$v1Line.Body.data.rows } else { 0 }
 if ($v1Line.Ok -and $v1LineCount -gt 0) {
-  Write-Check -State "OK" -Label "1D line CP175" -Detail "$LineModelId rows=$v1LineCount"
+  Write-Check -State "OK" -Label "1D line F4 beta4 ensemble" -Detail "$LineModelId rows=$v1LineCount"
 } else {
-  Write-Check -State "FAIL" -Label "1D line CP175" -Detail "$($v1Line.StatusCode) $($v1Line.ErrorCode) $($v1Line.ErrorMessage)"
+  Write-Check -State "FAIL" -Label "1D line F4 beta4 ensemble" -Detail "$($v1Line.StatusCode) $($v1Line.ErrorCode) $($v1Line.ErrorMessage)"
 }
 
 $v1Band1dPath = "/api/v1/predictions/band/1d/{0}?days=30&horizon=5" -f $Ticker
@@ -322,5 +322,5 @@ if ($v1Band1w.Ok -and $v1Band1wCount -gt 0) {
 Write-Check -State "OK" -Label "1W line" -Detail "deferred, frontend does not call line endpoint"
 
 Write-Host ""
-Write-Host "v1 product slots: 1D Line=CP175, 1D Band=CP153, 1W Band=CP178, 1W Line=Deferred."
+Write-Host "v1 product slots: 1D Line=F4 beta4 ensemble, 1D Band=CP153, 1W Band=CP178, 1W Line=Deferred."
 Write-Host "참고: npm run build 후에는 기존 next dev 서버를 재시작해야 frontend-static 404를 피할 수 있습니다."

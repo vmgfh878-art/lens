@@ -2,9 +2,9 @@
 
 # Lens
 
-미국 주식 보수 예측선과 위험 범위 신호 연구 플랫폼
+미국 주식 보수적 기준선과 위험 범위 신호 연구 플랫폼
 
-예측을 단언하지 않고, 보수적 line · calibrated band · 백테스트 · 실패 기록을 통해
+예측을 단언하지 않고, 보수적 기준선 · calibrated band · 백테스트 · 실패 기록을 통해
 사용자 판단을 보조하는 학술 및 포트폴리오 프로젝트.
 
 Live Demo: 배포 직후 URL 추가 예정
@@ -32,13 +32,13 @@ stop-loss 신호로 해석할 수 있게 합니다.
 
 | 출력 | 의미 | 현재 후보 |
 |---|---|---|
-| Line | h5 보수 예측선 (5 거래일 기준) | CP175 β=5 frozen line |
+| Line | h5 보수적 기준선 (5 거래일 기준) | F4 β=4 ensemble |
 | Band | 예측 범위 (q15/q85 calibrated) | CP153 TiDE lower_focused (1D) · CP178 walk-forward lower (1W) |
 | Warning | 위험 경고 | v1 미노출. v2 에서 band uncertainty 로 흡수 검토 |
 
 ### 진행 / 결과 요약
 
-- Line: CP203 까지 v2 line 검증. seed instability + multi-modal collapse 확인. v1 (CP175) 우선 ship.
+- Line: CP212에서 F4 β=4 ensemble을 v1 1D line serving 후보로 승격. raw output은 `safe_line_score`이며 화면에서 가격으로 환산.
 - Band: CP202 / CP202.1 결과 정상 regime 에서 GARCH 우위, stress regime 에서 동등. 예측기가 아닌 calibrated risk interval 로 한정.
 - Warning: CP196 ~ CP198 의 dvol 계열 warning detector 폐기. Phase 2 의 v2 band concept 으로 흡수.
 - 데이터: yfinance local parquet 중심. Supabase / 외부 API 의존 최소화.
@@ -77,7 +77,7 @@ stop-loss 신호로 해석할 수 있게 합니다.
 
 | 슬롯 | 후보 | 상태 | Row count |
 |---|---|---|---|
-| 1D Line | CP175 β=5 frozen line | READY | 177,095 (full) / 112,568 (past 1y) |
+| 1D Line | F4 β=4 ensemble | READY | serving parquet 기준 |
 | 1D Band | CP153 TiDE q15 lower_focused (historical) | READY | 929,385 (full) / 543,615 (past 1y) |
 | 1W Band | CP178 walk-forward lower calibration (9 ensemble) | READY | 416,724 (full) / 138,908 (ensemble avg, past 2y) |
 | 1W Line | — | Deferred | v1.1 이상에서 검토 |
@@ -234,7 +234,7 @@ python backend/scripts/rebuild_product_history_parquet.py
 | model artifacts | local | 학습 checkpoint / metrics |
 | v1 product signal | `backend/data/v1/*.parquet` (git 포함) | frontend 서빙용 (~18 MB) |
 | logs / reports | local `docs/` `logs/` | 실험 기록 |
-| Supabase | optional | v1 에선 미사용. v2 부터 thin product DB 검토 |
+| Supabase | optional | v2 1번. 사용량 제한 해제 후 thin product DB 재연결 |
 
 원칙
 
@@ -250,17 +250,20 @@ python backend/scripts/rebuild_product_history_parquet.py
 
 | 축 | 목표 |
 |---|---|
+| Supabase reconnect | 사용량 제한 해제 후 thin product DB 재연결, egress guard 확인 |
 | Conformal coverage | 분포 가정 약한 coverage 수학적 보장 (Vovk 2005, Romano 2019) |
 | Deep ensemble | aleatoric / epistemic uncertainty 분리 (Lakshminarayanan 2017) |
 | Selective output | 모델이 자신 없을 때 표시 안 함 또는 낮은 신뢰도 표시 (Geifman 2017) |
 | Concept Bottleneck | band 가 넓어진 이유를 사람이 이해 가능한 12 concept 으로 설명 (Koh 2020) |
 | Leading volatility | forward vol mse loss + event-aware widening regularizer (Lens-specific) |
 | 외부 데이터 | Form 4 (insider) · 8-K (item code) · cross-asset stress |
+| Band MLOps | 기존 1D/1W band 자동 재평가 · 재학습 · 승격 추천 루프 |
 
 목표는 단순 성능 향상이 아니라
 왜 오늘 이 종목의 band 가 넓어졌는지와 언제 모델을 믿지 말아야 하는지를 사용자에게 설명하는 것입니다.
 
 자세한 설계는 [docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md) 참조.
+기존 band 모델의 지속 개선 계획은 [docs/public/band_mlops_plan.md](docs/public/band_mlops_plan.md) 참조.
 
 ---
 
@@ -270,7 +273,7 @@ python backend/scripts/rebuild_product_history_parquet.py
 |---|---|---|
 | v1.0 | 진행 중 | 3 slot 모델 + frontend deploy (1D Line · 1D Band · 1W Band) |
 | v1.1 | 계획 | 1W Line 검토 (필요 시 신규 학습) |
-| v2.0 | 설계 완료 | Conformal Band + CBM ([docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md)) |
+| v2.0 | 설계 완료 | 1. Supabase thin product DB 재연결 2. Conformal Band + CBM + Band MLOps ([docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md), [docs/public/band_mlops_plan.md](docs/public/band_mlops_plan.md)) |
 | v3.0 | 후보 | Form 4 / 8-K NLP 외부 데이터 통합 |
 
 ---

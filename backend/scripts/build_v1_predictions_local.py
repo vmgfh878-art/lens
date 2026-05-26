@@ -12,6 +12,7 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -22,21 +23,23 @@ SRC = ROOT / "data" / "artifacts" / "cp204_v1_import_package"
 DST = ROOT / "backend" / "data" / "v1"
 DST.mkdir(parents=True, exist_ok=True)
 
-TODAY = date(2026, 5, 20)
-CUTOFF_1D = (TODAY - timedelta(days=365)).isoformat()
-CUTOFF_1W = (TODAY - timedelta(days=730)).isoformat()
+
+def resolve_asof_date(raw: str | None) -> date:
+    if raw:
+        return date.fromisoformat(raw)
+    return date.today()
 
 
-def build_line_1d():
+def build_line_1d(cutoff_1d: str):
     print("=" * 50)
     print("1D Line")
     print("=" * 50)
     df = pd.read_parquet(SRC / "cp204_1d_line_payload.parquet")
     df["asof_date"] = pd.to_datetime(df["asof_date"]).dt.strftime("%Y-%m-%d")
     before = len(df)
-    df = df[df["asof_date"] >= CUTOFF_1D].copy()
+    df = df[df["asof_date"] >= cutoff_1d].copy()
     after = len(df)
-    print(f"  rows: {before:,} → {after:,} (cutoff={CUTOFF_1D})")
+    print(f"  rows: {before:,} → {after:,} (cutoff={cutoff_1d})")
 
     # Keep only frontend-needed columns
     cols = [
@@ -56,7 +59,7 @@ def build_line_1d():
     print(f"  tickers: {df['ticker'].nunique()}, dates: {df['asof_date'].nunique()}")
 
 
-def build_band_1d():
+def build_band_1d(cutoff_1d: str):
     print("=" * 50)
     print("1D Band")
     print("=" * 50)
@@ -64,9 +67,9 @@ def build_band_1d():
     df["asof_date"] = pd.to_datetime(df["asof_date"]).dt.strftime("%Y-%m-%d")
     df["forecast_date"] = pd.to_datetime(df["forecast_date"]).dt.strftime("%Y-%m-%d")
     before = len(df)
-    df = df[df["asof_date"] >= CUTOFF_1D].copy()
+    df = df[df["asof_date"] >= cutoff_1d].copy()
     after = len(df)
-    print(f"  rows: {before:,} → {after:,} (cutoff={CUTOFF_1D})")
+    print(f"  rows: {before:,} → {after:,} (cutoff={cutoff_1d})")
 
     cols = [
         "ticker", "asof_date", "forecast_date", "horizon_step",
@@ -83,15 +86,15 @@ def build_band_1d():
     print(f"  tickers: {df['ticker'].nunique()}, dates: {df['asof_date'].nunique()}, horizons: {sorted(df['horizon_step'].unique())}")
 
 
-def build_band_1w():
+def build_band_1w(cutoff_1w: str):
     print("=" * 50)
     print("1W Band (ensemble averaged)")
     print("=" * 50)
     df = pd.read_parquet(SRC / "cp204_1w_band_payload.parquet")
     df["asof_date"] = pd.to_datetime(df["asof_date"]).dt.strftime("%Y-%m-%d")
     before = len(df)
-    df = df[df["asof_date"] >= CUTOFF_1W].copy()
-    print(f"  rows after date filter: {before:,} → {len(df):,} (cutoff={CUTOFF_1W})")
+    df = df[df["asof_date"] >= cutoff_1w].copy()
+    print(f"  rows after date filter: {before:,} → {len(df):,} (cutoff={cutoff_1w})")
 
     # Ensemble average over seeds
     agg = df.groupby(["ticker", "asof_date", "horizon_step"], as_index=False).agg({
@@ -111,15 +114,24 @@ def build_band_1w():
     print(f"  tickers: {agg['ticker'].nunique()}, dates: {agg['asof_date'].nunique()}, horizons: {sorted(agg['horizon_step'].unique())}")
 
 
-def main():
-    print(f"\nTODAY (logical): {TODAY.isoformat()}")
-    print(f"Cutoffs: 1D >= {CUTOFF_1D}, 1W >= {CUTOFF_1W}\n")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="로컬 v1 prediction parquet를 생성합니다.")
+    parser.add_argument("--asof-date", default=None, help="명시한 기준일로 cutoff를 계산합니다. 생략하면 시스템 날짜를 사용합니다.")
+    return parser.parse_args()
 
-    build_line_1d()
+
+def main(asof_date: str | None = None):
+    today = resolve_asof_date(asof_date)
+    cutoff_1d = (today - timedelta(days=365)).isoformat()
+    cutoff_1w = (today - timedelta(days=730)).isoformat()
+    print(f"\nAsof date: {today.isoformat()} (source={'argument' if asof_date else 'system_date'})")
+    print(f"Cutoffs: 1D >= {cutoff_1d}, 1W >= {cutoff_1w}\n")
+
+    build_line_1d(cutoff_1d)
     print()
-    build_band_1d()
+    build_band_1d(cutoff_1d)
     print()
-    build_band_1w()
+    build_band_1w(cutoff_1w)
     print()
 
     total = sum(p.stat().st_size for p in DST.glob("*.parquet")) / 1024 / 1024
@@ -128,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(parse_args().asof_date)

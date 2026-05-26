@@ -190,66 +190,6 @@ def select_product_latest_payload(
 
 def _validate_product_latest_predictions(records: list[dict[str, Any]], *, max_rows: int) -> None:
     if len(records) > max_rows:
-        raise ValueError(f"제품 latest-only prediction 저장 row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
-    if not records:
-        return
-
-    asof_dates = {str(record.get("asof_date")) for record in records}
-    if len(asof_dates) != 1:
-        raise ValueError(f"제품 latest-only 저장은 단일 asof_date만 허용합니다: {sorted(asof_dates)}")
-
-    duplicate_keys: set[tuple[Any, ...]] = set()
-    for record in records:
-        layer = _meta_value(record, "layer")
-        composite = bool(_meta_value(record, "composite"))
-        model_name = str(record.get("model_name") or "")
-        if composite or model_name == "line_band_composite" or layer == "composite":
-            raise ValueError("제품 latest-only 저장에서는 composite prediction 저장을 허용하지 않습니다.")
-        if layer not in PRODUCT_LATEST_ALLOWED_LAYERS:
-            raise ValueError(f"제품 latest-only prediction meta.layer는 line/band만 허용합니다: {layer}")
-        _validate_product_latest_layer_payload(record, str(layer))
-        key = (
-            record.get("run_id"),
-            record.get("ticker"),
-            record.get("model_name"),
-            record.get("timeframe"),
-            record.get("horizon"),
-            record.get("asof_date"),
-        )
-        if key in duplicate_keys:
-            raise ValueError(f"제품 latest-only prediction 입력에 중복 key가 있습니다: {key}")
-        duplicate_keys.add(key)
-
-
-def _validate_product_latest_evaluations(records: list[dict[str, Any]], *, max_rows: int) -> None:
-    if len(records) > max_rows:
-        raise ValueError(f"제품 latest-only evaluation 저장 row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
-    if not records:
-        return
-    asof_dates = {str(record.get("asof_date")) for record in records}
-    if len(asof_dates) != 1:
-        raise ValueError(f"제품 latest-only evaluation 저장은 단일 asof_date만 허용합니다: {sorted(asof_dates)}")
-
-
-def save_product_latest_predictions(
-    prediction_records: list[dict[str, Any]],
-    evaluation_records: list[dict[str, Any]],
-    *,
-    max_prediction_rows: int = PRODUCT_LATEST_DEFAULT_MAX_ROWS,
-    max_evaluation_rows: int = PRODUCT_LATEST_DEFAULT_MAX_ROWS,
-) -> None:
-    """제품 화면용 최신 prediction만 얇게 저장한다.
-
-    일반 inference --save와 달리 full history 저장, composite 저장, 과도한 row 저장을 차단한다.
-    """
-    _validate_product_latest_predictions(prediction_records, max_rows=max_prediction_rows)
-    _validate_product_latest_evaluations(evaluation_records, max_rows=max_evaluation_rows)
-    save_predictions(with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_PRODUCT_LATEST_ONLY))
-    save_prediction_evaluations(evaluation_records)
-
-
-def _validate_product_latest_predictions(records: list[dict[str, Any]], *, max_rows: int) -> None:
-    if len(records) > max_rows:
         raise ValueError(f"제품 latest-only prediction row 수가 제한을 초과했습니다: {len(records)} > {max_rows}")
     duplicate_keys: set[tuple[Any, ...]] = set()
     for record in records:

@@ -1,9 +1,12 @@
 {
-  "line_run_id": "line_b_cp175_beta5_frozen_eval",
+  "line_run_id": "cp210_F4_b4_ensemble_mean",
   "band_run_id": "tide-1D-ea54dcae654d",
-  "asof_start": "2025-05-20",
-  "asof_end": "2026-05-08",
-  "row_count": 656183,
+  "asof_start": "2024-11-12",
+  "asof_end": "2026-05-22",
+  "row_count": 775272,
   "source": "v1_local_parquet",
-  "built_at": "2026-05-21T07:38:03.522572+00:00"
+  "built_at": "2026-05-25T11:58:10.353743+00:00",
+  "cp": "CP212",
+  "line_policy": "current_predictions_line_1d_serving_rows",
+  "band_policy": "current_predictions_band_1d_serving_rows"
 }

@@ -1765,6 +1765,39 @@ input:disabled {
   overflow-wrap: anywhere;
 }
 
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 20px;
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.freshness-badge--fresh {
+  background: #e8f7ee;
+  color: #166534;
+}
+
+.freshness-badge--delayed {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.freshness-badge--stale {
+  background: #fef2f2;
+  color: #b42318;
+}
+
+.freshness-badge--static,
+.freshness-badge--empty {
+  background: #f1f5f9;
+  color: #475569;
+}
+
 .provenance-grid--composite {
   background: #fff;
 }

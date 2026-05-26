@@ -33,6 +33,47 @@ def _load(path: Path) -> pd.DataFrame | None:
     return df
 
 
+def clear_caches() -> dict[str, Any]:
+    """로컬 market parquet cache를 비운다.
+
+    CP212 통합 refresh 뒤에는 prediction parquet뿐 아니라 market parquet도
+    같은 기준일로 다시 읽어야 하므로 admin reload에서 함께 호출한다.
+    """
+    global _PRICES_1D, _PRICES_1W, _INDICATORS_1D, _STOCK_INFO
+    with _LOCK:
+        _PRICES_1D = None
+        _PRICES_1W = None
+        _INDICATORS_1D = None
+        _STOCK_INFO = None
+    return {
+        "prices_1d": "cleared",
+        "prices_1w": "cleared",
+        "indicators_1d": "cleared",
+        "stock_info": "cleared",
+    }
+
+
+def reload_caches() -> dict[str, Any]:
+    """로컬 market parquet cache를 비우고 즉시 다시 읽는다."""
+    summary = clear_caches()
+    loaded = {
+        "prices_1d": get_prices_1d(),
+        "prices_1w": get_prices_1w(),
+        "indicators_1d": get_indicators_1d(),
+        "stock_info": get_stock_info(),
+    }
+    for key, frame in loaded.items():
+        if frame is None:
+            summary[key] = {"status": "missing"}
+        else:
+            summary[key] = {
+                "status": "loaded",
+                "rows": int(len(frame)),
+                "tickers": int(frame["ticker"].nunique()) if "ticker" in frame.columns else None,
+            }
+    return summary
+
+
 def get_prices_1d() -> pd.DataFrame | None:
     global _PRICES_1D
     with _LOCK:

@@ -21,6 +21,7 @@ from ai.models.cnn_lstm import CNNLSTM
 from ai.models.common import BandOutput, ForecastOutput, LineV2Output
 from ai.models.patchtst import PatchTST
 from ai.models.tide import TiDE
+from ai.calibration_artifacts import apply_product_band_calibration, resolve_product_band_calibration
 from ai.evaluation import (
     build_single_sample_evaluation,
     summarize_band_metrics,
@@ -145,12 +146,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-product-latest-only",
         action="store_true",
-        help="제품 화면용 latest-only helper로만 저장합니다. 단일 asof_date 계약을 통과해야 합니다.",
+        help="제품 화면용 latest-only helper로 저장합니다. ticker/timeframe/horizon/layer별 최신 row만 남깁니다.",
     )
     parser.add_argument(
         "--allow-bulk-evaluation-save",
         action="store_true",
         help="평가/레거시 목적의 bulk predictions 저장을 명시적으로 허용합니다.",
+    )
+    parser.add_argument(
+        "--disable-band-calibration",
+        action="store_true",
+        help="제품 band inference에서 calibration artifact 자동 적용을 끕니다. 저장 meta에는 calibration_disabled로 기록됩니다.",
     )
     args = parser.parse_args()
     if args.save_product_latest_only:
@@ -250,6 +256,142 @@ def decode_return_forecasts(
     return line_prices, lower_prices, upper_prices
 
 
+def _safe_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _matches_calibration_target(payload: dict[str, Any], *, run_id: str, timeframe: str) -> bool:
+    payload_timeframe = str(payload.get("timeframe") or "").upper()
+    if payload_timeframe and payload_timeframe != str(timeframe).upper():
+        return False
+    ids = {
+        str(payload.get("model_run_id") or ""),
+        str(payload.get("run_id") or ""),
+        str(payload.get("model_id") or ""),
+    }
+    return run_id in ids
+
+
+def _calibration_from_payload(payload: dict[str, Any], *, source_path: Path) -> dict[str, Any] | None:
+    if payload.get("schema_version") == "calibration_artifact_manifest_v1":
+        params = payload.get("calibration_params")
+        method = payload.get("calibration_method")
+    elif "calibration_method" in payload and "calibration_params" in payload:
+        params = payload.get("calibration_params")
+        method = payload.get("calibration_method")
+    elif "method" in payload and "params" in payload:
+        params = payload.get("params")
+        method = payload.get("method")
+    else:
+        return None
+    if not isinstance(params, dict) or not method:
+        return None
+    return {
+        "status": "calibration_applied",
+        "applied": True,
+        "method": str(method),
+        "params": params,
+        "artifact_path": str(source_path),
+        "source": "product_band_calibration_artifact",
+    }
+
+
+def _legacy_resolve_product_band_calibration_unused(
+    *,
+    checkpoint_config: dict[str, Any],
+    run_id: str,
+    timeframe: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    if not enabled:
+        return {"status": "calibration_disabled", "applied": False}
+
+    explicit_candidates = [
+        checkpoint_config.get("calibration_artifact_path"),
+        checkpoint_config.get("band_calibration_artifact"),
+        checkpoint_config.get("calibration_path"),
+    ]
+    for raw_path in explicit_candidates:
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        payload = _safe_json(path)
+        if payload:
+            artifact = _calibration_from_payload(payload, source_path=path)
+            if artifact:
+                return artifact
+
+    try:
+        manifest = resolve_default_calibration_artifact_manifest(
+            role="band",
+            timeframe=timeframe,
+            model_run_id=run_id,
+        )
+        path = default_calibration_manifest_path(role="band", timeframe=timeframe, model_run_id=run_id)
+        artifact = _calibration_from_payload(manifest, source_path=path)
+        if artifact:
+            return artifact
+    except FileNotFoundError:
+        pass
+
+    docs_dir = PROJECT_ROOT / "docs"
+    for pattern in ("*config_lock.json", "*calibration_params.json"):
+        for path in sorted(docs_dir.glob(pattern)):
+            payload = _safe_json(path)
+            if not payload or not _matches_calibration_target(payload, run_id=run_id, timeframe=timeframe):
+                continue
+            artifact = _calibration_from_payload(payload, source_path=path)
+            if artifact:
+                return artifact
+
+    return {
+        "status": "calibration_missing_raw_band_output_used",
+        "applied": False,
+        "missing_reason": f"band calibration artifact not found for run_id={run_id}, timeframe={timeframe}",
+    }
+
+
+def _legacy_apply_product_band_calibration_unused(
+    *,
+    lower_returns: torch.Tensor,
+    upper_returns: torch.Tensor,
+    calibration: dict[str, Any],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if not calibration.get("applied"):
+        return lower_returns, upper_returns
+
+    method = str(calibration.get("method") or "")
+    params = calibration.get("params") if isinstance(calibration.get("params"), dict) else {}
+    center = (lower_returns + upper_returns) / 2.0
+    lower_width = torch.clamp(center - lower_returns, min=1e-6)
+    upper_width = torch.clamp(upper_returns - center, min=1e-6)
+
+    if method in {"scalar_width", "lower_focused", "separate_scale", "symmetric_expand", "upper_trimmed", "lower_breach_guard"}:
+        scale = float(params.get("scale", 1.0))
+        lower_scale = float(params.get("lower_scale", scale))
+        upper_scale = float(params.get("upper_scale", scale))
+        calibrated_lower = center - lower_width * lower_scale
+        calibrated_upper = center + upper_width * upper_scale
+    elif method == "conformal_residual":
+        calibrated_lower = center + float(params["lower_offset"])
+        calibrated_upper = center + float(params["upper_offset"])
+    elif "global_shift" in params:
+        calibrated_lower = lower_returns + float(params["global_shift"])
+        calibrated_upper = upper_returns
+    else:
+        raise ValueError(f"지원하지 않는 band calibration method입니다: {method}")
+
+    return torch.minimum(calibrated_lower, calibrated_upper), torch.maximum(calibrated_lower, calibrated_upper)
+
+
 def resolve_bundle(
     *,
     split_name: str,
@@ -297,7 +439,8 @@ def infer_bundle(
     model_ver: str,
     q_low: float,
     q_high: float,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, float | None]]:
+    enable_band_calibration: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     model, checkpoint = load_checkpoint(checkpoint_path)
     device = resolve_device(str(checkpoint.get("config", {}).get("device", "auto")))
     model = model.to(device)
@@ -324,6 +467,16 @@ def infer_bundle(
         model_role,
         INFERENCE_PAYLOAD_SUPPORTED_ROLES,
         context="inference.payload",
+    )
+    product_band_calibration = (
+        resolve_product_band_calibration(
+            checkpoint_config=model_config,
+            run_id=run_id,
+            timeframe=timeframe,
+            enabled=enable_band_calibration,
+        )
+        if model_role == "band"
+        else {"status": "not_band_model", "applied": False}
     )
     pinball = PinballLoss((q_low, 0.5, q_high), sort_quantiles=True)
 
@@ -378,8 +531,11 @@ def infer_bundle(
                     dim=-1,
                 ).values
                 line_returns = None
-                lower_returns = ordered_band[..., 0]
-                upper_returns = ordered_band[..., 1]
+                lower_returns, upper_returns = apply_product_band_calibration(
+                    lower_returns=ordered_band[..., 0],
+                    upper_returns=ordered_band[..., 1],
+                    calibration=product_band_calibration,
+                )
                 summary_lower_predictions.append(lower_returns)
                 summary_upper_predictions.append(upper_returns)
                 batch_size_now = lower_returns.shape[0]
@@ -477,7 +633,15 @@ def infer_bundle(
                             "upper_band_series": upper_series,
                             "band_quantile_low": q_low,
                             "band_quantile_high": q_high,
-                            "meta": {"layer": "band", "model_role": "band"},
+                            "meta": {
+                                "layer": "band",
+                                "model_role": "band",
+                                "band_calibration_status": product_band_calibration.get("status"),
+                                "band_calibration_applied": bool(product_band_calibration.get("applied")),
+                                "band_calibration_method": product_band_calibration.get("method"),
+                                "band_calibration_params": product_band_calibration.get("params") or {},
+                                "band_calibration_artifact": product_band_calibration.get("artifact_path"),
+                            },
                         }
                     )
                 elif raw_return_mode:
@@ -633,6 +797,8 @@ def infer_bundle(
             squeeze_breakout_threshold=model_config.get("squeeze_breakout_threshold"),
         )
     summary_metrics.update(feature_subset.report)
+    if model_role == "band":
+        summary_metrics["band_calibration"] = product_band_calibration
     return prediction_records, evaluation_records, summary_metrics
 
 
@@ -645,6 +811,7 @@ def run_inference(
     save: bool = False,
     save_product_latest_only: bool = False,
     allow_bulk_evaluation_save: bool = False,
+    disable_band_calibration: bool = False,
 ) -> dict[str, Any]:
     model_run = get_model_run(run_id)
     if model_run is None:
@@ -710,6 +877,7 @@ def run_inference(
         model_ver=config.get("model_ver", "v2-multihead"),
         q_low=float(model_run.get("band_quantile_low") or config.get("q_low", 0.1)),
         q_high=float(model_run.get("band_quantile_high") or config.get("q_high", 0.9)),
+        enable_band_calibration=not disable_band_calibration,
     )
     summary_metrics.update(provider_contract)
     contract_metrics = {
@@ -767,5 +935,6 @@ if __name__ == "__main__":
         save=args.save,
         save_product_latest_only=args.save_product_latest_only,
         allow_bulk_evaluation_save=args.allow_bulk_evaluation_save,
+        disable_band_calibration=args.disable_band_calibration,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

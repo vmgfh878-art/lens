@@ -15,6 +15,7 @@
 | 5 | `band_baseline_comparison.md` | band가 통계 baseline 대비 어디까지 의미 있고 어디서 한계가 있는지 |
 | 6 | `v1_save_run_status.md` | v1 package의 실제 준비 상태와 차단 항목 |
 | 7 | `band_v2_plan.md` | Phase 2 band v2의 conformal, uncertainty, concept, selective output 계획 |
+| 8 | `band_mlops_plan.md` | 기존 1D/1W band에 MLOps를 적용해 자동 재평가, 재학습, 승격 추천을 만드는 계획 |
 
 ## 공개 기준
 

@@ -1,11 +1,10 @@
 import axios from "axios";
 
-// 우선순위: NEXT_PUBLIC_BACKEND_URL > 배포 기본 Render URL.
-// 배포 화면에서는 localhost fallback 에 기대지 않도록 명시적 상태를 노출한다.
-const PRODUCTION_BACKEND_URL = "https://lens-backend-7stj.onrender.com";
+// 우선순위: NEXT_PUBLIC_BACKEND_URL > 로컬 개발 fallback.
+// 배포 환경에서는 고정 Render URL로 조용히 붙지 않고 설정 오류를 드러낸다.
 const LOCAL_BACKEND_URL = "http://127.0.0.1:8000";
 
-type BackendUrlSource = "env" | "local-default" | "production-default" | "invalid-env";
+type BackendUrlSource = "env" | "local-default" | "missing-env" | "invalid-env";
 
 interface BackendUrlResolution {
   url: string;
@@ -32,9 +31,9 @@ function resolveBackendUrl(value: string | undefined): BackendUrlResolution {
       };
     }
     return {
-      url: PRODUCTION_BACKEND_URL,
-      source: "production-default",
-      warning: "NEXT_PUBLIC_BACKEND_URL이 설정되지 않아 Render 기본 백엔드로 연결합니다. 배포 설정에서 환경변수를 확인해주세요.",
+      url: "",
+      source: "missing-env",
+      warning: "NEXT_PUBLIC_BACKEND_URL이 설정되지 않았습니다. 배포 환경에서는 고정 백엔드 fallback을 사용하지 않습니다.",
     };
   }
 
@@ -47,11 +46,13 @@ function resolveBackendUrl(value: string | undefined): BackendUrlResolution {
       warning: null,
     };
   } catch {
-    const fallback = isLocalBrowserHost() ? LOCAL_BACKEND_URL : PRODUCTION_BACKEND_URL;
+    const fallback = isLocalBrowserHost() ? LOCAL_BACKEND_URL : "";
     return {
       url: fallback,
       source: "invalid-env",
-      warning: `NEXT_PUBLIC_BACKEND_URL 값이 올바르지 않아 ${fallback}로 연결합니다.`,
+      warning: fallback
+        ? `NEXT_PUBLIC_BACKEND_URL 값이 올바르지 않아 로컬 백엔드 ${fallback}로 연결합니다.`
+        : "NEXT_PUBLIC_BACKEND_URL 값이 올바르지 않습니다. 배포 환경에서는 고정 백엔드 fallback을 사용하지 않습니다.",
     };
   }
 }
@@ -149,6 +150,7 @@ export interface PredictionResult {
 
 export interface ProductLineHistoryPoint {
   asof_date: string;
+  forecast_date?: string | null;
   display_horizon: number;
   value: number;
   run_id: string;

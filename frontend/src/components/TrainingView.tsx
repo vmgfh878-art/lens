@@ -223,7 +223,7 @@ function formatStatusLabel(status: string | null | undefined) {
 
 function formatRoleLabel(role: string | null | undefined) {
   if (role === "line_model" || role === "line_v2" || role === "line") {
-    return "보수적 예측선";
+    return "보수적 기준선";
   }
   if (role === "band_model" || role === "band") {
     return "AI 밴드";
@@ -319,16 +319,10 @@ function getProductMetricDefinitions(slot: ProductSlot) {
 }
 
 function getProductSlotStatus(slot: ProductSlot, detail: AiRunDetail | null, isLoading: boolean): ProductSlotStatus {
-  if (!slot.runId) {
+  if (slot.kind === "preparing-line" || slot.kind === "preparing-band" || !slot.runId) {
     return "준비 중";
   }
-  if (isLoading) {
-    return "데이터 확인 중";
-  }
-  if (slot.id === "band-1w") {
-    return "사용 중";
-  }
-  if (slot.id === "line-1w" && detail) {
+  if (slot.runId) {
     return "사용 중";
   }
   if (detail && hasStoredEvaluationMetrics(detail, getProductMetricDefinitions(slot))) {
@@ -1168,7 +1162,7 @@ function ExperimentDisclosure({
 function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
   const description =
     slot.id === "line-1w"
-      ? "주간 보수적 예측선은 다음 wave 에서 학습 예정입니다. 1W AI 밴드 (CP178 walk-forward lower calibration 9-ensemble) 는 활성 상태로 별도 카드에서 확인할 수 있습니다."
+      ? "1W 보수적 기준선은 v1에서 제공하지 않습니다. 1W AI 밴드는 자동 갱신 상태로 별도 카드에서 확인할 수 있습니다."
       : "이 슬롯은 다음 학습 단계에서 채울 예정입니다.";
 
   return (
@@ -1185,7 +1179,7 @@ function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
           target="검증 완료"
           actual="아직 없음"
           diff="검증 필요"
-          description="현재는 주간 AI 밴드만 활성 상태입니다. 주간 보수적 예측선은 v1.1 이후 학습 예정입니다."
+          description="현재는 주간 AI 밴드만 활성 상태입니다. 1W 보수적 기준선은 v1에서 제공하지 않습니다."
           tone="neutral"
         />
       </div>
@@ -1209,27 +1203,29 @@ function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
   const cards = detail ? buildLineExperimentCards(detail) : [];
   const hasEvaluation = cards.length > 0;
   const isWeekly = (detail?.timeframe ?? slot?.timeframe) === "1W";
-  const status: ProductSlotStatus = hasEvaluation || isWeekly ? "사용 중" : "연결 필요";
+  const status: ProductSlotStatus = slot?.runId ? "사용 중" : "준비 중";
   const horizonLabel = isWeekly ? "4주" : "5거래일";
-  const title = isWeekly ? "1W 보수적 예측선 v1" : "1D 보수적 예측선 v1";
-  const summary = isWeekly
-    ? "1W 보수적 예측선은 중기 방향과 하방 위험을 보수적으로 보기 위한 참고선입니다."
-    : "수익 방향과 종목 순위 판단에는 사용할 수 있지만, 위험 회피 품질은 개선 중입니다.";
+  const title = slot?.title ?? (isWeekly ? "1W 보수적 기준선" : "1D 보수적 기준선");
+  const summary =
+    slot?.summary ??
+    (isWeekly
+      ? "1W 보수적 기준선은 v1에서 제공하지 않습니다."
+      : "수익 방향과 종목 순위 판단에는 사용할 수 있지만, 위험 회피 품질은 개선 중입니다.");
 
   return (
     <div className="model-detail-stack">
       <div className="model-detail-hero">
         <span className={`status-pill status-pill--${getStatusPillClass(status)}`}>{status}</span>
         <h2>{title}</h2>
-        <p>{hasEvaluation || isWeekly ? summary : "제품 후보 run은 지정되어 있지만 저장된 평가 metric을 확인하지 못했습니다."}</p>
+        <p>{summary}</p>
       </div>
 
       <section className="model-story-grid">
         <article>
           <h3>모델 역할</h3>
           <p>
-            PatchTST 기반 모델입니다. 최근 데이터를 보고 앞으로 {horizonLabel}의 수익 방향을 예측합니다.
-            일반 예측선보다 하방 위험을 더 조심스럽게 보도록 학습했습니다.
+            Line v2 기반 제품 모델입니다. 최근 데이터를 보고 앞으로 {horizonLabel} 후 도착가를 보수적으로 추정합니다.
+            출력은 수익률 단위 score이며 화면에서는 기준 종가를 곱해 가격으로 환산합니다.
           </p>
         </article>
         <article>
@@ -1237,6 +1233,11 @@ function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
           <DataList items={["가격", "거래량", "기술적 지표", "재무·거시·시장 폭 관련 피처"]} />
         </article>
       </section>
+
+      <div className="notice">
+        계약: 수익률 단위 score. asof 종가 × (1 + score)로 가격 환산 후 표시합니다.
+        출력 의미: 5거래일 후 도착가 보수 추정 (h5 horizon, β=5).
+      </div>
 
       {hasEvaluation ? (
         <>
@@ -1272,24 +1273,32 @@ function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
   );
 }
 
-function BandModelDetail({ detail }: { detail: AiRunDetail | null }) {
+function BandModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: ProductSlot | null }) {
   const cards = detail ? buildBandExperimentCards(detail) : [];
   const hasEvaluation = cards.length > 0;
-  const status: ProductSlotStatus = hasEvaluation ? "사용 중" : "연결 필요";
+  const status: ProductSlotStatus = slot?.runId ? "사용 중" : "준비 중";
+  const isWeekly = (detail?.timeframe ?? slot?.timeframe) === "1W";
+  const horizonLabel = isWeekly ? "4주" : "5거래일";
+  const title = slot?.title ?? (isWeekly ? "1W AI 밴드 v1" : "1D AI 밴드 v1");
+  const summary =
+    slot?.summary ??
+    (isWeekly
+      ? "1W 예상 변동 범위를 보여주는 주간 리스크 참고 밴드입니다."
+      : "저장된 평가 결과가 확인된 1D 위험 범위 보조지표입니다.");
 
   return (
     <div className="model-detail-stack">
       <div className="model-detail-hero">
         <span className={`status-pill status-pill--${getStatusPillClass(status)}`}>{status}</span>
-        <h2>1D AI 밴드 v1</h2>
-        <p>{hasEvaluation ? "저장된 평가 결과가 확인된 1D 위험 범위 보조지표입니다." : "제품 후보 run은 지정되어 있지만 저장된 평가 metric을 확인하지 못했습니다."}</p>
+        <h2>{title}</h2>
+        <p>{summary}</p>
       </div>
 
       <section className="model-story-grid">
         <article>
           <h3>모델 역할</h3>
           <p>
-            CNN-LSTM 기반 모델입니다. 최근 60거래일의 가격·변동성·거래량 정보를 보고 앞으로 5거래일의 예상 변동 범위를 계산합니다.
+            TiDE 기반 제품 밴드입니다. 최근 가격·변동성 흐름을 보고 앞으로 {horizonLabel}의 예상 변동 범위를 계산합니다.
             밴드가 넓어지는 구간은 모델이 더 큰 변동 가능성을 보는 구간입니다.
           </p>
         </article>
@@ -1540,12 +1549,12 @@ function getComparisonVerdictTag(detail: AiRunDetail, rows: ComparisonRow[], cat
 
 function getFinalJudgement(detail: AiRunDetail, rows: ComparisonRow[], category: ExperimentCategory) {
   if (detail.timeframe === "1W") {
-    return "1W 보수적 예측선은 준비 중이지만 1W AI 밴드는 활성 (CP178 walk-forward lower calibration). 이 실험 결과를 현재 1W 제품 모델 대비 우열로 과장하지 않습니다.";
+    return "1W 보수적 기준선은 v1에서 제공하지 않지만 1W AI 밴드는 활성 (CP178 walk-forward lower calibration)입니다. 이 실험 결과를 현재 1W 제품 모델 대비 우열로 과장하지 않습니다.";
   }
   const kind = getExperimentKind(detail);
   const weakRows = rows.filter((row) => row.result === "worse");
   const betterRows = rows.filter((row) => row.result === "better");
-  const roleText = kind === "band" ? "AI 밴드" : "보수적 예측선";
+  const roleText = kind === "band" ? "AI 밴드" : "보수적 기준선";
   if (weakRows.length > 0 && betterRows.length > 0) {
     return `${formatExperimentName(detail)}은 ${betterRows[0].label}에서는 제품 모델보다 나은 면이 있었지만, ${weakRows[0].label}에서 약해 ${roleText} 제품 모델로 쓰기 어렵습니다.`;
   }
@@ -1718,6 +1727,10 @@ export default function TrainingView() {
   async function loadDetail(selection: SelectedItem, runId: string | null) {
     setSelected(selection);
     setErrorMessage(null);
+    if (selection.kind === "slot") {
+      setDetail(null);
+      return;
+    }
     if (!runId) {
       setDetail(null);
       return;
@@ -1856,7 +1869,7 @@ export default function TrainingView() {
         ) : selectedSlot?.kind === "line" ? (
           <LineModelDetail detail={detail} slot={selectedSlot} />
         ) : selectedSlot?.kind === "band" ? (
-          <BandModelDetail detail={detail} />
+          <BandModelDetail detail={detail} slot={selectedSlot} />
         ) : selectedSlot ? (
           <PreparingSlotDetail slot={selectedSlot} />
         ) : (

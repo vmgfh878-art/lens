@@ -77,13 +77,28 @@ function daysBetween(left: string, right: string) {
 
 function keepLatestContiguousHistory(points: OverlayPoint[]) {
   const sorted = sanitizeOverlayPoints(points);
-  let segmentStart = 0;
+  if (sorted.length <= 1) {
+    return sorted;
+  }
+
+  const segments: OverlayPoint[][] = [];
+  let currentSegment: OverlayPoint[] = [sorted[0]];
   for (let index = 1; index < sorted.length; index += 1) {
     if (daysBetween(sorted[index - 1].time, sorted[index].time) > MAX_ROLLING_HISTORY_GAP_DAYS) {
-      segmentStart = index;
+      segments.push(currentSegment);
+      currentSegment = [sorted[index]];
+    } else {
+      currentSegment.push(sorted[index]);
     }
   }
-  return sorted.slice(segmentStart);
+  segments.push(currentSegment);
+
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    if (segments[index].length >= 2) {
+      return segments[index];
+    }
+  }
+  return segments[segments.length - 1] ?? [];
 }
 
 function sanitizeWhitespaceDates(rows: Array<{ time: string }>, occupiedTimes: Set<string>) {
@@ -269,13 +284,14 @@ function buildRollingConservativeHistory(history: ProductLineHistoryPoint[] | un
   return keepLatestContiguousHistory(
     (history ?? [])
       .map((item) => {
-        if (!isValidTime(item.asof_date) || !Number.isFinite(item.value)) {
+        const displayDate = item.forecast_date ?? item.asof_date;
+        if (!isValidTime(displayDate) || !Number.isFinite(item.value)) {
           return null;
         }
-        if (latestPriceDate && compareDate(item.asof_date, latestPriceDate) > 0) {
+        if (latestPriceDate && compareDate(displayDate, latestPriceDate) > 0) {
           return null;
         }
-        return { time: item.asof_date, value: item.value };
+        return { time: displayDate, value: item.value };
       })
       .filter((point): point is OverlayPoint => point !== null)
   );
@@ -300,6 +316,10 @@ function buildRollingBandHistory(
       })
       .filter((point): point is OverlayPoint => point !== null)
   );
+}
+
+function getLatestBandHistoryDate(history: ProductBandHistoryPoint[] | undefined) {
+  return maxDate((history ?? []).map((item) => item.asof_date));
 }
 
 function emptyOverlayState(warning: string | null = null): OverlayState {
@@ -338,7 +358,7 @@ function buildOverlayState(
   const hasConservativeLine = hasSameLength(lineForecastDates, conservativeValues);
   const hasUpper = hasSameLength(bandForecastDates, actualBandPrediction?.upper_band_series);
   const hasLower = hasSameLength(bandForecastDates, actualBandPrediction?.lower_band_series);
-  const modelMarkerDate = prediction?.asof_date ?? actualBandPrediction?.asof_date ?? null;
+  const modelMarkerDate = actualBandPrediction?.asof_date ?? getLatestBandHistoryDate(bandPredictionHistory);
 
   if ((prediction && !hasConservativeLine) || (actualBandPrediction && (!hasUpper || !hasLower))) {
     return {
@@ -472,11 +492,11 @@ export default function Chart({
     upperBandHistoryData,
     warning,
   } = overlayState;
-  const markerDate = timeframe !== "1M" && (canDrawBand || canDrawConservativeLine) ? modelMarkerDate : null;
+  const markerDate = timeframe !== "1M" && layers?.aiBand && modelMarkerDate ? modelMarkerDate : null;
   const latestForecastLabel =
     timeframe === "1W"
-      ? `최신 ${Math.max(conservativeData.length, 1)}주 예측`
-      : `최신 ${Math.max(conservativeData.length, 1)}일 예측`;
+      ? `보수적 기준선 (${Math.max(conservativeData.length, 1)}주)`
+      : "보수적 기준선";
   const chartTimelineDates = useMemo(() => {
     const source = timelineDates && timelineDates.length > 0 ? timelineDates : data.map((item) => item.date);
     const dates = markerDate ? [...source, markerDate] : source;
@@ -488,24 +508,27 @@ export default function Chart({
     [chartTimelineDates, priceDateSet]
   );
   const volumeData = useMemo(() => buildVolumeData(data), [data]);
+  const conservativeRenderData = conservativeData;
+  const upperBandRenderData = upperBandData;
+  const lowerBandRenderData = lowerBandData;
   const useSeparatePredictionScale = useMemo(
     () =>
       shouldUseSeparatePredictionScale(data, [
-        ...conservativeData,
+        ...conservativeRenderData,
         ...conservativeHistoryData,
-        ...upperBandData,
+        ...upperBandRenderData,
         ...upperBandHistoryData,
-        ...lowerBandData,
+        ...lowerBandRenderData,
         ...lowerBandHistoryData,
       ]),
     [
-      conservativeData,
       conservativeHistoryData,
+      conservativeRenderData,
       data,
-      lowerBandData,
       lowerBandHistoryData,
-      upperBandData,
+      lowerBandRenderData,
       upperBandHistoryData,
+      upperBandRenderData,
     ]
   );
 
@@ -638,37 +661,38 @@ export default function Chart({
       conservativeHistorySeries.setData(conservativeHistoryData);
     }
 
-    if (upperBandData.length >= 2 && lowerBandData.length >= 2 && layers?.aiBand) {
+    // 단일 예측점을 라인 마커로 그리면 확대 중 캔버스가 깨질 수 있어 선은 2점 이상일 때만 그린다.
+    if (upperBandRenderData.length >= 2 && lowerBandRenderData.length >= 2 && layers?.aiBand) {
       const upperBandSeries = chart.addLineSeries({
         color: "#172554",
-        lineWidth: 4,
+        lineWidth: 3,
         lineStyle: LineStyle.Dashed,
         priceScaleId: useSeparatePredictionScale ? PREDICTION_SCALE_ID : "right",
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      upperBandSeries.setData(upperBandData);
+      upperBandSeries.setData(upperBandRenderData);
 
       const lowerBandSeries = chart.addLineSeries({
         color: "#172554",
-        lineWidth: 4,
+        lineWidth: 3,
         lineStyle: LineStyle.Dashed,
         priceScaleId: useSeparatePredictionScale ? PREDICTION_SCALE_ID : "right",
         priceLineVisible: false,
         lastValueVisible: false,
       });
-      lowerBandSeries.setData(lowerBandData);
+      lowerBandSeries.setData(lowerBandRenderData);
     }
 
-    if (conservativeData.length >= 2 && layers?.conservativeLine) {
+    if (conservativeRenderData.length >= 2 && layers?.conservativeLine) {
       const conservativeSeries = chart.addLineSeries({
         color: "#006b57",
-        lineWidth: 4,
+        lineWidth: 3,
         lineStyle: LineStyle.Dashed,
         priceScaleId: useSeparatePredictionScale ? PREDICTION_SCALE_ID : "right",
         priceLineVisible: false,
       });
-      conservativeSeries.setData(conservativeData);
+      conservativeSeries.setData(conservativeRenderData);
     }
 
     chart.timeScale().fitContent();
@@ -697,14 +721,16 @@ export default function Chart({
     data,
     timeframe,
     chartType,
-    conservativeData,
     conservativeHistoryData,
+    conservativeRenderData,
     lowerBandData,
     lowerBandHistoryData,
+    lowerBandRenderData,
     markerDate,
     onVisibleDatesChange,
     upperBandData,
     upperBandHistoryData,
+    upperBandRenderData,
     useSeparatePredictionScale,
     layers?.aiBand,
     layers?.conservativeLine,
@@ -724,17 +750,20 @@ export default function Chart({
       <div className="chart-frame__canvas-wrap">
         <div ref={containerRef} className="chart-frame__canvas" />
         <div ref={forecastMarkerRef} className="chart-forecast-marker" aria-hidden="true">
-          <span title="과거 예측 이력과 최신 예측을 나누는 기준일">모델 기준일 경계</span>
+          <span title="자동 갱신 AI 밴드의 마지막 저장 기준일">밴드 기준일</span>
         </div>
       </div>
       <div className="chart-legend">
-        {conservativeData.length >= 2 ? (
-          <span className="chart-legend__item chart-legend__item--latest-line" title="현재 모델 기준일 이후 예측">
+        {conservativeRenderData.length >= 2 ? (
+          <span
+            className="chart-legend__item chart-legend__item--latest-line"
+            title="safe_line_score를 asof 종가에 곱해 가격으로 환산한 보수적 기준선"
+          >
             {latestForecastLabel}
           </span>
         ) : null}
-        {upperBandData.length >= 2 && lowerBandData.length >= 2 ? (
-          <span className="chart-legend__item chart-legend__item--latest-band" title="현재 모델 기준일 이후 AI 위험 범위">
+        {upperBandRenderData.length >= 2 && lowerBandRenderData.length >= 2 ? (
+          <span className="chart-legend__item chart-legend__item--latest-band" title="밴드 기준일 이후 AI 위험 범위">
             최신 AI 위험 범위
           </span>
         ) : null}
@@ -744,7 +773,7 @@ export default function Chart({
           </span>
         ) : null}
         {layers?.volumeBar && volumeData.length >= 2 ? <span className="chart-legend__item chart-legend__item--volume">거래량</span> : null}
-        {markerDate ? <span className="chart-legend__item chart-legend__item--start">모델 기준일 경계</span> : null}
+        {markerDate ? <span className="chart-legend__item chart-legend__item--start">밴드 기준일</span> : null}
         {useSeparatePredictionScale ? <span className="chart-legend__muted">예측 범위가 넓어 별도 가격 축으로 표시 중</span> : null}
         {!canDrawBand && !canDrawConservativeLine && (prediction || bandPrediction) && timeframe !== "1M" ? (
           <span className="chart-legend__muted">{warning ?? "표시 가능한 예측선이 없습니다."}</span>

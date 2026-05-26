@@ -1,6 +1,6 @@
 param(
     [string]$TaskName = "Lens yfinance 500 daily append",
-    [string]$TaskDescription = "Lens local yfinance 500 parquet daily append and 1D/1W indicator refresh",
+    [string]$TaskDescription = "Lens local yfinance 500 append and v1 market/band/line/product-history unified refresh",
     [string]$At = "08:20",
     [string[]]$DaysOfWeek = @("Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"),
     [bool]$RunAtLogOn = $false,
@@ -10,13 +10,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
-$ScriptPath = Join-Path $Root "scripts\run_yfinance_500_daily_append_automation.ps1"
+$ScriptPath = Join-Path $Root "scripts\run_v1_unified_refresh_local.ps1"
 if (-not (Test-Path -LiteralPath $ScriptPath)) {
     throw "자동화 스크립트를 찾을 수 없습니다: $ScriptPath"
 }
 
 $PowerShell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-$Argument = "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`" -Apply"
+$Argument = "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`" -Apply -ReloadLocalBackend"
 
 Write-Host "task_name=$TaskName"
 Write-Host "script=$ScriptPath"

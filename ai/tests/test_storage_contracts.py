@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from ai.storage import (
@@ -141,6 +142,11 @@ class StorageContractsTestCase(unittest.TestCase):
             save_product_latest_predictions([first, newer, other_ticker], [])
         saved_predictions = upsert.call_args_list[0].args[1]
         self.assertEqual(len(saved_predictions), 2)
+
+    def test_product_latest_contract_has_single_validator_definition(self):
+        source = Path("ai/storage.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count("def _validate_product_latest_predictions"), 1)
+        self.assertEqual(source.count("def save_product_latest_predictions"), 1)
 
     def test_product_latest_line_layer_rejects_band_payload(self):
         prediction = {

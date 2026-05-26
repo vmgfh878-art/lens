@@ -242,13 +242,14 @@ const STRATEGIES: StrategyDefinition[] = [
     label: "Lens Balance v1",
     shortLabel: "Lens Balance",
     description:
-      "보수적 예측선과 AI 밴드를 함께 읽는 단일 티커 연구 전략입니다. 현재 제품 슬롯과 실험 기준선은 분리해서 봅니다.",
+      "1D 보수적 기준선과 자동 갱신된 1D AI 밴드를 함께 읽는 단일 티커 연구 전략입니다. 제품 provenance와 연구 기준선은 분리해서 봅니다.",
     ruleRows: [
-      ["사용 지표", "보수적 예측선 v1, AI 밴드 v1"],
+      ["사용 지표", "보수적 기준선, 자동 갱신된 1D AI 밴드"],
       ["제품 예측선 슬롯", `${PRODUCT_SLOT_BY_ID["line-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["line-1d"].sourceCp}`],
       ["제품 밴드 슬롯", `${PRODUCT_SLOT_BY_ID["band-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["band-1d"].sourceCp}`],
-      ["진입", "보수적 예측선 >= -0.2%, 밴드 폭 급확장 아님"],
-      ["보유", "보수적 예측선 >= -1.4%, line 약화와 밴드 위험이 동시에 확정되지 않음"],
+      ["예측선 계약", "F4 β=4 ensemble v1. raw output은 safe_line_score이며 화면에서는 가격으로 환산합니다."],
+      ["진입", "보수적 기준선 >= -0.2%, 밴드 폭 급확장 아님"],
+      ["보유", "보수적 기준선 >= -1.4%, line 약화와 밴드 위험이 동시에 확정되지 않음"],
       ["청산", "line 약화 + 밴드 하단 위험 또는 밴드 폭 확장"],
       ["확인일", "청산 2일 확인, 재진입 2일 확인"],
       ["포지션", "단일 티커 100% 또는 현금 100%"],
@@ -565,10 +566,10 @@ function getRawTarget(row: {
   const riskExit = conservativeReturn < LENS_BALANCE_RULE.lineHoldThreshold && (lowerRisky || widthExpanded);
 
   if (entryOk) {
-    return { target: 1 as const, reason: "보수적 예측선이 진입 기준을 충족하고 밴드 폭 급확장이 없습니다." };
+    return { target: 1 as const, reason: "보수적 기준선이 진입 기준을 충족하고 밴드 폭 급확장이 없습니다." };
   }
   if (lineHold && !riskExit) {
-    return { target: 1 as const, reason: "보수적 예측선이 보유 기준 위이고 밴드 위험이 확정되지 않았습니다." };
+    return { target: 1 as const, reason: "보수적 기준선이 보유 기준 위이고 밴드 위험이 확정되지 않았습니다." };
   }
   if (riskExit && lowerRisky && widthExpanded) {
     return { target: 0 as const, reason: "예측선 약화와 밴드 하단 위험, 밴드 폭 확장이 동시에 나타났습니다." };
@@ -1347,7 +1348,7 @@ export default function BacktestView() {
 
       if ((needsLine && lineRows.length === 0) || (needsBand && bandRows.length === 0)) {
         const missingParts = [
-          needsLine && lineRows.length === 0 ? "보수적 예측선" : null,
+          needsLine && lineRows.length === 0 ? "보수적 기준선" : null,
           needsBand && bandRows.length === 0 ? "AI 밴드" : null,
         ].filter(Boolean);
         setStatusMessage(`이 티커에는 아직 ${missingParts.join(", ")} 저장 결과가 없습니다. 가격 데이터만 표시합니다.`);
@@ -1498,7 +1499,7 @@ export default function BacktestView() {
     ? [
         {
           id: "conservative",
-          label: "보수적 예측선",
+          label: "보수적 기준선",
           value: formatRatioAsPercent(latestTradeRecord.conservativeReturn),
           description: "-0.2% 이상이면 진입 후보, -1.4% 이상이면 보유 후보로 봅니다.",
         },
