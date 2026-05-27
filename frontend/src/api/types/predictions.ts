@@ -30,6 +30,7 @@ export interface ProductLineHistoryPoint {
 
 export interface ProductBandHistoryPoint {
   asof_date: string;
+  forecast_date?: string | null;
   display_horizon: number;
   lower: number;
   upper: number;

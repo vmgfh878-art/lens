@@ -332,9 +332,11 @@ export default function StockView() {
 
       const [lineResponse, bandResponse] = await Promise.all([linePromise, bandPromise]);
       const lineHistory = lineResponse ? buildLineHistoryFromV1(lineResponse.data, priceRows) : [];
-      const lineLatest = lineResponse ? buildLinePredictionFromV1(lineResponse.data, priceRows) : null;
       const bandHistory = bandResponse ? buildBandHistoryFromV1(bandResponse.data, bandSlot?.horizon ?? 5, priceRows) : [];
       const bandLatest = bandResponse ? buildBandPredictionFromV1(bandResponse.data, nextTimeframe, bandSlot?.horizon ?? 5, priceRows) : null;
+      const lineLatest = lineResponse
+        ? buildLinePredictionFromV1(lineResponse.data, priceRows, bandLatest?.forecast_dates ?? [])
+        : null;
       const bandReady = Boolean(bandLatest && isActualBandPrediction(bandLatest) && checkBandOverlay(bandLatest).ok);
       const lineReady = lineSlot?.status === "active" && (lineHistory.length > 0 || Boolean(lineLatest));
 
@@ -486,15 +488,15 @@ export default function StockView() {
   );
   const chartTimelineDates = useMemo(
     () =>
-      uniqueDates([
-          ...chartPriceData.map((row) => row.date),
-          ...(lineFutureForecastDates.length >= 2 ? lineFutureForecastDates : []),
-          ...(bandFutureForecastDates.length >= 2 ? bandFutureForecastDates : []),
-          ...activeLineHistory.map((row) => row.forecast_date ?? row.asof_date),
-          ...activeBandHistory.map((row) => row.asof_date),
-        ]),
-    [activeBandHistory, activeLineHistory, bandFutureForecastDates, chartPriceData, lineFutureForecastDates]
-  );
+        uniqueDates([
+            ...chartPriceData.map((row) => row.date),
+            ...(lineFutureForecastDates.length >= 2 ? lineFutureForecastDates : []),
+            ...(bandFutureForecastDates.length >= 2 ? bandFutureForecastDates : []),
+            ...activeLineHistory.map((row) => row.forecast_date ?? row.asof_date),
+            ...activeBandHistory.map((row) => row.forecast_date ?? row.asof_date),
+          ]),
+      [activeBandHistory, activeLineHistory, bandFutureForecastDates, chartPriceData, lineFutureForecastDates]
+    );
   const chartActualDateSet = useMemo(() => new Set(chartPriceData.map((row) => row.date)), [chartPriceData]);
   const indicatorRowsInChartRange = useMemo(
     () => indicatorData.filter((row) => chartActualDateSet.has(row.date)),

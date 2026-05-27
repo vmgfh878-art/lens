@@ -1,0 +1,20 @@
+  ▲ Next.js 14.2.3
+  - Local:        http://127.0.0.1:3000
+  - Network:      http://127.0.0.1:3000
+
+ ✓ Starting...
+ ✓ Ready in 1260ms
+ ○ Compiling / ...
+ ✓ Compiled / in 664ms (703 modules)
+ GET /?view=backtests 200 in 802ms
+ GET /?view=backtests 200 in 43ms
+ GET /?view=backtests 200 in 43ms
+ HEAD /?view=backtests 200 in 38ms
+ GET /?view=backtests 200 in 29ms
+ ✓ Compiled in 200ms (703 modules)
+ ✓ Compiled in 99ms (703 modules)
+ ✓ Compiled in 125ms (703 modules)
+ ✓ Compiled in 184ms (703 modules)
+ ✓ Compiled in 113ms (703 modules)
+ ✓ Compiled in 114ms (703 modules)
+ GET /?view=stocks 200 in 91ms

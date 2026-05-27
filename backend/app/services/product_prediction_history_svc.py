@@ -24,12 +24,14 @@ SUPPORTED_TIMEFRAME = "1D"
 
 
 def _snapshot_dir() -> Path:
-    override = os.environ.get("LENS_LOCAL_SNAPSHOT_DIR")
-    if override:
-        return Path(override)
-    # 우선 v1, 없으면 legacy
+    # product history는 raw parquet가 아니라 serving snapshot을 우선 사용해야 한다.
     if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists():
         return V1_SNAPSHOT_DIR
+    override = os.environ.get("LENS_LOCAL_SNAPSHOT_DIR")
+    if override:
+        override_path = Path(override)
+        if (override_path / "product_prediction_history_1D.parquet").exists():
+            return override_path
     return LEGACY_SNAPSHOT_DIR
 
 
@@ -145,9 +147,11 @@ def _line_history(frame: pd.DataFrame) -> list[dict[str, Any]]:
         value = _finite_or_none(row.get("line_value"))
         if value is None:
             continue
+        forecast_date = row.get("display_date")
         rows.append(
             {
                 "asof_date": pd.Timestamp(row["asof_date"]).strftime("%Y-%m-%d"),
+                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d") if forecast_date else None,
                 "display_horizon": int(row["display_horizon"]),
                 "value": value,
                 "run_id": str(row["run_id"]),
@@ -163,9 +167,11 @@ def _band_history(frame: pd.DataFrame) -> list[dict[str, Any]]:
         upper = _finite_or_none(row.get("upper_value"))
         if lower is None or upper is None:
             continue
+        forecast_date = row.get("display_date")
         rows.append(
             {
                 "asof_date": pd.Timestamp(row["asof_date"]).strftime("%Y-%m-%d"),
+                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d") if forecast_date else None,
                 "display_horizon": int(row["display_horizon"]),
                 "lower": lower,
                 "upper": upper,

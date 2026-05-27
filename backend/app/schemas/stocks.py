@@ -71,6 +71,7 @@ class PredictionData(BaseModel):
 
 class ProductLineHistoryPoint(BaseModel):
     asof_date: str
+    forecast_date: str | None = None
     display_horizon: int
     value: float
     run_id: str
@@ -78,6 +79,7 @@ class ProductLineHistoryPoint(BaseModel):
 
 class ProductBandHistoryPoint(BaseModel):
     asof_date: str
+    forecast_date: str | None = None
     display_horizon: int
     lower: float
     upper: float

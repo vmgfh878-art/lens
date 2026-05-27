@@ -1,8 +1,12 @@
-// Backtest 도메인 타입.
-// 전략 / 신호 / 시뮬레이션 결과 / 거래 기록 등의 인터페이스.
+export type StrategyId =
+  | "indicator_balance_v2"
+  | "ai_balance_v2"
+  | "ai_band_defense_v1"
+  | "indicator_baseline_v1"
+  | "lens_balance_v1";
 
-export type StrategyId = "indicator_baseline_v1" | "lens_balance_v1";
 export type SignalGroupId = "buy" | "hold" | "risk" | "watch";
+
 export type DecisionFactorId =
   | "conservative"
   | "lowerBand"
@@ -94,7 +98,7 @@ export interface LineSeries {
 
 export interface TradeRecord {
   date: string;
-  action: "매수" | "보유" | "매도" | "대기";
+  action: string;
   price: number | null;
   reason: string;
   nextDayReturn: number | null;
@@ -127,5 +131,6 @@ export interface StrategySignalCard {
   macdRatio: number | null;
   rsi: number | null;
   atrRatio: number | null;
+  strategyScore?: number | null;
   hasUsableSignal: boolean;
 }

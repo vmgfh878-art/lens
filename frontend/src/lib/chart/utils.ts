@@ -290,9 +290,10 @@ function buildRollingBandHistory(
     (history ?? [])
       .map((item) => {
         const value = item[field];
-        if (!isValidTime(item.asof_date) || !Number.isFinite(value)) return null;
-        if (latestPriceDate && compareDate(item.asof_date, latestPriceDate) > 0) return null;
-        return { time: item.asof_date, value };
+        const displayDate = item.forecast_date ?? item.asof_date;
+        if (!isValidTime(displayDate) || !Number.isFinite(value)) return null;
+        if (latestPriceDate && compareDate(displayDate, latestPriceDate) > 0) return null;
+        return { time: displayDate, value };
       })
       .filter((point): point is OverlayPoint => point !== null)
   );

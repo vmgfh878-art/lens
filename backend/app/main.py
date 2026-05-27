@@ -12,7 +12,7 @@ from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.middleware.request_id import request_id_middleware
 from app.routers import predict, prices
-from app.routers.v1 import admin, ai, health, stocks, predictions as v1_predictions
+from app.routers.v1 import admin, ai, health, stocks, predictions as v1_predictions, strategies
 
 logger = logging.getLogger("lens.api")
 
@@ -61,6 +61,7 @@ app.include_router(stocks.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(v1_predictions.router, prefix="/api/v1")
+app.include_router(strategies.router, prefix="/api/v1")
 app.include_router(prices.router, prefix="/prices", tags=["prices"])
 app.include_router(predict.router, prefix="/predict", tags=["predict"])
 

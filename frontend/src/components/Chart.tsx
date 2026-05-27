@@ -214,7 +214,7 @@ export default function Chart({
 
     if (layers?.aiBand && upperBandHistoryData.length >= 2 && lowerBandHistoryData.length >= 2) {
       const upperBandHistorySeries = chart.addLineSeries({
-        color: "rgba(30, 64, 175, 0.54)",
+        color: "rgba(29, 78, 216, 0.26)",
         lineWidth: 2,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
@@ -223,7 +223,7 @@ export default function Chart({
       upperBandHistorySeries.setData(upperBandHistoryData);
 
       const lowerBandHistorySeries = chart.addLineSeries({
-        color: "rgba(30, 64, 175, 0.54)",
+        color: "rgba(29, 78, 216, 0.26)",
         lineWidth: 2,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
@@ -234,7 +234,7 @@ export default function Chart({
 
     if (layers?.conservativeLine && conservativeHistoryData.length >= 2) {
       const conservativeHistorySeries = chart.addLineSeries({
-        color: "rgba(4, 120, 87, 0.58)",
+        color: "rgba(4, 120, 87, 0.28)",
         lineWidth: 2,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
@@ -246,8 +246,8 @@ export default function Chart({
     // 단일 예측점을 라인 마커로 그리면 확대 중 캔버스가 깨질 수 있어 선은 2점 이상일 때만 그린다.
     if (upperBandData.length >= 2 && lowerBandData.length >= 2 && layers?.aiBand) {
       const upperBandSeries = chart.addLineSeries({
-        color: "#172554",
-        lineWidth: 3,
+        color: "#1d4ed8",
+        lineWidth: 4,
         lineStyle: LineStyle.Dashed,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
@@ -256,8 +256,8 @@ export default function Chart({
       upperBandSeries.setData(upperBandData);
 
       const lowerBandSeries = chart.addLineSeries({
-        color: "#172554",
-        lineWidth: 3,
+        color: "#1d4ed8",
+        lineWidth: 4,
         lineStyle: LineStyle.Dashed,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
@@ -268,8 +268,8 @@ export default function Chart({
 
     if (conservativeData.length >= 2 && layers?.conservativeLine) {
       const conservativeSeries = chart.addLineSeries({
-        color: "#006b57",
-        lineWidth: 3,
+        color: "#047857",
+        lineWidth: 4,
         lineStyle: LineStyle.Dashed,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,

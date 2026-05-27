@@ -59,6 +59,28 @@ export function findTradingHorizonDate(rows: PriceBar[], asofDate: string, horiz
   return addBusinessDays(asofDate, horizon);
 }
 
+function countTradingSessionsToLatest(rows: PriceBar[], asofDate: string, latestPriceDate: string) {
+  const dates = sortPriceRows(rows).map((row) => row.date);
+  return dates.filter((date) => date > asofDate && date <= latestPriceDate).length;
+}
+
+function resolveFutureTradingDate(
+  rows: PriceBar[],
+  asofDate: string,
+  horizon: number,
+  latestPriceDate: string | null,
+  futureTradingDates: string[]
+) {
+  if (latestPriceDate && futureTradingDates.length > 0) {
+    const sessionsToLatest = countTradingSessionsToLatest(rows, asofDate, latestPriceDate);
+    const targetIndex = futureTradingDates.length - 1 - sessionsToLatest;
+    if (targetIndex >= 0 && targetIndex < futureTradingDates.length) {
+      return futureTradingDates[targetIndex];
+    }
+  }
+  return findTradingHorizonDate(rows, asofDate, horizon);
+}
+
 export function buildLineHistoryFromV1(
   response: V1LinePredictionResult,
   priceRows: PriceBar[]
@@ -84,7 +106,8 @@ export function buildLineHistoryFromV1(
 
 export function buildLinePredictionFromV1(
   response: V1LinePredictionResult,
-  priceRows: PriceBar[]
+  priceRows: PriceBar[],
+  futureTradingDates: string[] = []
 ): PredictionResult | null {
   const slot = PRODUCT_SLOT_BY_ID["line-1d"];
   const sortedRows = [...response.data]
@@ -95,14 +118,57 @@ export function buildLinePredictionFromV1(
     return null;
   }
 
-  const returnValue = finiteOrNull(latest.safe_line_score) ?? finiteOrNull(latest.line_score);
-  const baseClose = findCloseOnOrBefore(priceRows, latest.asof_date);
-  if (returnValue == null || baseClose == null) {
+  const horizon = slot.horizon ?? 5;
+  const latestPriceDate = priceRows.length > 0 ? priceRows[priceRows.length - 1]?.date ?? null : null;
+  const futureRows = sortedRows
+    .map((row) => {
+      const returnValue = finiteOrNull(row.safe_line_score) ?? finiteOrNull(row.line_score);
+      const baseClose = findCloseOnOrBefore(priceRows, row.asof_date);
+      if (returnValue == null || baseClose == null) {
+        return null;
+      }
+      return {
+        asof_date: row.asof_date,
+        forecast_date: resolveFutureTradingDate(
+          priceRows,
+          row.asof_date,
+          horizon,
+          latestPriceDate,
+          futureTradingDates
+        ),
+        line_value: baseClose * (1 + returnValue),
+        model_id: row.model_id ?? null,
+        source_cp: row.source_cp ?? null,
+      };
+    })
+    .filter(
+      (
+        row
+      ): row is {
+        asof_date: string;
+        forecast_date: string;
+        line_value: number;
+        model_id: string | null;
+        source_cp: string | null;
+      } => row !== null && isValidDate(row.forecast_date)
+    )
+    .filter((row) => {
+      return latestPriceDate ? row.forecast_date > latestPriceDate : true;
+    })
+    .sort((left, right) => left.forecast_date.localeCompare(right.forecast_date));
+
+  const dedupedFutureRows = Array.from(
+    futureRows.reduce((map, row) => {
+      map.set(row.forecast_date, row);
+      return map;
+    }, new Map<string, (typeof futureRows)[number]>()).values()
+  ).sort((left, right) => left.forecast_date.localeCompare(right.forecast_date));
+
+  const selectedFutureRows = dedupedFutureRows.slice(-horizon);
+  if (selectedFutureRows.length === 0) {
     return null;
   }
 
-  const horizon = slot.horizon ?? 5;
-  const lineValue = baseClose * (1 + returnValue);
   return {
     ticker: response.ticker,
     model_name: slot.modelName,
@@ -113,11 +179,11 @@ export function buildLinePredictionFromV1(
     run_id: latest.model_id ?? response.model_id ?? slot.runId ?? slot.sourceCp ?? "line-serving",
     model_ver: slot.version ?? "v1",
     signal: "HOLD",
-    forecast_dates: [findTradingHorizonDate(priceRows, latest.asof_date, horizon)],
+    forecast_dates: selectedFutureRows.map((row) => row.forecast_date),
     upper_band_series: [],
     lower_band_series: [],
-    conservative_series: [lineValue],
-    line_series: [lineValue],
+    conservative_series: selectedFutureRows.map((row) => row.line_value),
+    line_series: selectedFutureRows.map((row) => row.line_value),
     band_quantile_low: null,
     band_quantile_high: null,
     meta: {
@@ -159,27 +225,31 @@ export function buildBandHistoryFromV1(
   preferredHorizon: number,
   priceRows: PriceBar[]
 ): ProductBandHistoryPoint[] {
-  return sortUniqueByAsofDate(
-    selectBandDisplayRows(response, preferredHorizon)
-      .map((row) => {
-        const rawLower = finiteOrNull(row.band_lower);
-        const rawUpper = finiteOrNull(row.band_upper);
-        const baseClose = findCloseOnOrBefore(priceRows, row.asof_date);
-        const lower = rawLower == null ? null : normalizeBandValueToPrice(rawLower, baseClose);
-        const upper = rawUpper == null ? null : normalizeBandValueToPrice(rawUpper, baseClose);
-        if (!isValidDate(row.asof_date) || lower == null || upper == null) {
-          return null;
-        }
-        return {
-          asof_date: row.asof_date,
-          display_horizon: row.horizon_step,
-          lower,
-          upper,
-          run_id: row.model_id ?? response.model_id ?? response.source_cp ?? response.slot,
-        };
-      })
-      .filter((row): row is ProductBandHistoryPoint => row !== null)
+  const mappedRows: Array<ProductBandHistoryPoint | null> = selectBandDisplayRows(response, preferredHorizon).map((row) => {
+      const rawLower = finiteOrNull(row.band_lower);
+      const rawUpper = finiteOrNull(row.band_upper);
+      const baseClose = findCloseOnOrBefore(priceRows, row.asof_date);
+      const lower = rawLower == null ? null : normalizeBandValueToPrice(rawLower, baseClose);
+      const upper = rawUpper == null ? null : normalizeBandValueToPrice(rawUpper, baseClose);
+      if (!isValidDate(row.asof_date) || lower == null || upper == null) {
+        return null;
+      }
+      return {
+        asof_date: row.asof_date,
+        forecast_date:
+          row.forecast_date ?? findTradingHorizonDate(priceRows, row.asof_date, row.horizon_step ?? preferredHorizon),
+        display_horizon: row.horizon_step,
+        lower,
+        upper,
+        run_id: row.model_id ?? response.model_id ?? response.source_cp ?? response.slot,
+      };
+    });
+
+  const rows: ProductBandHistoryPoint[] = mappedRows.filter(
+    (row): row is ProductBandHistoryPoint => row !== null
   );
+
+  return sortUniqueByAsofDate(rows);
 }
 
 export function buildBandPredictionFromV1(

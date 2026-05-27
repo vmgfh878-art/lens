@@ -147,11 +147,12 @@ Invoke-PythonStep -Name "band_refresh" -Arguments @(
     "--report-path", $BandReportPath
 ) -StdoutPath (Join-Path $RunDirPath "band_stdout_${SafeDate}_${RunStamp}.log") -StderrPath (Join-Path $RunDirPath "band_stderr_${SafeDate}_${RunStamp}.log") | Out-Null
 
-$LineMetricsPath = Join-Path $RunDirPath "line_export_metrics_${SafeDate}_${RunStamp}.json"
-$LineReportPath = Join-Path $RunDirPath "line_export_report_${SafeDate}_${RunStamp}.md"
-Invoke-PythonStep -Name "line_export" -Arguments @(
+$LineMetricsPath = Join-Path $RunDirPath "line_refresh_metrics_${SafeDate}_${RunStamp}.json"
+$LineReportPath = Join-Path $RunDirPath "line_refresh_report_${SafeDate}_${RunStamp}.md"
+Invoke-PythonStep -Name "line_refresh" -Arguments @(
     "backend\scripts\cp212_line_1d_export.py",
     $ModeArg,
+    "--device", "auto",
     "--metrics-path", $LineMetricsPath,
     "--report-path", $LineReportPath
 ) -StdoutPath (Join-Path $RunDirPath "line_stdout_${SafeDate}_${RunStamp}.log") -StderrPath (Join-Path $RunDirPath "line_stderr_${SafeDate}_${RunStamp}.log") | Out-Null
@@ -270,7 +271,7 @@ $ReportLines += @(
     "- 새 학습 없음",
     "- 새 calibration 없음",
     "- 1W line 생성 없음",
-    "- line은 CP212 F4 beta=4 ensemble artifact를 serving parquet로 export"
+    "- line은 CP212 F4 beta=4 ensemble checkpoint로 최근 구간을 다시 계산해 serving parquet를 갱신"
 )
 $ReportLines -join "`n" | Set-Content -Path $ReportPath -Encoding UTF8
 Copy-Item -LiteralPath $ReportPath -Destination $LatestReportPath -Force

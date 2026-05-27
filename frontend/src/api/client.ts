@@ -33,6 +33,11 @@ export type {
   BacktestSummary,
   EvaluationSummary,
 } from "./types/ai";
+export type {
+  StrategyBacktestResult,
+  StrategyPortfolioMetrics,
+  StrategyScanResult,
+} from "./types/strategies";
 
 export {
   fetchIndicators,
@@ -53,3 +58,7 @@ export {
   fetchRunBacktests,
   fetchRunEvaluations,
 } from "./endpoints/ai";
+export {
+  fetchStrategyBacktest,
+  fetchStrategyScan,
+} from "./endpoints/strategies";

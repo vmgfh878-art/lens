@@ -7,6 +7,8 @@ import {
   fetchIndicators,
   fetchPredictionHistory,
   fetchPrices,
+  fetchStrategyBacktest,
+  fetchStrategyScan,
   fetchTickers,
   IndicatorPoint,
   PredictionResult,
@@ -28,6 +30,7 @@ import {
   SIGNAL_GROUPS,
   SIGNAL_SCAN_TICKERS,
   STRATEGIES,
+  isBackendStrategy,
   strategyNeedsBand,
   strategyNeedsLine,
 } from "@/lib/backtest/constants";
@@ -834,7 +837,7 @@ export default function BacktestView() {
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [selectedTicker, setSelectedTicker] = useState("AAPL");
   const timeframe: DisplayTimeframe = "1D";
-  const [strategyId, setStrategyId] = useState<StrategyId>("indicator_baseline_v1");
+  const [strategyId, setStrategyId] = useState<StrategyId>("indicator_balance_v2");
   const [priceData, setPriceData] = useState<PriceBar[]>([]);
   const [indicatorData, setIndicatorData] = useState<IndicatorPoint[]>([]);
   const [lineHistory, setLineHistory] = useState<PredictionResult[]>([]);
@@ -891,7 +894,11 @@ export default function BacktestView() {
     let active = true;
     setSignalLoading(true);
     setSignalErrorMessage(null);
-    Promise.all(SIGNAL_SCAN_TICKERS.map((ticker) => loadStrategySignalCard(ticker, strategyId)))
+    const signalPromise = isBackendStrategy(strategyId)
+      ? fetchStrategyScan(strategyId, { limit: 500 }).then((response) => response.data.cards)
+      : Promise.all(SIGNAL_SCAN_TICKERS.map((ticker) => loadStrategySignalCard(ticker, strategyId)));
+
+    signalPromise
       .then((cards) => {
         if (active) {
           setSignalCards(cards);
@@ -924,6 +931,26 @@ export default function BacktestView() {
 
     try {
       const normalizedTicker = nextTicker.trim().toUpperCase() || "AAPL";
+      if (isBackendStrategy(nextStrategyId)) {
+        const response = await fetchStrategyBacktest(nextStrategyId, normalizedTicker);
+        const nextResult = response.data;
+        setResult(nextResult);
+        setPriceData(
+          nextResult.points.map((point) => ({
+            date: point.date,
+            open: point.price,
+            high: point.price,
+            low: point.price,
+            close: point.price,
+            volume: null,
+          }))
+        );
+        setIndicatorData([]);
+        setLineHistory([]);
+        setBandHistory([]);
+        setStatusMessage(null);
+        return;
+      }
       const [prices, indicatorsResponse] = await Promise.all([
         fetchPriceHistory(normalizedTicker, nextTimeframe),
         fetchIndicators(normalizedTicker, { timeframe: nextTimeframe, limit: 300 }).catch(() => null),
@@ -993,7 +1020,7 @@ export default function BacktestView() {
   }
 
   useEffect(() => {
-    void loadBacktest("AAPL", "1D", "indicator_baseline_v1");
+    void loadBacktest("AAPL", "1D", "indicator_balance_v2");
   }, []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1106,6 +1133,7 @@ export default function BacktestView() {
     [expandedSignalGroups, signalCards]
   );
   const usableSignalCount = signalCards.filter((card) => card.hasUsableSignal).length;
+  const scanScopeCount = isBackendStrategy(strategyId) ? signalCards.length : SIGNAL_SCAN_TICKERS.length;
   const selectedSignalCard = signalCards.find((card) => card.ticker === selectedTicker);
   const latestSignalDate = signalCards
     .map((card) => card.asofDate)
@@ -1183,7 +1211,7 @@ export default function BacktestView() {
         <div className="view-header__title">
           <div className="eyebrow">백테스트</div>
           <h1>전략 신호</h1>
-          <p>전략이 고른 종목 후보를 먼저 보고, 종목을 선택해 단일 티커 백테스트를 확인합니다.</p>
+          <p>전략과 티커를 먼저 선택하고, 아래쪽 500티커 신호판은 같은 룰을 각 티커에 독립 적용한 최신 상태로 확인합니다.</p>
         </div>
         <div className="status-badge status-badge--neutral">{strategyDefinition.label}</div>
       </header>
@@ -1198,12 +1226,16 @@ export default function BacktestView() {
               : "AI 예측 없이 가격과 보조지표만 읽어 최신 전략 상태를 요약합니다."}
             {" "}포트폴리오 추천이 아니라 단일 티커 백테스트로 이어지는 신호 탐색 화면입니다.
           </p>
-          <p className="strategy-signal-scope-note">현재는 12개 주요 종목 기준 전략 신호입니다. 전체 scanner API가 붙기 전까지는 subset 신호로만 봅니다.</p>
+          <p className="strategy-signal-scope-note">
+            {isBackendStrategy(strategyId)
+              ? "현재 백엔드 로컬 parquet 기준 단일 티커 long/cash 신호입니다. 500개 내외 티커에 같은 룰을 각각 적용하고, 종목을 선택하면 그 티커 하나의 상세 백테스트를 봅니다."
+              : "현재는 12개 주요 종목 기준 전략 신호입니다. 전체 scanner API가 붙기 전까지는 subset 신호로만 봅니다."}
+          </p>
         </div>
         <div className="strategy-signal-summary">
           <div>
             <span>스캔 범위</span>
-            <strong>{SIGNAL_SCAN_TICKERS.length}개</strong>
+            <strong>{scanScopeCount}개</strong>
           </div>
           <div>
             <span>신호 확인</span>
@@ -1251,7 +1283,7 @@ export default function BacktestView() {
                     </div>
                     <div className="signal-card__label">{card.signalLabel}</div>
                     <dl>
-                      {strategyDefinition.usesAi ? (
+                      {strategyNeedsLine(strategyId) ? (
                         <>
                           <div>
                             <dt>예측선</dt>
@@ -1268,6 +1300,25 @@ export default function BacktestView() {
                           <div>
                             <dt>60일 추세</dt>
                             <dd>{formatRatioAsPercent(card.ma60Ratio)}</dd>
+                          </div>
+                        </>
+                      ) : strategyNeedsBand(strategyId) ? (
+                        <>
+                          <div>
+                            <dt>하단 위험</dt>
+                            <dd>{formatRatioAsPercent(card.lowerBandReturn)}</dd>
+                          </div>
+                          <div>
+                            <dt>밴드 폭</dt>
+                            <dd>{getBandWidthState(card)}</dd>
+                          </div>
+                          <div>
+                            <dt>60일 추세</dt>
+                            <dd>{formatRatioAsPercent(card.ma60Ratio)}</dd>
+                          </div>
+                          <div>
+                            <dt>RSI</dt>
+                            <dd>{formatNumber(card.rsi, 1)}</dd>
                           </div>
                         </>
                       ) : (
@@ -1311,9 +1362,9 @@ export default function BacktestView() {
 
       <section className="panel direct-ticker-panel">
         <div className="panel-heading">
-          <div className="eyebrow">직접 종목 확인</div>
-          <h2>신호 목록에 없는 종목도 확인</h2>
-          <p>신호 목록에 없는 종목도 직접 확인할 수 있습니다.</p>
+          <div className="eyebrow">전략 및 티커 검색</div>
+          <h2>먼저 종목을 직접 확인</h2>
+          <p>AAPL처럼 현재 상위 후보에 없는 종목도 직접 조회해 전략 편입 여부와 상세 백테스트를 확인합니다.</p>
         </div>
         <form className="backtest-toolbar backtest-toolbar--compact" onSubmit={handleSubmit}>
           <label className="search-field">

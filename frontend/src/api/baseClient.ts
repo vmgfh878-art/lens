@@ -65,13 +65,16 @@ function resolveBackendUrl(value: string | undefined): BackendUrlResolution {
 
 const backendUrlResolution = resolveBackendUrl(process.env.NEXT_PUBLIC_BACKEND_URL);
 
-// browser 에서는 proxy prefix 사용 (same-origin), SSR 에서는 backend URL 직접.
-const apiBaseUrl =
-  typeof window === "undefined"
-    ? backendUrlResolution.url
-    : backendUrlResolution.url
-      ? BROWSER_PROXY_BASE
-      : "";
+function resolveBrowserBaseUrl() {
+  // 로컬 브라우저에서는 프록시보다 직접 백엔드가 더 안정적이다.
+  if (isLocalBrowserHost()) {
+    return backendUrlResolution.url || LOCAL_BACKEND_URL;
+  }
+  return backendUrlResolution.url ? BROWSER_PROXY_BASE : "";
+}
+
+// browser 에서는 로컬이면 직접 백엔드, 배포면 same-origin proxy 사용.
+const apiBaseUrl = typeof window === "undefined" ? backendUrlResolution.url : resolveBrowserBaseUrl();
 
 export const api = axios.create({
   baseURL: apiBaseUrl,
