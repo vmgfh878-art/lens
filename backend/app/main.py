@@ -18,22 +18,28 @@ logger = logging.getLogger("lens.api")
 
 
 def _parse_cors_origins() -> list[str]:
-    # 기본: 로컬 dev + Vercel production 도메인 + Render preview.
-    # Production 배포 시 환경변수로 명시 override 가능.
+    # 기본: 로컬 dev + Vercel production 도메인.
+    # 새 vercel alias 가 추가될 때마다 손대지 않도록 regex 도 같이 사용.
+    # Production 배포 시 BACKEND_CORS_ORIGINS 환경변수로 명시 override 가능.
     default_origins = ",".join([
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://lens-kimjihyeong-s-projects.vercel.app",
+        "https://lens-ten-delta.vercel.app",
     ])
     raw = os.environ.get("BACKEND_CORS_ORIGINS", default_origins)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
-# Vercel 의 deployment 별 URL (예: lens-3hurhvz04-kimjihyeong-s-projects.vercel.app)
-# 도 같이 허용하기 위한 regex. lens-*-kimjihyeong-s-projects.vercel.app 패턴.
+# Vercel 의 모든 lens-* deployment URL 을 자동 허용한다.
+# - lens-3hurhvz04-kimjihyeong-s-projects.vercel.app (preview hash + team)
+# - lens-ten-delta.vercel.app (production alias)
+# - lens-<branch>-<team>.vercel.app
+# - lens-<hash>.vercel.app
+# BACKEND_CORS_ORIGIN_REGEX 환경변수로 override 가능.
 _CORS_ORIGIN_REGEX = os.environ.get(
     "BACKEND_CORS_ORIGIN_REGEX",
-    r"^https://lens-[a-z0-9]+-kimjihyeong-s-projects\.vercel\.app$",
+    r"^https://lens(?:-[a-z0-9-]+)?\.vercel\.app$",
 )
 
 
