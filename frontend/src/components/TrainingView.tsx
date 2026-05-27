@@ -3,38 +3,71 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AiRunDetail, AiRunSummary, fetchAiRun, fetchAiRuns } from "@/api/client";
-import { PRODUCT_RUN_IDS, PRODUCT_SLOTS as PRODUCT_SLOT_CONFIGS } from "@/lib/productSlots";
+import { PRODUCT_RUN_IDS } from "@/lib/productSlots";
 import type { ProductSlotId } from "@/lib/productSlots";
+import {
+  BAND_COMPARISON_METRICS,
+  BAND_METRICS,
+  CONFIG_KEYS_BAND,
+  CONFIG_KEYS_COMMON,
+  CONFIG_KEYS_LINE,
+  CONFIG_LABELS,
+  ComparisonMetricDefinition,
+  ExperimentCategory,
+  ExperimentKind,
+  LINE_COMPARISON_METRICS,
+  LINE_METRICS,
+  MetricDefinition,
+  PRODUCT_BAND_1D_RUN_ID,
+  PRODUCT_LINE_1D_RUN_ID,
+  PRODUCT_SLOTS,
+  ProductSlot,
+  ProductSlotStatus,
+  TRAINING_RUN_MODELS,
+} from "@/lib/training/constants";
+import {
+  buildAdditionalFields,
+  buildDetailFields,
+  DETAIL_GROUPS,
+  DetailField,
+  getMetricTargetLabel,
+  getPredictionDescription,
+  getStructureDescription,
+} from "@/lib/training/detailFields";
+import {
+  extractErrorMessage,
+  formatComparisonDiff,
+  formatConfigLabel,
+  formatFeatureSet,
+  formatKoreanDateTime,
+  formatMetric,
+  formatModelLabel,
+  formatRoleLabel,
+  formatSignedNumber,
+  formatSignedPctPoint,
+  formatStatusLabel,
+  formatValue,
+} from "@/lib/training/formatters";
+import {
+  formatDetailValue,
+  shouldShowDetailValue,
+} from "@/lib/training/detailFields";
+import {
+  formatConfigValue,
+  formatExperimentName,
+  getChangedExperimentFields,
+  getConfigKeys,
+  getConfigValue,
+  getExperimentDescription,
+  getExperimentKind,
+  getExperimentTag,
+  getRunRole,
+  isLegacyRun,
+} from "@/lib/training/runUtils";
 
-type ProductSlotKind = "line" | "band" | "preparing-line" | "preparing-band";
-type ProductSlotStatus = "사용 중" | "데이터 확인 중" | "연결 필요" | "준비 중";
-type ExperimentCategory = "previous" | "quality_failed";
-type ExperimentKind = "line" | "band";
 type SelectedItem =
   | { kind: "slot"; slotId: ProductSlotId }
   | { kind: "experiment"; runId: string; category: ExperimentCategory };
-
-interface ProductSlot {
-  id: ProductSlotId;
-  kind: ProductSlotKind;
-  title: string;
-  model: string;
-  version: string | null;
-  timeframe: "1D" | "1W";
-  runId: string | null;
-  summary: string;
-}
-
-interface MetricDefinition {
-  label: string;
-  keys: string[];
-  format?: "number" | "rate" | "pct_point";
-}
-
-interface ComparisonMetricDefinition extends MetricDefinition {
-  id: string;
-  better: "higher" | "lower" | "target_coverage" | "neutral";
-}
 
 interface ComparisonRow {
   id: string;
@@ -70,206 +103,8 @@ interface ExperimentListItem {
   tag: string;
 }
 
-interface DetailField {
-  key: string;
-  label: string;
-  value: string;
-  monospace?: boolean;
-}
-
-const TRAINING_RUN_MODELS = new Set(["patchtst", "cnn_lstm", "tide", "line_band_composite"]);
-
-const PRODUCT_SLOTS: ProductSlot[] = PRODUCT_SLOT_CONFIGS.map((slot) => ({
-  id: slot.id,
-  kind: slot.status === "deferred" ? (slot.kind === "line" ? "preparing-line" : "preparing-band") : slot.kind,
-  title: slot.title,
-  model: slot.modelName,
-  version: slot.version,
-  timeframe: slot.timeframe,
-  runId: slot.runId,
-  summary: slot.summary,
-}));
-const PRODUCT_LINE_1D_RUN_ID = PRODUCT_SLOTS.find((slot) => slot.id === "line-1d")?.runId ?? null;
-const PRODUCT_BAND_1D_RUN_ID = PRODUCT_SLOTS.find((slot) => slot.id === "band-1d")?.runId ?? null;
-
-const CONFIG_KEYS_COMMON = ["role", "model_role", "feature_set", "checkpoint_selection", "seq_len", "horizon", "wandb_status"];
-const CONFIG_KEYS_LINE = ["patch_len", "stride", "patch_stride"];
-const CONFIG_KEYS_BAND = ["q_low", "q_high", "lambda_band", "band_mode"];
-const CONFIG_LABELS: Record<string, string> = {
-  role: "역할",
-  model_role: "모델 역할",
-  feature_set: "사용 데이터",
-  checkpoint_selection: "모델 선택 기준",
-  seq_len: "입력 길이",
-  horizon: "예측 기간",
-  wandb_status: "실험 추적 상태",
-  patch_len: "패치 길이",
-  stride: "패치 간격",
-  patch_stride: "패치 간격",
-  q_low: "하단 분위수",
-  q_high: "상단 분위수",
-  lambda_band: "밴드 손실 가중치",
-  band_mode: "밴드 방식",
-};
-
-const LINE_METRICS: MetricDefinition[] = [
-  { label: "순위 상관", keys: ["ic_mean", "spearman_ic", "h1_h5_ic_mean", "all_horizon_ic_mean"] },
-  { label: "상위-하위 수익 차", keys: ["long_short_spread", "h1_h5_long_short_spread", "all_horizon_long_short_spread"] },
-  { label: "위험 오판율", keys: ["false_safe_tail_rate", "h1_h5_false_safe_tail_rate", "all_horizon_false_safe_tail_rate"], format: "rate" },
-  { label: "큰 하락 포착률", keys: ["severe_downside_recall", "h1_h5_severe_downside_recall", "all_horizon_severe_downside_recall"], format: "rate" },
-  { label: "수수료 반영 샤프", keys: ["fee_adjusted_sharpe", "h1_h5_fee_adjusted_sharpe", "all_horizon_fee_adjusted_sharpe"] },
-];
-
-const BAND_METRICS: MetricDefinition[] = [
-  { label: "목표 포함률", keys: ["nominal_coverage", "h1_h5_band_nominal_coverage", "all_horizon_band_nominal_coverage"], format: "rate" },
-  { label: "실제 포함률", keys: ["empirical_coverage", "h1_h5_band_empirical_coverage", "all_horizon_band_empirical_coverage"], format: "rate" },
-  { label: "포함률 오차", keys: ["coverage_abs_error", "h1_h5_band_coverage_abs_error", "all_horizon_band_coverage_abs_error"], format: "pct_point" },
-  { label: "하단 이탈률", keys: ["lower_breach_rate", "h1_h5_band_lower_breach_rate"], format: "rate" },
-  { label: "상단 이탈률", keys: ["upper_breach_rate", "h1_h5_band_upper_breach_rate"], format: "rate" },
-  { label: "평균 밴드 폭", keys: ["avg_band_width", "h1_h5_band_avg_band_width"] },
-  { label: "비대칭 구간 점수", keys: ["asymmetric_interval_score", "h1_h5_band_asymmetric_interval_score", "all_horizon_band_asymmetric_interval_score"] },
-  { label: "밴드 폭 반응도", keys: ["band_width_ic", "h1_h5_band_band_width_ic", "all_horizon_band_band_width_ic"] },
-  { label: "하방 폭 반응도", keys: ["downside_width_ic", "h1_h5_band_downside_width_ic", "all_horizon_band_downside_width_ic"] },
-];
-
-const LINE_COMPARISON_METRICS: ComparisonMetricDefinition[] = [
-  { id: "ic_mean", label: "순위 상관", keys: ["ic_mean", "spearman_ic", "h1_h5_ic_mean", "all_horizon_ic_mean"], better: "higher" },
-  { id: "long_short_spread", label: "상위-하위 수익 차", keys: ["long_short_spread", "h1_h5_long_short_spread", "all_horizon_long_short_spread"], better: "higher" },
-  { id: "fee_adjusted_sharpe", label: "수수료 반영 샤프", keys: ["fee_adjusted_sharpe", "h1_h5_fee_adjusted_sharpe", "all_horizon_fee_adjusted_sharpe"], better: "higher" },
-  { id: "false_safe_tail_rate", label: "위험 오판율", keys: ["false_safe_tail_rate", "h1_h5_false_safe_tail_rate", "all_horizon_false_safe_tail_rate"], format: "rate", better: "lower" },
-  { id: "false_safe_severe_rate", label: "큰 위험 오판율", keys: ["false_safe_severe_rate", "h1_h5_false_safe_severe_rate", "all_horizon_false_safe_severe_rate"], format: "rate", better: "lower" },
-  { id: "severe_downside_recall", label: "큰 하락 포착률", keys: ["severe_downside_recall", "h1_h5_severe_downside_recall", "all_horizon_severe_downside_recall"], format: "rate", better: "higher" },
-];
-
-const BAND_COMPARISON_METRICS: ComparisonMetricDefinition[] = [
-  { id: "empirical_coverage", label: "실제 포함률", keys: ["empirical_coverage", "h1_h5_band_empirical_coverage", "all_horizon_band_empirical_coverage"], format: "rate", better: "target_coverage" },
-  { id: "coverage_abs_error", label: "포함률 오차", keys: ["coverage_abs_error", "h1_h5_band_coverage_abs_error", "all_horizon_band_coverage_abs_error"], format: "pct_point", better: "lower" },
-  { id: "lower_breach_rate", label: "하단 이탈률", keys: ["lower_breach_rate", "h1_h5_band_lower_breach_rate"], format: "rate", better: "lower" },
-  { id: "upper_breach_rate", label: "상단 이탈률", keys: ["upper_breach_rate", "h1_h5_band_upper_breach_rate"], format: "rate", better: "lower" },
-  { id: "asymmetric_interval_score", label: "비대칭 구간 점수", keys: ["asymmetric_interval_score", "h1_h5_band_asymmetric_interval_score", "all_horizon_band_asymmetric_interval_score"], better: "lower" },
-  { id: "avg_band_width", label: "평균 밴드 폭", keys: ["avg_band_width", "h1_h5_band_avg_band_width"], better: "neutral" },
-  { id: "band_width_ic", label: "밴드 폭 반응도", keys: ["band_width_ic", "h1_h5_band_band_width_ic", "all_horizon_band_band_width_ic"], better: "higher" },
-  { id: "downside_width_ic", label: "하방 폭 반응도", keys: ["downside_width_ic", "h1_h5_band_downside_width_ic", "all_horizon_band_downside_width_ic"], better: "higher" },
-];
-
-function formatValue(value: unknown, digits = 4) {
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return "-";
-    }
-    return new Intl.NumberFormat("ko-KR", {
-      maximumFractionDigits: digits,
-    }).format(value);
-  }
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-  if (typeof value === "boolean") {
-    return value ? "true" : "false";
-  }
-  return "-";
-}
-
-function formatKoreanDateTime(value: string | null | undefined) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return `${new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(date)} KST`;
-}
-
-function formatMetric(value: unknown, format: MetricDefinition["format"] = "number", fallback = "-") {
-  if (value == null) {
-    return fallback;
-  }
-  if (typeof value !== "number") {
-    return formatValue(value);
-  }
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-  if (format === "rate") {
-    return `${formatValue(value * 100, 1)}%`;
-  }
-  if (format === "pct_point") {
-    return `${formatValue(value * 100, 1)}%p`;
-  }
-  return formatValue(value);
-}
-
-function formatStatusLabel(status: string | null | undefined) {
-  if (status === "completed") {
-    return "완료";
-  }
-  if (status === "failed_nan") {
-    return "실패";
-  }
-  if (status === "failed_quality_gate") {
-    return "기준 미달";
-  }
-  return status ?? "-";
-}
-
-function formatRoleLabel(role: string | null | undefined) {
-  if (role === "line_model" || role === "line_v2" || role === "line") {
-    return "보수적 기준선";
-  }
-  if (role === "band_model" || role === "band") {
-    return "AI 밴드";
-  }
-  if (role === "composite_model") {
-    return "이전 조합 실험";
-  }
-  return role ?? "-";
-}
-
-function formatModelLabel(value: unknown) {
-  if (value === "patchtst") {
-    return "PatchTST";
-  }
-  if (value === "cnn_lstm") {
-    return "CNN-LSTM";
-  }
-  if (value === "line_band_composite") {
-    return "결합 방식 실험";
-  }
-  return formatValue(value);
-}
-
-function formatFeatureSet(value: unknown) {
-  if (value === "full_features") {
-    return "전체 피처";
-  }
-  if (value === "price_volatility_volume") {
-    return "가격·변동성·거래량";
-  }
-  return formatValue(value);
-}
-
-function formatConfigLabel(key: string) {
-  return CONFIG_LABELS[key] ?? key;
-}
-
-function extractErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error) {
-    if (error.message === "Network Error" || error.message.includes("ECONNREFUSED")) {
-      return "백엔드에 연결할 수 없습니다. NEXT_PUBLIC_BACKEND_URL 설정과 백엔드 상태를 확인해주세요.";
-    }
-    return error.message;
-  }
-  return fallback;
-}
+// DetailField interface 는 @/lib/training/detailFields 로 이동했다.
+// constants / formatters / runUtils 도 마찬가지.
 
 function getMetricByKeys(metrics: Record<string, unknown> | null | undefined, keys: string[]) {
   if (!metrics) {
@@ -343,29 +178,6 @@ function getStatusPillClass(status: ProductSlotStatus) {
 
 function getComparisonDefinitions(kind: ExperimentKind) {
   return kind === "band" ? BAND_COMPARISON_METRICS : LINE_COMPARISON_METRICS;
-}
-
-function formatSignedNumber(value: number | null, digits = 4) {
-  if (value == null) {
-    return "-";
-  }
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatValue(value, digits)}`;
-}
-
-function formatSignedPctPoint(value: number | null) {
-  if (value == null) {
-    return "-";
-  }
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatValue(value, 1)}%p`;
-}
-
-function formatComparisonDiff(value: number, format: MetricDefinition["format"]) {
-  if (format === "rate" || format === "pct_point") {
-    return formatSignedPctPoint(value * 100);
-  }
-  return formatSignedNumber(value);
 }
 
 function getComparisonResult(metric: ComparisonMetricDefinition, productValue: number, experimentValue: number) {
@@ -475,203 +287,8 @@ function hasDisplayableComparison(detail: AiRunDetail, productDetail: AiRunDetai
   return buildComparisonRows(detail, productDetail).length >= 2;
 }
 
-function getConfigValue(detail: AiRunDetail | null, key: string) {
-  if (!detail) {
-    return null;
-  }
-  if (key === "horizon") {
-    return detail.horizon ?? detail.config_summary?.horizon ?? null;
-  }
-  return detail.config_summary?.[key] ?? (detail as unknown as Record<string, unknown>)[key] ?? null;
-}
-
-function normalizeRunRole(role: unknown): string | null {
-  const normalized = String(role ?? "").trim().toLowerCase();
-  if (normalized === "line_model" || normalized === "line_v2" || normalized === "line") {
-    return "line_model";
-  }
-  if (normalized === "band_model" || normalized === "band") {
-    return "band_model";
-  }
-  if (normalized === "composite_model" || normalized === "composite") {
-    return "composite_model";
-  }
-  return null;
-}
-
-function getRunRole(run: AiRunSummary | AiRunDetail | null): string | null {
-  if (!run) {
-    return null;
-  }
-  if (run.run_id === PRODUCT_LINE_1D_RUN_ID) {
-    return "line_model";
-  }
-  if (run.run_id === PRODUCT_BAND_1D_RUN_ID) {
-    return "band_model";
-  }
-  if ("config_summary" in run) {
-    const configRole = normalizeRunRole(run.config_summary?.role) ?? normalizeRunRole(run.config_summary?.model_role);
-    if (configRole) {
-      return configRole;
-    }
-  }
-  return normalizeRunRole(run.role);
-}
-
-function isLegacyRun(run: AiRunSummary | AiRunDetail) {
-  const modelName = String(run.model_name ?? "");
-  const role = getRunRole(run);
-  return run.is_legacy || modelName === "line_band_composite" || role === "composite_model";
-}
-
-function getExperimentKind(run: AiRunSummary | AiRunDetail): ExperimentKind | null {
-  const role = getRunRole(run);
-  if (role === "line_model") {
-    return "line";
-  }
-  if (role === "band_model") {
-    return "band";
-  }
-  return null;
-}
-
-function getConfigKeys(detail: AiRunDetail | null) {
-  const role = getRunRole(detail);
-  if (role === "line_model") {
-    return [...CONFIG_KEYS_COMMON, ...CONFIG_KEYS_LINE];
-  }
-  if (role === "band_model") {
-    return [...CONFIG_KEYS_COMMON, ...CONFIG_KEYS_BAND];
-  }
-  return [...CONFIG_KEYS_COMMON, ...CONFIG_KEYS_LINE, ...CONFIG_KEYS_BAND];
-}
-
-function formatConfigValue(key: string, value: unknown) {
-  if (key === "role" || key === "model_role") {
-    return formatRoleLabel(typeof value === "string" ? value : null);
-  }
-  if (key === "feature_set") {
-    return formatFeatureSet(value);
-  }
-  return formatValue(value);
-}
-
-function formatExperimentName(run: AiRunSummary | AiRunDetail) {
-  const modelName = String(run.model_name ?? "");
-  const horizon = run.horizon ?? ("config_summary" in run ? getConfigValue(run, "horizon") : null);
-  const horizonLabel = horizon ? `h${formatValue(horizon, 0)}` : "h?";
-  if (modelName === "patchtst") {
-    const patchLen = "config_summary" in run ? getConfigValue(run, "patch_len") : null;
-    const stride = "config_summary" in run ? getConfigValue(run, "stride") ?? getConfigValue(run, "patch_stride") : null;
-    const seqLen = "config_summary" in run ? getConfigValue(run, "seq_len") : null;
-    const epochs = "config_summary" in run ? getConfigValue(run, "epochs") : null;
-    const featureSet = "config_summary" in run ? getConfigValue(run, "feature_set") ?? run.feature_set : run.feature_set;
-    const checkpointSelection = "config_summary" in run ? getConfigValue(run, "checkpoint_selection") ?? run.checkpoint_selection : run.checkpoint_selection;
-    if (horizon === 20) {
-      return "PatchTST h20 예측선 실험";
-    }
-    if (featureSet && featureSet !== "full_features") {
-      return `PatchTST ${horizonLabel} no fundamentals 예측선`;
-    }
-    if (typeof patchLen === "number" && patchLen >= 32) {
-      return `PatchTST ${horizonLabel} 긴 패치 예측선`;
-    }
-    if (typeof stride === "number" && stride <= 4) {
-      return `PatchTST ${horizonLabel} Dense 예측선`;
-    }
-    if (typeof seqLen === "number" && seqLen <= 60 && typeof epochs === "number" && epochs >= 30) {
-      return `PatchTST ${horizonLabel} seq60 장기 학습 예측선`;
-    }
-    if (typeof seqLen === "number" && seqLen <= 60) {
-      return `PatchTST ${horizonLabel} seq60 초기 예측선`;
-    }
-    if (checkpointSelection === "line_gate") {
-      return `PatchTST ${horizonLabel} Line Gate 예측선`;
-    }
-    if (checkpointSelection === "val_total") {
-      return `PatchTST ${horizonLabel} Val Total 예측선`;
-    }
-    return `PatchTST ${horizonLabel} 기본 예측선`;
-  }
-  if (modelName === "cnn_lstm") {
-    const qLow = "config_summary" in run ? getConfigValue(run, "q_low") : null;
-    const qHigh = "config_summary" in run ? getConfigValue(run, "q_high") : null;
-    const featureSet = "config_summary" in run ? getConfigValue(run, "feature_set") ?? run.feature_set : run.feature_set;
-    if (typeof qLow === "number" && typeof qHigh === "number") {
-      const dataLabel = featureSet === "price_volatility_volume" ? "가격·변동성" : "";
-      return `CNN-LSTM q${Math.round(qLow * 100)} ${dataLabel} AI 밴드`.replace(/\s+/g, " ").trim();
-    }
-    if (featureSet === "price_volatility_volume") {
-      return "CNN-LSTM 가격·변동성·거래량 밴드";
-    }
-    return "CNN-LSTM 밴드 초기 실험";
-  }
-  return `${formatModelLabel(run.model_name)} 실험`;
-}
-
-function getExperimentDescription(detail: AiRunDetail | null, category: ExperimentCategory) {
-  if (category === "quality_failed") {
-    return "목표 기준에 미치지 못해 현재 제품 화면에는 쓰지 않는 실험입니다.";
-  }
-  return "현재 제품 화면에는 쓰지 않지만, 모델 구조와 실험 방향을 비교하기 위해 남겨둔 실행입니다.";
-}
-
-function getExperimentTag(run: AiRunSummary | AiRunDetail, category: ExperimentCategory) {
-  if (category === "quality_failed") {
-    return "기준 미달";
-  }
-  if (run.status !== "completed") {
-    return "보류";
-  }
-  if (run.created_at && run.created_at < "2026-01-01") {
-    return "개선 전 버전";
-  }
-  return "제품 미사용";
-}
-
-function getChangedExperimentFields(detail: AiRunDetail) {
-  const fields: string[] = [];
-  const experimentKind = getExperimentKind(detail);
-  const featureSet = detail.feature_set ?? getConfigValue(detail, "feature_set");
-  const horizon = detail.horizon ?? getConfigValue(detail, "horizon");
-  const checkpointSelection = detail.checkpoint_selection ?? getConfigValue(detail, "checkpoint_selection");
-
-  if (horizon != null) {
-    fields.push(`예측 기간 h${formatValue(horizon, 0)}`);
-  }
-  if (featureSet) {
-    fields.push(`사용 데이터 ${formatFeatureSet(featureSet)}`);
-  }
-  if (checkpointSelection) {
-    fields.push(`모델 선택 기준 ${formatValue(checkpointSelection)}`);
-  }
-  if (experimentKind === "line") {
-    const patchLen = getConfigValue(detail, "patch_len");
-    const stride = getConfigValue(detail, "stride") ?? getConfigValue(detail, "patch_stride");
-    const seqLen = getConfigValue(detail, "seq_len");
-    if (patchLen != null) {
-      fields.push(`패치 길이 ${formatValue(patchLen, 0)}`);
-    }
-    if (stride != null) {
-      fields.push(`패치 간격 ${formatValue(stride, 0)}`);
-    }
-    if (seqLen != null) {
-      fields.push(`입력 길이 ${formatValue(seqLen, 0)}`);
-    }
-  }
-  if (experimentKind === "band") {
-    const qLow = getConfigValue(detail, "q_low");
-    const qHigh = getConfigValue(detail, "q_high");
-    const bandMode = getConfigValue(detail, "band_mode");
-    if (qLow != null && qHigh != null) {
-      fields.push(`분위수 ${formatValue(qLow)} / ${formatValue(qHigh)}`);
-    }
-    if (bandMode) {
-      fields.push(`밴드 방식 ${formatValue(bandMode)}`);
-    }
-  }
-  return fields.length > 0 ? fields : ["실험 조건 상세는 상세 정보에서 확인"];
-}
+// run 분류 / config 추출 / experiment 명명 helper 는 @/lib/training/runUtils 로 이동했다.
+// 아래는 component 내부에서만 쓰는 helper 만 남긴다.
 
 function GoalCard({ title, target, actual, diff, judgement, description, tone = "neutral" }: GoalCardProps) {
   return (
@@ -728,235 +345,7 @@ function DataList({ items }: { items: string[] }) {
   );
 }
 
-const DETAIL_LABELS: Record<string, string> = {
-  ...CONFIG_LABELS,
-  model_name: "모델 구조",
-  model_ver: "모델 버전",
-  status: "상태",
-  timeframe: "차트 단위",
-  feature_version: "피처 버전",
-  line_target_type: "예측선 목표값",
-  band_target_type: "밴드 목표값",
-  learning_rate: "학습률",
-  lr: "학습률",
-  weight_decay: "가중치 감쇠",
-  batch_size: "배치 크기",
-  epochs: "학습 epoch",
-  best_epoch: "선택 epoch",
-  best_val_total: "검증 손실",
-  device: "학습 장치",
-  amp_dtype: "혼합 정밀도",
-  seed: "시드",
-  n_features: "피처 수",
-  hidden_size: "은닉 크기",
-  kernel_size: "커널 크기",
-  fp32_modules: "FP32 모듈",
-  n_heads: "어텐션 헤드",
-  n_layers: "레이어 수",
-  d_model: "모델 차원",
-  alpha: "alpha",
-  beta: "beta",
-  lambda_line: "예측선 손실 가중치",
-  ci_aggregate: "CI 집계 기준",
-  ci_target_fast: "빠른 CI 목표",
-  run_id: "실행 ID",
-  created_at: "생성 시각",
-  checkpoint_exists: "체크포인트",
-  wandb_run_id: "실험 추적 ID",
-};
-
-const DETAIL_HIDDEN_KEYS = new Set([
-  "checkpoint_path",
-  "line_model_run_id",
-  "band_model_run_id",
-  "composition_policy",
-  "band_calibration_method",
-  "band_calibration_params",
-  "prediction_composition_version",
-  "deprecated_for_phase1_product_contract",
-  "indicator_layer_replacement",
-  "line_model_name",
-  "band_model_name",
-]);
-
-const DETAIL_GROUPS = [
-  {
-    id: "training",
-    title: "학습 설정",
-    keys: ["epochs", "batch_size", "lr", "learning_rate", "weight_decay", "dropout", "device", "amp_dtype", "seed", "best_epoch", "best_val_total"],
-  },
-  {
-    id: "data",
-    title: "데이터 설정",
-    keys: ["timeframe", "horizon", "seq_len", "feature_set", "feature_version", "n_features", "target", "line_target_type", "band_target_type", "ci_aggregate", "ci_target_fast"],
-  },
-  {
-    id: "structure",
-    title: "모델 구조",
-    keys: ["model_name", "model_ver", "patch_len", "patch_stride", "stride", "d_model", "n_heads", "n_layers", "hidden_size", "kernel_size", "fp32_modules", "band_mode"],
-  },
-  {
-    id: "loss",
-    title: "손실/평가 설정",
-    keys: ["alpha", "beta", "lambda_line", "lambda_band", "q_low", "q_high", "checkpoint_selection"],
-  },
-];
-
-function isDetailObject(value: unknown) {
-  return typeof value === "object" && value !== null;
-}
-
-function shouldShowDetailValue(key: string, value: unknown) {
-  if (DETAIL_HIDDEN_KEYS.has(key) || value == null) {
-    return false;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value);
-  }
-  if (typeof value === "string") {
-    return value.trim().length > 0;
-  }
-  if (typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0 && value.every((item) => !isDetailObject(item));
-  }
-  return false;
-}
-
-function formatDetailLabel(key: string) {
-  return DETAIL_LABELS[key] ?? key.replace(/_/g, " ");
-}
-
-function formatDetailValue(key: string, value: unknown) {
-  if (key === "model_name") {
-    return formatModelLabel(value);
-  }
-  if (key === "role") {
-    return formatRoleLabel(typeof value === "string" ? value : null);
-  }
-  if (key === "status") {
-    return formatStatusLabel(typeof value === "string" ? value : null);
-  }
-  if (key === "feature_set") {
-    return formatFeatureSet(value);
-  }
-  if (typeof value === "boolean") {
-    return value ? "사용" : "미사용";
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => formatValue(item)).join(", ");
-  }
-  return formatValue(value);
-}
-
-function buildDetailValueMap(detail: AiRunDetail) {
-  const values: Record<string, unknown> = {
-    ...detail.config_summary,
-    model_name: detail.model_name,
-    model_ver: detail.model_ver,
-    status: detail.status,
-    role: getRunRole(detail),
-    timeframe: detail.timeframe,
-    horizon: detail.horizon,
-    feature_set: detail.feature_set ?? detail.config_summary?.feature_set,
-    feature_version: detail.feature_version,
-    line_target_type: detail.line_target_type,
-    band_target_type: detail.band_target_type,
-    checkpoint_selection: detail.checkpoint_selection ?? detail.config_summary?.checkpoint_selection,
-    wandb_status: detail.wandb_status ?? detail.config_summary?.wandb_status,
-    best_epoch: detail.best_epoch,
-    best_val_total: detail.best_val_total,
-  };
-  return values;
-}
-
-function buildDetailFields(detail: AiRunDetail, keys: string[], usedKeys: Set<string>) {
-  const values = buildDetailValueMap(detail);
-  return keys.flatMap((key) => {
-    const value = values[key];
-    if (!shouldShowDetailValue(key, value) || usedKeys.has(key)) {
-      return [];
-    }
-    usedKeys.add(key);
-    return [{
-      key,
-      label: formatDetailLabel(key),
-      value: formatDetailValue(key, value),
-    }];
-  });
-}
-
-function buildAdditionalFields(detail: AiRunDetail, usedKeys: Set<string>) {
-  const values = buildDetailValueMap(detail);
-  return Object.keys(values)
-    .sort()
-    .flatMap((key) => {
-      const value = values[key];
-      if (!shouldShowDetailValue(key, value) || usedKeys.has(key)) {
-        return [];
-      }
-      usedKeys.add(key);
-      return [{
-        key,
-        label: formatDetailLabel(key),
-        value: formatDetailValue(key, value),
-      }];
-    });
-}
-
-function getPredictionDescription(detail: AiRunDetail) {
-  const horizon = detail.horizon ? `${detail.horizon}거래일` : "다음 구간";
-  const kind = getExperimentKind(detail);
-  if (kind === "band") {
-    return `${formatModelLabel(detail.model_name)} 모델이 ${horizon}의 예상 변동 범위를 계산합니다. 밴드는 매수 목표가 아니라 위험 범위를 이해하기 위한 보조 지표입니다.`;
-  }
-  return `${formatModelLabel(detail.model_name)} 모델이 ${horizon}의 수익 방향과 종목 순위 판단을 돕는 예측선을 계산합니다. 단독 매매 신호가 아니라 가격 차트 위의 참고선으로 사용합니다.`;
-}
-
-function getStructureDescription(detail: AiRunDetail) {
-  const modelName = String(detail.model_name ?? "");
-  if (modelName === "patchtst") {
-    return "PatchTST는 시계열을 패치 단위로 나누어 최근 가격·지표 흐름의 패턴을 학습하는 Transformer 계열 구조입니다.";
-  }
-  if (modelName === "cnn_lstm") {
-    return "CNN-LSTM은 합성곱으로 짧은 구간의 패턴을 잡고, LSTM으로 시간 순서의 흐름을 이어서 보는 구조입니다.";
-  }
-  if (modelName === "tide") {
-    return "TiDE는 과거 구간을 인코딩하고 미래 구간을 디코딩하는 시계열 예측 구조입니다.";
-  }
-  return "이 실행은 저장된 설정과 평가 지표를 기준으로 구조와 품질을 확인합니다.";
-}
-
-function getMetricTargetLabel(metric: MetricDefinition) {
-  const key = metric.keys[0];
-  if (["ic_mean", "spearman_ic", "long_short_spread", "fee_adjusted_sharpe", "band_width_ic", "downside_width_ic"].includes(key)) {
-    return "0보다 큼";
-  }
-  if (key === "false_safe_tail_rate") {
-    return "25% 이하";
-  }
-  if (key === "severe_downside_recall") {
-    return "70% 이상";
-  }
-  if (key === "nominal_coverage" || key === "empirical_coverage") {
-    return "70% 근처";
-  }
-  if (key === "coverage_abs_error") {
-    return "5%p 이하";
-  }
-  if (key === "lower_breach_rate" || key === "upper_breach_rate") {
-    return "15% 근처";
-  }
-  if (key === "asymmetric_interval_score") {
-    return "낮을수록 좋음";
-  }
-  if (key === "avg_band_width") {
-    return "관찰 지표";
-  }
-  return "해석 기준 확인";
-}
+// detail field 관련 constants / helpers 는 @/lib/training/detailFields 로 이동했다.
 
 function DetailFieldGrid({ fields }: { fields: DetailField[] }) {
   if (fields.length === 0) {

@@ -14,294 +14,68 @@ import {
   StockSummary,
 } from "@/api/client";
 import MetricCard from "@/components/MetricCard";
+import {
+  DEFAULT_FEE_BPS,
+  DEFAULT_PRICE_LOOKBACK_DAYS,
+  getStrategyDefinition,
+  INDICATOR_BASELINE_RULE,
+  LENS_BALANCE_RULE,
+  PREDICTION_HISTORY_LIMIT,
+  PRODUCT_BAND_RUN_ID,
+  PRODUCT_LINE_RUN_ID,
+  SIGNAL_GROUP_DEFAULT_LIMIT,
+  SIGNAL_GROUP_MAX_LIMIT,
+  SIGNAL_GROUPS,
+  SIGNAL_SCAN_TICKERS,
+  STRATEGIES,
+  strategyNeedsBand,
+  strategyNeedsLine,
+} from "@/lib/backtest/constants";
+import {
+  describeAvoidanceStrength,
+  evaluateDrawdown,
+  evaluateFollowReturn,
+  evaluateLossAvoidance,
+  evaluateTradeFrequency,
+} from "@/lib/backtest/evaluators";
+import {
+  getBandWidthValue,
+  getConservativeValue,
+  getHighestUpperBandValue,
+  getWorstLowerBandValue,
+  median,
+  percentileRank,
+} from "@/lib/backtest/predictionHelpers";
+import type {
+  BacktestPoint,
+  BacktestSimulationResult,
+  DecisionFactorId,
+  LineSeries,
+  RiskSignal,
+  SignalGroupId,
+  StrategyDefinition,
+  StrategyId,
+  StrategySignalCard,
+  TradeEvent,
+  TradeRecord,
+} from "@/lib/backtest/types";
+import {
+  buildDefaultPriceWindow,
+  isValidDate,
+  sortPriceRows,
+  sortUniqueByDate,
+} from "@/lib/dateUtils";
+import {
+  formatCompact,
+  formatNumber,
+  formatPercent,
+  formatRatioAsPercent,
+  formatUnsignedRatioAsPercent,
+  isFiniteNumber,
+} from "@/lib/formatters";
 import { PRODUCT_SLOT_BY_ID } from "@/lib/productSlots";
 
-const PRODUCT_LINE_RUN_ID = PRODUCT_SLOT_BY_ID["line-1d"].runId ?? "";
-const PRODUCT_BAND_RUN_ID = PRODUCT_SLOT_BY_ID["band-1d"].runId ?? "";
-const DEFAULT_PRICE_LOOKBACK_DAYS = 365;
-const PREDICTION_HISTORY_LIMIT = 200;
-const DEFAULT_FEE_BPS = 10;
-const SIGNAL_SCAN_TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "AMD", "NFLX", "JPM", "XOM"];
-
-const LENS_BALANCE_RULE = {
-  lineEntryThreshold: -0.002,
-  lineHoldThreshold: -0.014,
-  lowerRiskThreshold: -0.05,
-  widthExpansionThreshold: 1.1,
-  widthPercentileThreshold: 0.75,
-  confirmDays: 2,
-  reentryConfirmDays: 2,
-};
-
-const LENS_BALANCE_VALIDATION = [
-  ["전략 수익률", "3.98%"],
-  ["단순 보유 수익률", "2.37%"],
-  ["전략 MDD", "-5.93%"],
-  ["단순 보유 MDD", "-13.08%"],
-  ["손실 회피율", "55.6%"],
-  ["시장 참여율", "44.7%"],
-  ["강한 상승 방어율", "67.1%"],
-  ["검증 티커", "95개"],
-] as const;
-
-const INDICATOR_BASELINE_RULE = {
-  ma60Entry: 0.02,
-  ma20Entry: -0.02,
-  ma60Exit: -0.05,
-  ma20Exit: -0.05,
-  macdEntry: 0,
-  rsiEntryCap: 75,
-  atrExit: 0.07,
-  pullbackBb: 0.35,
-  pullbackRsi: 55,
-  entryConfirmDays: 2,
-  exitConfirmDays: 3,
-};
-
-const INDICATOR_BASELINE_VALIDATION = [
-  ["전략 수익률", "22.95%"],
-  ["500 동일가중 시장", "16.87%"],
-  ["단순 보유 평균", "30.91%"],
-  ["전략 MDD", "-20.13%"],
-  ["단순 보유 MDD", "-25.95%"],
-  ["MDD 개선폭", "+5.82%"],
-  ["시장 참여율", "63.5%"],
-  ["검증 티커", "500개"],
-] as const;
-
-type StrategyId = "indicator_baseline_v1" | "lens_balance_v1";
-type SignalGroupId = "buy" | "hold" | "risk" | "watch";
-type DecisionFactorId =
-  | "conservative"
-  | "lowerBand"
-  | "bandWidth"
-  | "bandExpansion"
-  | "bandPercentile"
-  | "ma60Trend"
-  | "ma20Trend"
-  | "macd"
-  | "rsi"
-  | "atr";
-
-interface StrategyDefinition {
-  id: StrategyId;
-  label: string;
-  shortLabel: string;
-  description: string;
-  ruleRows: Array<[string, string]>;
-  visibleFactors: DecisionFactorId[];
-  validationRows: ReadonlyArray<readonly [string, string]>;
-  scopeNote: string;
-  usesAi: boolean;
-}
-
-interface RiskSignal {
-  date: string;
-  position: 0 | 1;
-  targetPosition: 0 | 1;
-  conservativeReturn: number | null;
-  lowerBandReturn: number | null;
-  bandWidthReturn: number | null;
-  bandWidthExpansion: number | null;
-  bandWidthPercentile: number | null;
-  ma60Ratio: number | null;
-  ma20Ratio: number | null;
-  macdRatio: number | null;
-  rsi: number | null;
-  atrRatio: number | null;
-  reason: string;
-}
-
-interface BacktestPoint {
-  date: string;
-  price: number;
-  strategyEquity: number;
-  buyHoldEquity: number;
-  position: 0 | 1;
-}
-
-interface TradeEvent {
-  date: string;
-  kind: "entry" | "exit";
-  price: number;
-  reason: string;
-}
-
-interface BacktestSimulationResult {
-  points: BacktestPoint[];
-  signals: RiskSignal[];
-  tradeEvents: TradeEvent[];
-  strategyReturnPct: number;
-  buyHoldReturnPct: number;
-  buyHoldReturnRatio: number | null;
-  excessReturnPct: number;
-  maxDrawdownPct: number;
-  buyHoldMaxDrawdownPct: number;
-  maxDrawdownImprovementPct: number;
-  feeAdjustedReturnPct: number;
-  feeAdjustedSharpe: number;
-  buyHoldSharpe: number;
-  strategySortino: number;
-  buyHoldSortino: number;
-  tradeCount: number;
-  cashWaitRatio: number;
-  marketParticipationRate: number;
-  worstTradeLossPct: number | null;
-  averageHoldingDays: number | null;
-  avoidedLargeLossDays: number;
-  largeLossDays: number;
-  largeLossAvoidanceRate: number | null;
-  largeLossThresholdPct: number | null;
-}
-
-interface LineSeries {
-  label: string;
-  color: string;
-  values: Array<{ date: string; value: number }>;
-}
-
-interface TradeRecord {
-  date: string;
-  action: "매수" | "보유" | "매도" | "대기";
-  price: number | null;
-  reason: string;
-  nextDayReturn: number | null;
-  conservativeReturn: number | null;
-  lowerBandReturn: number | null;
-  bandWidthReturn: number | null;
-  bandWidthExpansion: number | null;
-  bandWidthPercentile: number | null;
-  ma60Ratio: number | null;
-  ma20Ratio: number | null;
-  macdRatio: number | null;
-  rsi: number | null;
-  atrRatio: number | null;
-}
-
-interface StrategySignalCard {
-  ticker: string;
-  sector: string | null;
-  group: SignalGroupId;
-  signalLabel: string;
-  reason: string;
-  asofDate: string | null;
-  conservativeReturn: number | null;
-  lowerBandReturn: number | null;
-  bandWidthReturn: number | null;
-  bandWidthExpansion: number | null;
-  bandWidthPercentile: number | null;
-  ma60Ratio: number | null;
-  ma20Ratio: number | null;
-  macdRatio: number | null;
-  rsi: number | null;
-  atrRatio: number | null;
-  hasUsableSignal: boolean;
-}
-
-const SIGNAL_GROUPS: Array<{ id: SignalGroupId; title: string; description: string }> = [
-  { id: "buy", title: "매수 후보", description: "선택한 전략 기준으로 신규 진입을 검토할 수 있는 종목입니다." },
-  { id: "hold", title: "보유 유지", description: "선택한 전략상 보유 상태를 이어가는 종목입니다." },
-  { id: "risk", title: "위험 확대", description: "전략 기준이 약해져 방어 확인이 필요한 종목입니다." },
-  { id: "watch", title: "관망", description: "진입 기준이 아직 충분하지 않거나 신호가 부족한 종목입니다." },
-];
-
-const SIGNAL_GROUP_DEFAULT_LIMIT: Record<SignalGroupId, number> = {
-  buy: 3,
-  hold: 3,
-  risk: 3,
-  watch: 0,
-};
-
-const SIGNAL_GROUP_MAX_LIMIT = 10;
-
-const STRATEGIES: StrategyDefinition[] = [
-  {
-    id: "indicator_baseline_v1",
-    label: "지표 기준선 v1",
-    shortLabel: "지표 기준선",
-    description:
-      "AI 제품 슬롯과 분리해, 60일 추세, 20일 추세, MACD, RSI, ATR만으로 비교하는 연구 기준선입니다.",
-    ruleRows: [
-      ["사용 지표", "60일 추세, 20일 추세, MACD, RSI, ATR, Bollinger 위치"],
-      ["진입", "60일 추세 +2% 이상, 20일 추세 -2% 이상, MACD 양수, RSI 75 미만"],
-      ["저가 반등 진입", "60일 추세가 살아 있고 Bollinger 위치가 낮으며 RSI 55 미만"],
-      ["청산", "60일 추세 -5% 이하 또는 20일 추세 -5% 이하"],
-      ["변동성 방어", "ATR 7% 이상이고 20일 추세가 약하면 청산 후보"],
-      ["확인일", "진입 2일 확인, 청산 3일 확인"],
-      ["포지션", "단일 티커 100% 또는 현금 100%"],
-      ["판정", "제품 provenance가 아닌 연구 기준선"],
-    ],
-    visibleFactors: ["ma60Trend", "ma20Trend", "macd", "rsi", "atr"],
-    validationRows: INDICATOR_BASELINE_VALIDATION,
-    scopeNote:
-      "최근 1년 500티커 기준으로 동일가중 시장 proxy는 넘었지만, 각 티커 단순 보유 평균 수익률은 넘지 못했습니다. 기준선 전략으로만 봅니다.",
-    usesAi: false,
-  },
-  {
-    id: "lens_balance_v1",
-    label: "Lens Balance v1",
-    shortLabel: "Lens Balance",
-    description:
-      "1D 보수적 기준선과 자동 갱신된 1D AI 밴드를 함께 읽는 단일 티커 연구 전략입니다. 제품 provenance와 연구 기준선은 분리해서 봅니다.",
-    ruleRows: [
-      ["사용 지표", "보수적 기준선, 자동 갱신된 1D AI 밴드"],
-      ["제품 예측선 슬롯", `${PRODUCT_SLOT_BY_ID["line-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["line-1d"].sourceCp}`],
-      ["제품 밴드 슬롯", `${PRODUCT_SLOT_BY_ID["band-1d"].displayName} · ${PRODUCT_SLOT_BY_ID["band-1d"].sourceCp}`],
-      ["예측선 계약", "F4 β=4 ensemble v1. raw output은 safe_line_score이며 화면에서는 가격으로 환산합니다."],
-      ["진입", "보수적 기준선 >= -0.2%, 밴드 폭 급확장 아님"],
-      ["보유", "보수적 기준선 >= -1.4%, line 약화와 밴드 위험이 동시에 확정되지 않음"],
-      ["청산", "line 약화 + 밴드 하단 위험 또는 밴드 폭 확장"],
-      ["확인일", "청산 2일 확인, 재진입 2일 확인"],
-      ["포지션", "단일 티커 100% 또는 현금 100%"],
-      ["판정", "제품 기본 후보가 아니라 AI 지표 해석용 실험 전략 v1"],
-    ],
-    visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "bandPercentile"],
-    validationRows: LENS_BALANCE_VALIDATION,
-    scopeNote: "CP109/CP110 95개 티커 holdout 기준 결과입니다. 제품 기본 후보가 아니라 AI 지표 해석용 실험 전략 v1입니다.",
-    usesAi: true,
-  },
-];
-
-function formatNumber(value: number | null | undefined, digits = 2) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("ko-KR", {
-    maximumFractionDigits: digits,
-  }).format(value);
-}
-
-function formatPercent(value: number | null | undefined, digits = 2) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return `${value >= 0 ? "+" : ""}${formatNumber(value, digits)}%`;
-}
-
-function formatRatioAsPercent(value: number | null | undefined, digits = 2) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return formatPercent(value * 100, digits);
-}
-
-function formatUnsignedRatioAsPercent(value: number | null | undefined, digits = 2) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return `${formatNumber(value * 100, digits)}%`;
-}
-
-function formatCompact(value: number | null | undefined) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("ko-KR", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
+// BacktestView 전용 에러 메시지 (StockView 와 별도 톤).
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (error.message === "Network Error" || error.message.includes("ECONNREFUSED")) {
@@ -312,171 +86,14 @@ function extractErrorMessage(error: unknown) {
   return "백테스트 데이터를 불러오지 못했습니다.";
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isValidDate(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
-}
-
-function sortUniqueByDate<T extends { date: string }>(rows: T[]) {
-  const deduped = new Map<string, T>();
-  rows.forEach((row) => {
-    if (isValidDate(row.date)) {
-      deduped.set(row.date, row);
-    }
-  });
-  return Array.from(deduped.values()).sort((left, right) => left.date.localeCompare(right.date));
-}
-
-function sortPriceRows(rows: PriceBar[]) {
-  return sortUniqueByDate(rows.filter((row) => Number.isFinite(row.close)));
-}
-
-function formatDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function buildDefaultPriceWindow() {
-  const end = new Date();
-  const start = new Date(end);
-  start.setDate(start.getDate() - DEFAULT_PRICE_LOOKBACK_DAYS);
-  return {
-    start: formatDate(start),
-    end: formatDate(end),
-  };
-}
-
 async function fetchPriceHistory(ticker: string, timeframe: DisplayTimeframe) {
-  const window = buildDefaultPriceWindow();
+  const window = buildDefaultPriceWindow(DEFAULT_PRICE_LOOKBACK_DAYS);
   const response = await fetchPrices(ticker, {
     timeframe,
     start: window.start,
     end: window.end,
   });
   return sortPriceRows(response.data.data);
-}
-
-function getLastFinite(values: number[] | null | undefined) {
-  if (!values) {
-    return null;
-  }
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    if (Number.isFinite(values[index])) {
-      return values[index];
-    }
-  }
-  return null;
-}
-
-function getConservativeValue(prediction: PredictionResult) {
-  return getLastFinite(prediction.conservative_series?.length ? prediction.conservative_series : prediction.line_series);
-}
-
-function getWorstLowerBandValue(prediction: PredictionResult) {
-  const values = prediction.lower_band_series.filter(Number.isFinite);
-  return values.length > 0 ? Math.min(...values) : null;
-}
-
-function getHighestUpperBandValue(prediction: PredictionResult) {
-  const values = prediction.upper_band_series.filter(Number.isFinite);
-  return values.length > 0 ? Math.max(...values) : null;
-}
-
-function getBandWidthValue(prediction: PredictionResult) {
-  const lower = getWorstLowerBandValue(prediction);
-  const upper = getHighestUpperBandValue(prediction);
-  return lower != null && upper != null ? upper - lower : null;
-}
-
-function getStrategyDefinition(strategyId: StrategyId) {
-  return STRATEGIES.find((strategy) => strategy.id === strategyId) ?? STRATEGIES[0];
-}
-
-function median(values: number[]) {
-  if (values.length === 0) {
-    return null;
-  }
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-}
-
-function percentileRank(value: number, values: number[]) {
-  const usable = values.filter(Number.isFinite);
-  if (usable.length === 0) {
-    return null;
-  }
-  const lowerOrEqual = usable.filter((candidate) => candidate <= value).length;
-  return lowerOrEqual / usable.length;
-}
-
-function describeAvoidanceStrength(value: number | null | undefined) {
-  if (value == null || Number.isNaN(value)) {
-    return "-";
-  }
-  if (value >= 0.6) {
-    return "강함";
-  }
-  if (value >= 0.4) {
-    return "보통";
-  }
-  return "약함";
-}
-
-function evaluateFollowReturn(result: BacktestSimulationResult | null) {
-  if (!result || result.buyHoldReturnRatio == null) {
-    return "-";
-  }
-  if (result.buyHoldReturnPct < 0 && result.strategyReturnPct > result.buyHoldReturnPct) {
-    return "방어 우위";
-  }
-  if (result.buyHoldReturnRatio >= 0.7) {
-    return "양호";
-  }
-  if (result.buyHoldReturnRatio >= 0.4) {
-    return "보통";
-  }
-  return "약함";
-}
-
-function evaluateDrawdown(result: BacktestSimulationResult | null) {
-  if (!result) {
-    return "-";
-  }
-  if (result.maxDrawdownImprovementPct >= 5) {
-    return "양호";
-  }
-  if (result.maxDrawdownImprovementPct > 0) {
-    return "보통";
-  }
-  return "약함";
-}
-
-function evaluateLossAvoidance(result: BacktestSimulationResult | null) {
-  return describeAvoidanceStrength(result?.largeLossAvoidanceRate);
-}
-
-function evaluateTradeFrequency(result: BacktestSimulationResult | null) {
-  if (!result) {
-    return "-";
-  }
-  if (result.tradeCount <= 20) {
-    return "적정";
-  }
-  if (result.tradeCount <= 40) {
-    return "많음";
-  }
-  return "과도";
-}
-
-function strategyNeedsLine(strategyId: StrategyId) {
-  return strategyId === "lens_balance_v1";
-}
-
-function strategyNeedsBand(strategyId: StrategyId) {
-  return strategyId === "lens_balance_v1";
 }
 
 function buildRawSignals(params: {
