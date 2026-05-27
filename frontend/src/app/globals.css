@@ -1,66 +1,7 @@
 /* Lens Dashboard — light, airy, indigo-accented system */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap");
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css");
-
-:root {
-  --bg: #f4f6fb;
-  --bg-elevated: #fbfcfe;
-  --surface: #ffffff;
-  --surface-muted: #f0f3f9;
-  --surface-strong: #e4e9f2;
-
-  --fg1: #0f172a;
-  --fg2: #475569;
-  --fg-faint: #94a3b8;
-  --fg-on-accent: #ffffff;
-
-  /* legacy aliases — keep for components still using --text/--muted */
-  --text: var(--fg1);
-  --muted: var(--fg2);
-  --faint: var(--fg-faint);
-  --border: #e4e9f2;
-  --border-strong: #cbd5e1;
-  --primary: #0f172a;
-  --primary-soft: #eef2ff;
-
-  --accent-50:  #eef2ff;
-  --accent-100: #e0e7ff;
-  --accent-200: #c7d2fe;
-  --accent-300: #a5b4fc;
-  --accent-400: #818cf8;
-  --accent-500: #6366f1;
-  --accent-600: #4f46e5;
-  --accent-700: #4338ca;
-  --accent: #4f46e5;
-  --accent-soft: #eef2ff;
-  --accent-ring: rgba(99, 102, 241, 0.18);
-  --brand-grad: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
-
-  --green: #059669;
-  --green-soft: #ecfdf5;
-  --red: #dc2626;
-  --red-soft: #fef2f2;
-  --amber: #d97706;
-
-  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.04);
-  --shadow-accent: 0 4px 14px rgba(99, 102, 241, 0.22);
-
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-pill: 999px;
-
-  --font-sans: "Pretendard", "Inter", -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-
-  --motion: 160ms cubic-bezier(0.4, 0, 0.2, 1);
-  --side-nav-w: 248px;
-  --side-nav-w-collapsed: 64px;
-}
+@import "./tokens.css";
 
 * {
   box-sizing: border-box;
