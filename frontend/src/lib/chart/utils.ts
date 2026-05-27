@@ -299,6 +299,24 @@ function buildRollingBandHistory(
   );
 }
 
+function connectLatestOverlayToHistory(history: OverlayPoint[], future: OverlayPoint[]) {
+  if (history.length === 0 || future.length === 0) {
+    return future;
+  }
+
+  const lastHistoryPoint = history[history.length - 1];
+  const firstFuturePoint = future[0];
+  if (!lastHistoryPoint || !firstFuturePoint) {
+    return future;
+  }
+
+  if (compareDate(lastHistoryPoint.time, firstFuturePoint.time) >= 0) {
+    return future;
+  }
+
+  return [lastHistoryPoint, ...future];
+}
+
 function getLatestBandHistoryDate(history: ProductBandHistoryPoint[] | undefined) {
   return maxDate((history ?? []).map((item) => item.asof_date));
 }
@@ -379,13 +397,19 @@ export function buildOverlayState(
   const conservativeHistoryData = buildRollingConservativeHistory(predictionHistory, latestPriceDate);
   const upperBandHistoryData = buildRollingBandHistory(bandPredictionHistory, "upper", latestPriceDate);
   const lowerBandHistoryData = buildRollingBandHistory(bandPredictionHistory, "lower", latestPriceDate);
+  const connectedConservativeData = connectLatestOverlayToHistory(
+    conservativeHistoryData,
+    conservativeData
+  );
+  const connectedUpperBandData = connectLatestOverlayToHistory(upperBandHistoryData, upperBandData);
+  const connectedLowerBandData = connectLatestOverlayToHistory(lowerBandHistoryData, lowerBandData);
 
   const canDrawConservativeLine =
     Boolean(layers?.conservativeLine) &&
-    (conservativeData.length >= 2 || conservativeHistoryData.length >= 2);
+    (connectedConservativeData.length >= 2 || conservativeHistoryData.length >= 2);
   const canDrawBand =
     Boolean(layers?.aiBand) &&
-    ((upperBandData.length >= 2 && lowerBandData.length >= 2) ||
+    ((connectedUpperBandData.length >= 2 && connectedLowerBandData.length >= 2) ||
       (upperBandHistoryData.length >= 2 && lowerBandHistoryData.length >= 2));
   const warning =
     (prediction && conservativeData.length === 0 && conservativeHistoryData.length === 0) ||
@@ -399,10 +423,10 @@ export function buildOverlayState(
   return {
     canDrawBand,
     canDrawConservativeLine,
-    conservativeData,
+    conservativeData: connectedConservativeData,
     conservativeHistoryData,
-    upperBandData,
-    lowerBandData,
+    upperBandData: connectedUpperBandData,
+    lowerBandData: connectedLowerBandData,
     upperBandHistoryData,
     lowerBandHistoryData,
     modelMarkerDate,

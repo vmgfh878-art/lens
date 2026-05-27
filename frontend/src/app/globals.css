@@ -1556,18 +1556,16 @@ input:disabled {
 
 .chart-legend__item--latest-band::before {
   width: 14px;
-  height: 0;
-  background: transparent;
-  border-top: 3px dashed #1d4ed8;
-  border-radius: 0;
+  height: 4px;
+  background: #1d4ed8;
+  border-radius: 999px;
 }
 
 .chart-legend__item--latest-line::before {
   width: 14px;
-  height: 0;
-  background: transparent;
-  border-top: 3px dashed #047857;
-  border-radius: 0;
+  height: 4px;
+  background: #047857;
+  border-radius: 999px;
 }
 
 .chart-legend__item--history::before {

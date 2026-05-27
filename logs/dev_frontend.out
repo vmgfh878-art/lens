@@ -18,3 +18,8 @@
  ✓ Compiled in 113ms (703 modules)
  ✓ Compiled in 114ms (703 modules)
  GET /?view=stocks 200 in 91ms
+ ✓ Compiled in 652ms (718 modules)
+ ✓ Compiled in 168ms (703 modules)
+ GET /?view=stocks 200 in 52ms
+ ✓ Compiled in 321ms (703 modules)
+ GET /?view=report 200 in 69ms

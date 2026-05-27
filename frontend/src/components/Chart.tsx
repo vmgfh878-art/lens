@@ -248,7 +248,7 @@ export default function Chart({
       const upperBandSeries = chart.addLineSeries({
         color: "#1d4ed8",
         lineWidth: 4,
-        lineStyle: LineStyle.Dashed,
+        lineStyle: LineStyle.Solid,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -258,7 +258,7 @@ export default function Chart({
       const lowerBandSeries = chart.addLineSeries({
         color: "#1d4ed8",
         lineWidth: 4,
-        lineStyle: LineStyle.Dashed,
+        lineStyle: LineStyle.Solid,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -270,7 +270,7 @@ export default function Chart({
       const conservativeSeries = chart.addLineSeries({
         color: "#047857",
         lineWidth: 4,
-        lineStyle: LineStyle.Dashed,
+        lineStyle: LineStyle.Solid,
         priceScaleId: overlayScaleId,
         priceLineVisible: false,
       });
