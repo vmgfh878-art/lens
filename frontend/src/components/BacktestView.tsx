@@ -5,7 +5,6 @@ import { FormEvent, Fragment, startTransition, useDeferredValue, useEffect, useM
 import {
   DisplayTimeframe,
   fetchIndicators,
-  fetchPredictionHistory,
   fetchPrices,
   fetchStrategyBacktest,
   fetchStrategyScan,
@@ -484,12 +483,9 @@ async function loadStrategySignalCard(ticker: string, strategyId: StrategyId): P
     const [prices, indicatorsResponse, lineResponse, bandResponse, tickerResponse] = await Promise.all([
       fetchPriceHistory(ticker, "1D"),
       fetchIndicators(ticker, { timeframe: "1D", limit: 300 }).catch(() => null),
-      strategyId === "lens_balance_v1"
-        ? fetchPredictionHistory(ticker, { runId: PRODUCT_LINE_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null)
-        : Promise.resolve(null),
-      strategyId === "lens_balance_v1"
-        ? fetchPredictionHistory(ticker, { runId: PRODUCT_BAND_RUN_ID, limit: PREDICTION_HISTORY_LIMIT }).catch(() => null)
-        : Promise.resolve(null),
+      // legacy /predictions/history endpoint 제거됨. lens_balance_v1 은 v1 endpoint 로 옮겨야 한다.
+      Promise.resolve(null as { data: PredictionResult[] } | null),
+      Promise.resolve(null as { data: PredictionResult[] } | null),
       fetchTickers({ search: ticker, limit: 1 }).catch(() => null),
     ]);
     const indicators = sortUniqueByDate(indicatorsResponse?.data.data ?? []);
@@ -971,19 +967,10 @@ export default function BacktestView() {
 
       const needsLine = strategyNeedsLine(nextStrategyId);
       const needsBand = strategyNeedsBand(nextStrategyId);
+      // legacy /predictions/history endpoint 제거됨. lens_balance_v1 류 strategy 는 v1 endpoint 로 옮겨야 한다.
       const [lineResponse, bandResponse] = await Promise.all([
-        needsLine
-          ? fetchPredictionHistory(normalizedTicker, {
-              runId: PRODUCT_LINE_RUN_ID,
-              limit: PREDICTION_HISTORY_LIMIT,
-            }).catch(() => null)
-          : Promise.resolve(null),
-        needsBand
-          ? fetchPredictionHistory(normalizedTicker, {
-              runId: PRODUCT_BAND_RUN_ID,
-              limit: PREDICTION_HISTORY_LIMIT,
-            }).catch(() => null)
-          : Promise.resolve(null),
+        Promise.resolve(null as { data: PredictionResult[] } | null),
+        Promise.resolve(null as { data: PredictionResult[] } | null),
       ]);
       const lineRows = lineResponse?.data ?? [];
       const bandRows = bandResponse?.data ?? [];

@@ -1,51 +1,14 @@
 import { api } from "../baseClient";
 import type { ApiResponse, PredictionTimeframe } from "../types/common";
 import type {
-  PredictionResult,
   ProductPredictionHistoryResult,
   V1BandPredictionResult,
   V1LinePredictionResult,
 } from "../types/predictions";
 
-export async function fetchPrediction(
-  ticker: string,
-  options?: {
-    model?: "patchtst" | "cnn_lstm" | "tide";
-    timeframe?: PredictionTimeframe;
-    horizon?: number;
-    runId?: string;
-  }
-): Promise<ApiResponse<PredictionResult>> {
-  const params = {
-    model: options?.model ?? "patchtst",
-    timeframe: options?.timeframe ?? "1D",
-    horizon: options?.horizon,
-    run_id: options?.runId,
-  };
-  const res = await api.get<ApiResponse<PredictionResult>>(
-    `/api/v1/stocks/${ticker}/predictions/latest`,
-    { params }
-  );
-  return res.data;
-}
-
-export async function fetchPredictionHistory(
-  ticker: string,
-  options: {
-    runId: string;
-    limit?: number;
-  }
-): Promise<ApiResponse<PredictionResult[]>> {
-  const params = {
-    run_id: options.runId,
-    limit: options.limit ?? 90,
-  };
-  const res = await api.get<ApiResponse<PredictionResult[]>>(
-    `/api/v1/stocks/${ticker}/predictions/history`,
-    { params }
-  );
-  return res.data;
-}
+// legacy fetchPrediction / fetchPredictionHistory 는 backend 의
+// /api/v1/stocks/{ticker}/predictions/latest|history endpoint 와 함께 제거됐다.
+// 모든 line/band 조회는 v1 endpoint (/api/v1/predictions/...) 로 단일화.
 
 export async function fetchProductPredictionHistory(
   ticker: string,

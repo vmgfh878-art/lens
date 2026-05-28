@@ -45,8 +45,6 @@ export {
   fetchTickers,
 } from "./endpoints/stocks";
 export {
-  fetchPrediction,
-  fetchPredictionHistory,
   fetchProductPredictionHistory,
   fetchV1Band1dPrediction,
   fetchV1Band1wPrediction,
