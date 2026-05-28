@@ -3,12 +3,31 @@ from __future__ import annotations
 import json
 import math
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from app.core.exceptions import UpstreamUnavailableError
+
+
+# Render free tier (512MB) 에서 매 요청마다 11MB parquet 을 메모리에 로드하면
+# 메모리 spike (~50-80MB) → OOM 으로 워커가 죽는 사례가 있었다. lru_cache 로
+# 같은 경로의 파일은 한 번만 읽고 메모리 유지. parquet 갱신 시 admin/reload
+# 가 cache 를 비워야 한다 (현재는 manual 재시작 필요).
+_HISTORY_COLUMNS = [
+    "ticker",
+    "timeframe",
+    "role",
+    "asof_date",
+    "display_date",
+    "display_horizon",
+    "run_id",
+    "line_value",
+    "lower_value",
+    "upper_value",
+]
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -60,19 +79,15 @@ def _load_manifest(path: Path) -> dict[str, Any]:
         ) from exc
 
 
-def _load_history_frame(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise UpstreamUnavailableError(
-            "제품용 rolling prediction history parquet를 찾을 수 없습니다.",
-            details={"path": str(path)},
-        )
+@lru_cache(maxsize=2)
+def _load_history_frame_cached(path_str: str, mtime: float) -> pd.DataFrame:
+    """parquet 을 한 번만 읽어 메모리 유지. mtime 이 바뀌면 자동 reload."""
+    path = Path(path_str)
     try:
+        frame = pd.read_parquet(path, columns=_HISTORY_COLUMNS)
+    except ValueError:
+        # 일부 schema 가 _HISTORY_COLUMNS 와 다를 수 있음 — fallback 전체 로드.
         frame = pd.read_parquet(path)
-    except Exception as exc:  # pragma: no cover - parquet 엔진 오류 메시지는 환경마다 다르다.
-        raise UpstreamUnavailableError(
-            "제품용 rolling prediction history parquet를 읽을 수 없습니다.",
-            details={"path": str(path), "error": str(exc)},
-        ) from exc
     if frame.empty:
         return frame
     frame = frame.copy()
@@ -81,6 +96,26 @@ def _load_history_frame(path: Path) -> pd.DataFrame:
     frame["role"] = frame["role"].astype(str).str.lower()
     frame["asof_date"] = pd.to_datetime(frame["asof_date"], errors="coerce")
     return frame.dropna(subset=["ticker", "timeframe", "role", "asof_date"])
+
+
+def _load_history_frame(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise UpstreamUnavailableError(
+            "제품용 rolling prediction history parquet를 찾을 수 없습니다.",
+            details={"path": str(path)},
+        )
+    try:
+        return _load_history_frame_cached(str(path), path.stat().st_mtime)
+    except Exception as exc:  # pragma: no cover - parquet 엔진 오류 메시지는 환경마다 다르다.
+        raise UpstreamUnavailableError(
+            "제품용 rolling prediction history parquet를 읽을 수 없습니다.",
+            details={"path": str(path), "error": str(exc)},
+        ) from exc
+
+
+def clear_product_history_cache() -> None:
+    """admin/reload 에서 호출해 lru_cache 비움."""
+    _load_history_frame_cached.cache_clear()
 
 
 def _manifest_summary(manifest: dict[str, Any]) -> dict[str, Any]:

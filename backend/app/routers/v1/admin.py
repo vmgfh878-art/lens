@@ -11,6 +11,7 @@ from app.core.http import success_response
 from app.db import supabase_is_configured
 from app.routers.v1 import predictions as v1_predictions
 from app.services import local_market_svc
+from app.services.product_prediction_history_svc import clear_product_history_cache
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -48,6 +49,7 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
     base_dir = Path(__file__).resolve().parents[3] / "data" / "v1"
     prediction_summary = v1_predictions.load_caches(base_dir)
     market_summary = local_market_svc.reload_caches()
+    clear_product_history_cache()
     return success_response(
         request,
         {
@@ -55,6 +57,7 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
             "base_dir": str(base_dir),
             "predictions": prediction_summary,
             "market": market_summary,
+            "product_history_cache": "cleared",
         },
     )
 
