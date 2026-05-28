@@ -22,9 +22,15 @@ def list_strategies(request: Request, response: Response):
             {
                 "id": rule.id,
                 "label": rule.label,
+                "short_label": rule.short_label,
                 "uses_line": rule.uses_line,
                 "uses_band": rule.uses_band,
                 "uses_ai": rule.uses_ai,
+                "entry_confirm_days": rule.entry_confirm_days,
+                "exit_confirm_days": rule.exit_confirm_days,
+                "entry_desc": rule.entry_desc,
+                "exit_desc": rule.exit_desc,
+                "risk_desc": rule.risk_desc,
                 "contract": "single_ticker_long_cash",
             }
             for rule in STRATEGIES.values()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,89 +9,13 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
+# 전략 정의 (StrategyRule + STRATEGIES) 는 strategy_rules.py 에서 단일 관리한다 (모델 급 관리).
+# 이 파일은 전략의 "실행" (pandas 조건 계산 + 백테스트) 만 담당한다.
+from app.strategies.strategy_rules import STRATEGIES, StrategyRule
+
 
 FEE_RATE = 0.001
 MIN_EVAL_DAYS = 120
-
-
-@dataclass(frozen=True)
-class StrategyRule:
-    id: str
-    label: str
-    short_label: str
-    uses_ai: bool
-    uses_line: bool
-    uses_band: bool
-    entry_confirm_days: int
-    exit_confirm_days: int
-
-
-STRATEGIES: dict[str, StrategyRule] = {
-    "indicator_balance_v2": StrategyRule(
-        id="indicator_balance_v2",
-        label="지표 균형 v2",
-        short_label="지표 균형",
-        uses_ai=False,
-        uses_line=False,
-        uses_band=False,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-    "ai_balance_v2": StrategyRule(
-        id="ai_balance_v2",
-        label="AI 균형 v2",
-        short_label="AI 균형",
-        uses_ai=True,
-        uses_line=True,
-        uses_band=True,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-    "ai_band_defense_v1": StrategyRule(
-        id="ai_band_defense_v1",
-        label="AI 밴드 방어 v1",
-        short_label="밴드 방어",
-        uses_ai=True,
-        uses_line=False,
-        uses_band=True,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-}
-
-# 이전 실험 로그와 호환되는 id는 유지하되, 사용자에게 노출되는 라벨은 한국어로 고정한다.
-STRATEGIES = {
-    "indicator_balance_v2": StrategyRule(
-        id="indicator_balance_v2",
-        label="지표 균형 v2",
-        short_label="지표 균형",
-        uses_ai=False,
-        uses_line=False,
-        uses_band=False,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-    "ai_balance_v2": StrategyRule(
-        id="ai_balance_v2",
-        label="AI 균형 v2",
-        short_label="AI 균형",
-        uses_ai=True,
-        uses_line=True,
-        uses_band=True,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-    "ai_band_defense_v1": StrategyRule(
-        id="ai_band_defense_v1",
-        label="AI 밴드 방어 v1",
-        short_label="밴드 방어",
-        uses_ai=True,
-        uses_line=False,
-        uses_band=True,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-    ),
-}
 
 
 def _data_dir() -> Path:
@@ -319,18 +242,6 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
         return entry, exit_signal, risk_signal
 
     raise HTTPException(status_code=404, detail=f"지원하지 않는 전략입니다: {rule.id}")
-
-
-def _reason(rule: StrategyRule, position: int, target: int, risk: bool) -> tuple[str, str, str]:
-    if target == 1 and position == 0:
-        return "buy", "매수 후보", f"{rule.label} 기준 진입 조건이 확인 중입니다."
-    if position == 1 and not risk:
-        return "hold", "보유 유지", f"{rule.label} 기준 보유 조건이 유지됩니다."
-    if position == 1 and risk:
-        return "risk", "위험 확대", f"{rule.label} 기준 위험 조건이 감지되어 청산 확인 중입니다."
-    if risk:
-        return "risk", "위험 확대", f"{rule.label} 기준 위험 조건이 강해져 신규 진입을 피합니다."
-    return "watch", "관망", f"{rule.label} 기준 신규 진입 조건이 아직 충분하지 않습니다."
 
 
 def _reason(rule: StrategyRule, position: int, target: int, risk: bool) -> tuple[str, str, str]:
@@ -616,6 +527,14 @@ def get_strategy_scan(strategy_id: str, limit: int = 500) -> dict[str, Any]:
         "aggregateMetrics": result["aggregate"],
         "contract": "single_ticker_long_cash_average",
     }
+
+
+def clear_strategy_cache() -> None:
+    """admin/reload 에서 호출. parquet 갱신 후 전략 frame/결과/sector cache 를 비운다.
+    이게 안 되면 새 데이터를 받아도 전략은 옛 결과를 계속 노출한다."""
+    _load_frame.cache_clear()
+    _strategy_results.cache_clear()
+    _sector_map.cache_clear()
 
 
 def get_strategy_backtest(strategy_id: str, ticker: str) -> dict[str, Any]:

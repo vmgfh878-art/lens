@@ -9,9 +9,11 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from app.core.http import success_response
 from app.db import supabase_is_configured
+from app.repositories.ai_repo import _load_mock
 from app.routers.v1 import predictions as v1_predictions
 from app.services import local_market_svc
 from app.services.product_prediction_history_svc import clear_product_history_cache
+from app.services.strategy_backtest_svc import clear_strategy_cache
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -50,6 +52,8 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
     prediction_summary = v1_predictions.load_caches(base_dir)
     market_summary = local_market_svc.reload_caches()
     clear_product_history_cache()
+    clear_strategy_cache()
+    _load_mock.cache_clear()
     return success_response(
         request,
         {
@@ -58,6 +62,8 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
             "predictions": prediction_summary,
             "market": market_summary,
             "product_history_cache": "cleared",
+            "strategy_cache": "cleared",
+            "ai_runs_mock_cache": "cleared",
         },
     )
 
