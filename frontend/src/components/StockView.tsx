@@ -403,6 +403,7 @@ export default function StockView() {
     const nextTicker = tickerInput.trim().toUpperCase() || "AAPL";
     setTickerInput(nextTicker);
     setSelectedTicker(nextTicker);
+    setSuggestions([]);
     startTransition(() => {
       void loadStock(nextTicker, timeframe);
     });
@@ -411,6 +412,7 @@ export default function StockView() {
   function handleTickerSelect(nextTicker: string) {
     setTickerInput(nextTicker);
     setSelectedTicker(nextTicker);
+    setSuggestions([]);
     startTransition(() => {
       void loadStock(nextTicker, timeframe);
     });
@@ -744,13 +746,10 @@ export default function StockView() {
 
         <aside className="panel side-panel forecast-panel">
           <div className="panel-heading">
-            <div className="eyebrow">예측 레이어</div>
             <h2>모델 정보</h2>
           </div>
 
           <div className="provenance-card">
-            <span className="eyebrow">예측 출처</span>
-            <strong>{provenanceSummary}</strong>
             <div className="provenance-grid">
               <span>보수적 기준선</span>
               <strong>{activeLineModelDisplayName}</strong>
@@ -758,16 +757,12 @@ export default function StockView() {
               <strong>{activeBandModelDisplayName}</strong>
               <span>가격 최신일</span>
               <strong>{priceLatestDateLabel}</strong>
-              <span>AI 밴드 기준일</span>
-              <strong>{bandAsofLabel}</strong>
               <span>AI 밴드 상태</span>
               <strong>
                 <span className={`freshness-badge freshness-badge--${getFreshnessClass(bandFreshness)}`}>
                   {formatFreshnessStatus(bandFreshness)}
                 </span>
               </strong>
-              <span>보수적 기준선 기준일</span>
-              <strong>{lineAsofLabel}</strong>
               <span>보수적 기준선 상태</span>
               <strong>
                 <span className={`freshness-badge freshness-badge--${getFreshnessClass(lineFreshness)}`}>
@@ -776,8 +771,6 @@ export default function StockView() {
               </strong>
               <span>예측 기간</span>
               <strong>{forecastHorizonCount ? `${forecastHorizonCount}${forecastUnitLabel}` : "-"}</strong>
-              <span>미래 예측선</span>
-              <strong>{futureForecastStatus}</strong>
             </div>
             {timeframe === "1D" && (rawActivePrediction || activeLineHistory.length > 0) ? (
               <p>1D 보수적 기준선은 저장된 v1 serving 기준으로 표시됩니다. raw output은 가격이 아니라 safe_line_score이며, 차트에서는 가격으로 환산합니다.</p>
