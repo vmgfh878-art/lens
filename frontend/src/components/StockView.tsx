@@ -773,9 +773,9 @@ export default function StockView() {
               <strong>{forecastHorizonCount ? `${forecastHorizonCount}${forecastUnitLabel}` : "-"}</strong>
             </div>
             {timeframe === "1D" && (rawActivePrediction || activeLineHistory.length > 0) ? (
-              <p>1D 보수적 기준선은 저장된 v1 serving 기준으로 표시됩니다. raw output은 가격이 아니라 safe_line_score이며, 차트에서는 가격으로 환산합니다.</p>
+              <p>보수적 기준선은 5거래일 후 도착가를 보수적으로 추정합니다. 자세한 계산 방식은 지표 가이드를 참고하세요.</p>
             ) : null}
-            {timeframe === "1W" ? <p>1W 보수적 기준선은 v1에서 제공하지 않습니다. 1W AI 밴드는 자동 갱신 결과를 표시합니다.</p> : null}
+            {timeframe === "1W" ? <p>1W 보수적 기준선은 준비 중입니다. 1W AI 밴드만 표시됩니다.</p> : null}
             {!aiDisabled && (rawActivePrediction || activeBandPrediction || activeLineHistory.length > 0 || activeBandHistory.length > 0) ? (
               <details className="provenance-details">
                 <summary>상세 정보</summary>
@@ -805,8 +805,8 @@ export default function StockView() {
             />
             <p className="layer-description">
               {timeframe === "1W"
-                ? "1W 보수적 기준선은 v1에서 제공하지 않습니다."
-                : "1D 보수적 기준선은 저장된 v1 serving 기준입니다. raw output은 가격이 아니라 safe_line_score이며, asof 종가 × (1 + safe_line_score)로 환산합니다."}
+                ? "1W 보수적 기준선은 준비 중입니다."
+                : "앞으로 5거래일의 보수적 도착가 추정선입니다. 가격이 이 선 위에 있으면 정상 범위로 봅니다."}
             </p>
             <LayerToggle
               label="AI 밴드"
@@ -816,10 +816,10 @@ export default function StockView() {
             />
             <p className="layer-description">
               {bandFreshness === "stale"
-                ? "AI 밴드는 마지막 저장된 기준으로 표시됩니다."
+                ? "최근 저장된 기준으로 표시 중입니다."
                 : timeframe === "1W"
-                ? "자동 갱신된 1W AI 밴드입니다. asof 가격에 밴드 수익률을 곱해 가격 차트 위에 표시합니다."
-                : "자동 갱신된 1D AI 밴드입니다. 최신 parquet 결과를 가격 차트 위에 표시합니다."}
+                ? "주간 예상 변동 범위입니다. 넓을수록 불확실성이 큽니다."
+                : "5거래일 후 예상 변동 범위입니다. 넓을수록 불확실성이 큽니다."}
             </p>
             {!bandLayerDisabled && layers.aiBand ? (
               <div className="layer-metrics">
@@ -836,7 +836,7 @@ export default function StockView() {
             {!lineLayerDisabled && layers.conservativeLine ? (
               <div className="layer-metrics">
                 <div>
-                  <span>예측가</span>
+                  <span>5거래일 후 도착가</span>
                   <strong>{formatNumber(conservativeValue)}</strong>
                 </div>
                 <div>

@@ -30,7 +30,7 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     id: "line-1d",
     kind: "line",
     title: "1D 보수적 기준선",
-    displayName: "보수적 기준선",
+    displayName: "보수적 기준선 v1",
     modelName: "F4 β=4 ensemble",
     version: "v1",
     timeframe: "1D",
