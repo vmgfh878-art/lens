@@ -15,8 +15,6 @@ from app.schemas.stocks import (
 )
 from app.services.api_service import (
     get_indicator_response_data,
-    get_latest_prediction_data,
-    get_prediction_history_data,
     get_price_response_data,
     get_stocks,
 )
@@ -90,25 +88,6 @@ def get_indicators(
 
 
 @router.get(
-    "/{ticker}/predictions/latest",
-    response_model=ApiResponse[PredictionData],
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
-)
-def get_latest_prediction(
-    request: Request,
-    response: Response,
-    ticker: str,
-    model: str = Query(default="patchtst", description="모델 이름"),
-    timeframe: str = Query(default="1D", description="예측 타임프레임"),
-    horizon: int | None = Query(default=None, description="예측 horizon"),
-    run_id: str | None = Query(default=None, description="AI run ID"),
-):
-    data = get_latest_prediction_data(ticker, model=model, timeframe=timeframe, horizon=horizon, run_id=run_id)
-    response.headers["Cache-Control"] = "public, max-age=3600"
-    return success_response(request, data)
-
-
-@router.get(
     "/{ticker}/predictions/product-history",
     response_model=ApiResponse[ProductPredictionHistoryResponseData],
     responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
@@ -134,20 +113,3 @@ def get_product_prediction_history(
     response.headers["Cache-Control"] = "public, max-age=3600"
     total = len(data["line_history"]) + len(data["band_history"])
     return success_response(request, data, total=total)
-
-
-@router.get(
-    "/{ticker}/predictions/history",
-    response_model=ApiResponse[list[PredictionData]],
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
-)
-def get_prediction_history(
-    request: Request,
-    response: Response,
-    ticker: str,
-    run_id: str = Query(description="AI run ID"),
-    limit: int = Query(default=90, ge=1, le=200, description="최근 prediction row 수"),
-):
-    data = get_prediction_history_data(ticker, run_id=run_id, limit=limit)
-    response.headers["Cache-Control"] = "public, max-age=3600"
-    return success_response(request, data, total=len(data))

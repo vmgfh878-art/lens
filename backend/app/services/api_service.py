@@ -4,28 +4,19 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from app.core.exceptions import InvalidRunStatusError, ResourceNotFoundError
-from app.repositories.ai_repo import fetch_model_run
-from app.repositories.prediction_repo import (
-    fetch_latest_prediction,
-    fetch_prediction_by_run,
-    fetch_prediction_history_by_run,
-)
+from app.core.exceptions import ResourceNotFoundError
 from app.services.local_market_svc import (
     fetch_indicator_rows_local,
     fetch_price_rows_local,
     fetch_stocks_local,
 )
+from app.services.model_svc import normalize_display_timeframe
+from app.services.feature_svc import drop_incomplete_resampled_periods
 
 # Supabase 경로는 v1 에서 비활성. 모든 market/stocks 조회는 local parquet 직접 읽음.
-# Supabase 부활 필요 시 별도 reactivation (이전 git 이력 참조).
-from app.services.model_svc import (
-    normalize_display_timeframe,
-    normalize_model_name,
-    normalize_prediction_timeframe,
-    resolve_horizon,
-)
-from app.services.feature_svc import drop_incomplete_resampled_periods
+# legacy prediction normalization (get_latest_prediction_data 등) 도 같이 제거됨.
+# 새 v1 endpoint (/api/v1/predictions/line, /predictions/band/1d, /predictions/band/1w,
+# /stocks/{ticker}/predictions/product-history) 가 모든 prediction 조회를 담당한다.
 
 
 DEFAULT_PRICE_WINDOW_DAYS = 365
@@ -117,184 +108,4 @@ def get_indicator_response_data(
     }
 
 
-def _build_prediction_meta(prediction: dict, model_run: dict | None) -> dict:
-    meta = prediction.get("meta") if isinstance(prediction.get("meta"), dict) else {}
-    merged = dict(meta)
-    if not model_run:
-        return merged
-
-    config = model_run.get("config") if isinstance(model_run.get("config"), dict) else {}
-    feature_version = model_run.get("feature_version") or config.get("feature_version")
-    if feature_version:
-        merged.setdefault("feature_contract", feature_version)
-        merged.setdefault("feature_contract_version", feature_version)
-    for key in (
-        "line_model_run_id",
-        "band_model_run_id",
-        "composition_policy",
-        "band_calibration_method",
-        "band_calibration_params",
-        "prediction_composition_version",
-        "role",
-        "model_role",
-        "layer",
-        "deprecated_for_phase1_product_contract",
-        "indicator_layer_replacement",
-    ):
-        if config.get(key) is not None:
-            merged.setdefault(key, config[key])
-    return merged
-
-
-def _prediction_layer_from_meta(meta: dict) -> str | None:
-    layer = meta.get("layer")
-    if layer in {"line", "band"}:
-        return str(layer)
-    role = str(meta.get("role") or meta.get("model_role") or "").lower()
-    if role in {"line_model", "line_v2", "line"}:
-        return "line"
-    if role in {"band_model", "band"}:
-        return "band"
-    return None
-
-
-def _expected_prediction_layer(model_run: dict | None) -> str | None:
-    if not model_run:
-        return None
-    config = model_run.get("config") if isinstance(model_run.get("config"), dict) else {}
-    role = str(
-        config.get("role")
-        or config.get("model_role")
-        or model_run.get("role")
-        or ""
-    ).lower()
-    if role in {"line_model", "line_v2", "line"}:
-        return "line"
-    if role in {"band_model", "band"}:
-        return "band"
-    return None
-
-
-def _normalize_prediction_payload(
-    prediction: dict,
-    *,
-    ticker: str,
-    model_run: dict | None,
-    expected_layer: str | None = None,
-) -> dict:
-    prediction["ticker"] = ticker.upper()
-    prediction["forecast_dates"] = prediction.get("forecast_dates") or []
-    meta = _build_prediction_meta(prediction, model_run)
-    layer = _prediction_layer_from_meta(meta) or expected_layer
-    if expected_layer and layer and layer != expected_layer:
-        raise ResourceNotFoundError(
-            f"run_id={prediction.get('run_id')} 예측 row layer={layer}는 요청한 {expected_layer} layer가 아닙니다."
-        )
-    if expected_layer and layer is None:
-        raise ResourceNotFoundError(
-            f"run_id={prediction.get('run_id')} 예측 row에 meta.layer가 없어 {expected_layer} layer로 사용할 수 없습니다."
-        )
-    if layer == "line":
-        prediction["line_series"] = prediction.get("line_series") or prediction.get("conservative_series") or []
-        prediction["conservative_series"] = prediction.get("conservative_series") or []
-        prediction["upper_band_series"] = []
-        prediction["lower_band_series"] = []
-        meta.setdefault("layer", "line")
-    elif layer == "band":
-        prediction["upper_band_series"] = prediction.get("upper_band_series") or []
-        prediction["lower_band_series"] = prediction.get("lower_band_series") or []
-        prediction["line_series"] = []
-        prediction["conservative_series"] = []
-        meta.setdefault("layer", "band")
-    else:
-        prediction["upper_band_series"] = prediction.get("upper_band_series") or []
-        prediction["lower_band_series"] = prediction.get("lower_band_series") or []
-        prediction["line_series"] = prediction.get("line_series") or prediction.get("conservative_series") or []
-        prediction["conservative_series"] = prediction.get("conservative_series") or prediction["line_series"]
-    prediction["meta"] = meta
-    return prediction
-
-
-def _normalize_line_prediction_payload(prediction: dict, *, ticker: str, model_run: dict | None) -> dict:
-    return _normalize_prediction_payload(prediction, ticker=ticker, model_run=model_run, expected_layer="line")
-
-
-def _normalize_band_prediction_payload(prediction: dict, *, ticker: str, model_run: dict | None) -> dict:
-    return _normalize_prediction_payload(prediction, ticker=ticker, model_run=model_run, expected_layer="band")
-
-
-def _fetch_completed_model_run(run_id: str) -> dict:
-    model_run = fetch_model_run(run_id)
-    if model_run is None:
-        raise ResourceNotFoundError(f"run_id={run_id} AI run을 찾을 수 없습니다.")
-    run_status = str(model_run.get("status") or "completed")
-    if run_status != "completed":
-        raise InvalidRunStatusError(
-            f"run_id={run_id} status={run_status}: completed 상태의 run 예측만 조회할 수 있습니다.",
-            details={"run_id": run_id, "status": run_status},
-        )
-    return model_run
-
-
-def get_latest_prediction_data(
-    ticker: str,
-    *,
-    model: str = "patchtst",
-    timeframe: str = "1D",
-    horizon: int | None = None,
-    run_id: str | None = None,
-) -> dict:
-    model_run = None
-    if run_id:
-        model_run = _fetch_completed_model_run(run_id)
-        prediction = fetch_prediction_by_run(ticker, run_id=run_id)
-        model_name = str(model_run.get("model_name") or model).strip().lower()
-        normalized_timeframe = normalize_prediction_timeframe(str(model_run.get("timeframe") or timeframe))
-        resolved_horizon = int(model_run.get("horizon") or resolve_horizon(normalized_timeframe, horizon))
-    else:
-        model_name = normalize_model_name(model)
-        normalized_timeframe = normalize_prediction_timeframe(timeframe)
-        resolved_horizon = resolve_horizon(normalized_timeframe, horizon)
-
-        prediction = fetch_latest_prediction(
-            ticker,
-            model_name=model_name,
-            timeframe=normalized_timeframe,
-            horizon=resolved_horizon,
-        )
-    if prediction is None:
-        raise ResourceNotFoundError(
-            (
-                f"ticker={ticker.upper()}, model={model_name}, "
-                f"timeframe={normalized_timeframe}, horizon={resolved_horizon} 조건의 예측 결과를 찾을 수 없습니다."
-            )
-        )
-
-    expected_layer = _expected_prediction_layer(model_run)
-    if expected_layer == "line":
-        return _normalize_line_prediction_payload(prediction, ticker=ticker, model_run=model_run)
-    if expected_layer == "band":
-        return _normalize_band_prediction_payload(prediction, ticker=ticker, model_run=model_run)
-    return _normalize_prediction_payload(prediction, ticker=ticker, model_run=model_run)
-
-
-def get_prediction_history_data(
-    ticker: str,
-    *,
-    run_id: str,
-    limit: int = 90,
-) -> list[dict]:
-    model_run = _fetch_completed_model_run(run_id)
-    normalized_timeframe = normalize_prediction_timeframe(str(model_run.get("timeframe") or "1D"))
-    rows = fetch_prediction_history_by_run(ticker, run_id=run_id, limit=limit)
-    expected_layer = _expected_prediction_layer(model_run)
-    normalized_rows = []
-    for row in rows:
-        payload = {**row, "timeframe": row.get("timeframe") or normalized_timeframe}
-        if expected_layer == "line":
-            normalized_rows.append(_normalize_line_prediction_payload(payload, ticker=ticker, model_run=model_run))
-        elif expected_layer == "band":
-            normalized_rows.append(_normalize_band_prediction_payload(payload, ticker=ticker, model_run=model_run))
-        else:
-            normalized_rows.append(_normalize_prediction_payload(payload, ticker=ticker, model_run=model_run))
-    return normalized_rows
+# prediction normalization / legacy endpoint helper 는 v1 에서 제거됨.
