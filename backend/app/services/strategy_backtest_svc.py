@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
+from app.services import parquet_store
+
 # 전략 정의 (StrategyRule + STRATEGIES) 는 strategy_rules.py 에서 단일 관리한다 (모델 급 관리).
 # 이 파일은 전략의 "실행" (pandas 조건 계산 + 백테스트) 만 담당한다.
 from app.strategies.strategy_rules import STRATEGIES, StrategyRule
@@ -138,7 +140,12 @@ def _load_frame() -> pd.DataFrame:
             indicators[column] = pd.to_numeric(indicators[column], errors="coerce")
     indicators["rsi_norm"] = _normalize_rsi(indicators["rsi"]) if "rsi" in indicators.columns else np.nan
 
-    line = pd.read_parquet(base / "predictions_line_1d.parquet")
+    # Use shared parquet_store to avoid loading a second copy of these files
+    # (predictions.py already holds them; store ensures only one in-process copy).
+    _raw_line = parquet_store.get_raw("line_1d")
+    if _raw_line is None:
+        raise FileNotFoundError("predictions_line_1d.parquet not found in parquet_store")
+    line = _raw_line.copy()
     line["ticker"] = line["ticker"].astype(str).str.upper()
     line["date"] = pd.to_datetime(line["asof_date"])
     for column in ["line_score", "safe_line_score", "line_rank_by_date", "safe_line_rank_by_date"]:
@@ -146,14 +153,16 @@ def _load_frame() -> pd.DataFrame:
             line[column] = pd.to_numeric(line[column], errors="coerce")
     line = line.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
 
-    band = pd.read_parquet(base / "predictions_band_1d.parquet")
-    band = band[pd.to_numeric(band["horizon_step"], errors="coerce") == 5].copy()
+    _raw_band = parquet_store.get_raw("band_1d")
+    if _raw_band is None:
+        raise FileNotFoundError("predictions_band_1d.parquet not found in parquet_store")
+    band = _raw_band[pd.to_numeric(_raw_band["horizon_step"], errors="coerce") == 5].copy()
     band["ticker"] = band["ticker"].astype(str).str.upper()
     band["date"] = pd.to_datetime(band["asof_date"])
     for column in ["band_lower", "band_upper"]:
         band[column] = pd.to_numeric(band[column], errors="coerce")
     band = (
-        band.groupby(["ticker", "date"], as_index=False)
+        band.groupby(["ticker", "date"], as_index=False, observed=True)
         .agg(band_lower=("band_lower", "min"), band_upper=("band_upper", "max"))
     )
 

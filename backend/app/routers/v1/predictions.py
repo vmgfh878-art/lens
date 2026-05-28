@@ -19,66 +19,43 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.core.http import success_response
+from app.services import parquet_store
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
-
-# ----- 캐시 -----
-# main.py startup 에서 채워줌
-_CACHE: dict[str, pd.DataFrame | None] = {
-    "line_1d": None,
-    "band_1d": None,
-    "band_1w": None,
-}
-_SLOT_FILES = {
-    "line_1d": "predictions_line_1d.parquet",
-    "band_1d": "predictions_band_1d.parquet",
-    "band_1w": "predictions_band_1w.parquet",
-}
+_SLOTS = ("line_1d", "band_1d", "band_1w")
 
 
 def load_caches(base_dir: Path) -> dict[str, Any]:
-    """Startup 시 호출. 각 parquet 메모리 로드 + 캐시."""
-    base = Path(base_dir)
-    summary: dict[str, Any] = {}
+    """admin/reload 및 startup 에서 호출. 공유 store 를 비우고 각 슬롯 상태 반환.
 
-    for slot, fname in _SLOT_FILES.items():
-        path = base / fname
-        if not path.exists():
-            _CACHE[slot] = None
-            summary[slot] = {"status": "missing", "path": str(path)}
+    base_dir 인자는 하위 호환성을 위해 유지하지만 실제 경로는 parquet_store 가 관리.
+    """
+    parquet_store.clear_all()
+    summary: dict[str, Any] = {}
+    for slot in _SLOTS:
+        try:
+            df = parquet_store.get_raw(slot)
+        except Exception as exc:  # noqa: BLE001
+            summary[slot] = {"status": "error", "error": str(exc)}
             continue
-        df = pd.read_parquet(path)
-        _CACHE[slot] = df
-        summary[slot] = {
-            "status": "loaded",
-            "rows": len(df),
-            "tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else 0,
-            "size_mb": round(path.stat().st_size / 1024 / 1024, 2),
-        }
+        if df is None:
+            summary[slot] = {"status": "missing"}
+        else:
+            summary[slot] = {
+                "status": "loaded",
+                "rows": len(df),
+                "tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else 0,
+                "mb": round(df.memory_usage(deep=True).sum() / 1024 / 1024, 1),
+            }
     return summary
 
 
-def _default_v1_data_dir() -> Path:
-    return Path(__file__).resolve().parents[3] / "data" / "v1"
-
-
-def _load_slot(slot: str) -> pd.DataFrame | None:
-    fname = _SLOT_FILES.get(slot)
-    if not fname:
-        return None
-    path = _default_v1_data_dir() / fname
-    if not path.exists():
-        return None
-    df = pd.read_parquet(path)
-    _CACHE[slot] = df
-    return df
-
-
 def _get_df(slot: str) -> pd.DataFrame:
-    df = _CACHE.get(slot)
-    if df is None:
-        df = _load_slot(slot)
+    try:
+        df = parquet_store.get_raw(slot)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if df is None:
         raise HTTPException(
             status_code=503,
