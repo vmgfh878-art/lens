@@ -289,8 +289,39 @@ $ScheduleLines = @(
 )
 $ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
 
-Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus"
+# Production git push (Apply 모드 + serving parquet 변경 있을 때만).
+# Render/Vercel 은 git push 를 받아야 production 이 갱신된다. 윈도우 자동화가
+# 여기까지 해야 "PC 켜지면 production 까지 최신"이 된다.
+# 임시방편: DB(Supabase) 전환 시 이 git push 는 DB write 로 대체 예정 (lens_v2_master_plan §9).
+$PushStatus = "SKIPPED_DRY_RUN"
+if ($Apply) {
+    Write-Log "production git push 시작"
+    try {
+        git add backend/data/v1/*.parquet backend/data/v1/*.json 2>&1 | Out-Null
+        git diff --cached --quiet
+        if ($LASTEXITCODE -ne 0) {
+            git commit -m "data: daily refresh $RunDate" 2>&1 | Out-Null
+            git push origin main 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $PushStatus = "PASS"
+                Write-Log "production git push 완료"
+            } else {
+                $PushStatus = "WARN_PUSH_FAILED"
+                Write-Log "production git push 실패 (네트워크/인증 확인)"
+            }
+        } else {
+            $PushStatus = "NO_CHANGES"
+            Write-Log "serving parquet 변경 없음, push 생략"
+        }
+    } catch {
+        $PushStatus = "WARN_PUSH_ERROR"
+        Write-Log "git push 오류: $($_.Exception.Message)"
+    }
+}
+
+Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus"
 Write-Host "status=$FinalStatus"
+Write-Host "push=$PushStatus"
 Write-Host "metrics=$MetricsPath"
 Write-Host "report=$ReportPath"
 Write-Host "schedule_status=$LatestSchedulePath"
