@@ -1,6 +1,6 @@
 {
   "comment": "v1 학교 데모용 mock AI runs. Supabase 미설정 시 ai_repo 가 이 파일을 읽음. 모든 ticker per-run evaluations 포함.",
-  "built_at": "2026-06-01T00:34:14.782015+00:00",
+  "built_at": "2026-06-01T01:21:10.303333+00:00",
   "runs": [
     {
       "run_id": "cp210_F4_b4_ensemble_mean",
