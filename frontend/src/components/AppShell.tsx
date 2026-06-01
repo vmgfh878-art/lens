@@ -39,14 +39,16 @@ type IconName =
 const NAV_SECTIONS: NavSection[] = [
   {
     label: "분석",
-    items: [{ id: "stocks", label: "주식 보기", icon: "chart" }],
+    items: [
+      { id: "stocks", label: "주식 보기", icon: "chart" },
+      { id: "backtests", label: "백테스트", icon: "beaker" },
+    ],
   },
   {
     label: "리서치",
     items: [
-      { id: "backtests", label: "백테스트", icon: "beaker" },
-      { id: "training", label: "AI 모델", icon: "cpu" },
       { id: "report", label: "지표 가이드", icon: "doc" },
+      { id: "training", label: "AI 모델", icon: "cpu" },
     ],
   },
 ];

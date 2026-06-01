@@ -100,6 +100,34 @@ export function diffCalendarDaysBetween(
   return Math.max(0, Math.floor((to - from) / (24 * 60 * 60 * 1000)));
 }
 
+// CP215 — 두 날짜 사이의 평일(월~금) 수. fromDate < toDate 면 양수, 같거나 역순이면 0.
+// 휴장/공휴일 무관 — 평일 기준 근사. 가격 datasets 가 없어도 동작.
+export function diffBusinessDaysBetween(
+  fromDate: string | null | undefined,
+  toDate: string | null | undefined
+) {
+  if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+    return null;
+  }
+  if (fromDate >= toDate) {
+    return 0;
+  }
+  const cursor = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+  let count = 0;
+  while (cursor < end) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export function countPriceRowsAfter(
   rows: PriceBar[],
   fromDate: string | null | undefined,

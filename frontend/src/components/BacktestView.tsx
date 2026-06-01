@@ -76,6 +76,12 @@ import {
   isFiniteNumber,
 } from "@/lib/formatters";
 import { PRODUCT_SLOT_BY_ID } from "@/lib/productSlots";
+import StatusInline from "@/components/StatusInline";
+import {
+  ApiError,
+  classifyApiError,
+  describeApiError,
+} from "@/lib/apiErrors";
 
 // BacktestView 전용 에러 메시지 (StockView 와 별도 톤).
 function extractErrorMessage(error: unknown) {
@@ -848,6 +854,8 @@ export default function BacktestView() {
   const [signalCards, setSignalCards] = useState<StrategySignalCard[]>([]);
   const [signalLoading, setSignalLoading] = useState(false);
   const [signalErrorMessage, setSignalErrorMessage] = useState<string | null>(null);
+  const [signalApiError, setSignalApiError] = useState<ApiError | null>(null);
+  const [backtestApiError, setBacktestApiError] = useState<ApiError | null>(null);
   const [expandedSignalGroups, setExpandedSignalGroups] = useState<Partial<Record<SignalGroupId, boolean>>>({});
   const detailRef = useRef<HTMLDivElement | null>(null);
   const deferredTicker = useDeferredValue(tickerInput);
@@ -898,12 +906,15 @@ export default function BacktestView() {
       .then((cards) => {
         if (active) {
           setSignalCards(cards);
+          setSignalApiError(null);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (active) {
           setSignalCards([]);
-          setSignalErrorMessage("전략 신호를 불러오지 못했습니다. 직접 종목 확인은 계속 사용할 수 있습니다.");
+          const classified = classifyApiError(err, `/api/v1/strategies/${strategyId}/scan`);
+          setSignalApiError(classified);
+          setSignalErrorMessage(describeApiError(classified));
         }
       })
       .finally(() => {
@@ -924,6 +935,7 @@ export default function BacktestView() {
     setResult(null);
     setLineHistory([]);
     setBandHistory([]);
+    setBacktestApiError(null);
 
     try {
       const normalizedTicker = nextTicker.trim().toUpperCase() || "AAPL";
@@ -1000,7 +1012,9 @@ export default function BacktestView() {
       setPriceData([]);
       setIndicatorData([]);
       setResult(null);
-      setErrorMessage(extractErrorMessage(error));
+      const classified = classifyApiError(error, `/api/v1/strategies/${nextStrategyId}/backtest/${nextTicker}`);
+      setBacktestApiError(classified);
+      setErrorMessage(describeApiError(classified));
     } finally {
       setIsLoading(false);
     }
@@ -1239,7 +1253,16 @@ export default function BacktestView() {
         </div>
       </section>
 
-      {signalErrorMessage ? <div className="notice notice--error">{signalErrorMessage}</div> : null}
+      {signalApiError ? (
+        <StatusInline
+          kind="error"
+          label="전략 신호"
+          error={signalApiError}
+          hint="백엔드 로그 또는 strategy_scan endpoint 확인"
+        />
+      ) : signalErrorMessage ? (
+        <div className="notice notice--error">{signalErrorMessage}</div>
+      ) : null}
 
       <section className="strategy-signal-board" aria-label="Lens Balance v1 전략 신호 그룹">
         {groupedSignalCards.map((group) => (
@@ -1421,7 +1444,16 @@ export default function BacktestView() {
         </div>
       </section>
 
-      {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
+      {backtestApiError ? (
+        <StatusInline
+          kind="error"
+          label="백테스트 실행"
+          error={backtestApiError}
+          hint="ticker/strategy 조합 또는 백엔드 로그 확인"
+        />
+      ) : errorMessage ? (
+        <div className="notice notice--error">{errorMessage}</div>
+      ) : null}
       {statusMessage ? <div className="notice">{statusMessage}</div> : null}
 
       <div className="backtest-detail-anchor" ref={detailRef}>

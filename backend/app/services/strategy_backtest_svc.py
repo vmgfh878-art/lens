@@ -24,6 +24,26 @@ def _data_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "v1"
 
 
+def _align_date_dtype(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
+    """CP214 — merge 직전 호출. `col` 을 flat `datetime64[ns]` 로 강제.
+
+    근본 원인은 `parquet_store._compress_strings` 에서 fix (날짜 컬럼은 categorical 제외)
+    했지만, 이 헬퍼는 idempotent 방어선이다.
+    - `pd.to_datetime(Categorical[str])` 가 결과를 `Categorical[datetime]` 로 유지하는
+      pandas 동작 때문에 datetime64 와의 merge 가 실패하는 케이스가 다시 들어와도
+      이 함수를 머지 직전에 호출하면 평탄화된다.
+    - object / Categorical[str] / datetime64 / Categorical[datetime] 모두 안전.
+    """
+    if col not in df.columns:
+        return df
+    series = df[col]
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        series = series.astype(object)
+    if not pd.api.types.is_datetime64_any_dtype(series):
+        series = pd.to_datetime(series, errors="coerce")
+    return df.assign(**{col: series.astype("datetime64[ns]")})
+
+
 def _jsonable(value: Any) -> Any:
     if value is None:
         return None
@@ -165,6 +185,13 @@ def _load_frame() -> pd.DataFrame:
         band.groupby(["ticker", "date"], as_index=False, observed=True)
         .agg(band_lower=("band_lower", "min"), band_upper=("band_upper", "max"))
     )
+
+    # CP214 — 머지 직전 date dtype 평탄화 (방어). 근본 fix 는 parquet_store 에서 했지만
+    # 향후 다른 source 가 추가돼도 머지가 깨지지 않게 idempotent helper 적용.
+    price = _align_date_dtype(price)
+    indicators = _align_date_dtype(indicators)
+    line = _align_date_dtype(line)
+    band = _align_date_dtype(band)
 
     frame = price.merge(
         indicators[["ticker", "date", "ma_5_ratio", "ma_20_ratio", "ma_60_ratio", "macd_ratio", "bb_position", "vol_change", "rsi_norm"]],

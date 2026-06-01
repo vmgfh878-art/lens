@@ -23,3 +23,11 @@
  GET /?view=stocks 200 in 52ms
  ✓ Compiled in 321ms (703 modules)
  GET /?view=report 200 in 69ms
+ GET /?view=stocks 200 in 41ms
+ GET / 200 in 30ms
+ GET /?view=stocks 200 in 32ms
+ GET /?view=stocks 200 in 53ms
+ GET /?view=backtests 200 in 41ms
+ GET /?view=backtests 200 in 64ms
+ ✓ Compiled in 157ms (703 modules)
+ ✓ Compiled in 148ms (703 modules)

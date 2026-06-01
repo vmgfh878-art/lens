@@ -128,10 +128,25 @@ CP 로그, raw provider payload
 ## 4. v2 모델 후보
 
 ### 4.1 Band v2 (1순위 — MLOps 첫 대상)
-- **Conformal Prediction**: coverage 보장(Vovk/Romano)
-- **CBM(Concept Bottleneck)**: 위험 concept 설명(Koh 2020)
+
+#### v1 의 정직한 한계 (CP204 plan §0 인용)
+- **Lagging forecaster**: 과거 변동성 clustering 따라가는 수준. "변동성 커지기 전 미리 넓어짐" 없음
+- CP202.2 진단: width 의 forward / backward 변동성 상관 = **0.34 (1D), 0.38 (1W)** → 명확한 lagging. 미래 변동성 예측 거의 못 함
+- CP216.2 통계 검정도 같은 결론: 1D 는 단순 분위수 / GARCH walk-forward 못 이김. 1W 는 walk-forward GARCH 보다는 강하지만 historical_quantile 못 이김
+- → v1 평가 narrative 가 "현재 상태 표시" 위주로 굳어진 이유 (= §0 "리스크 인식 도구" 정체성). v1 한계 인정한 정직 narrative
+
+#### v2 1번 목표: 미래 예측성 강화
+- v1 의 lagging 한계 자체를 푸는 게 v2 1번 목표 — "변동성 커지기 전에 미리 넓어지는" 밴드
+- 그 위에 정직성 + 설명 가능성 (Conformal / CBM / Selective / XAI) 을 같이 얹음 — 정확도만 추구하다 over-trust 위험 없게
+- 라인의 정확도 야망은 ROI 낮음 (CP216.2 결론: 통계 베이스라인과 동등). 정확도 야망은 라인이 아닌 밴드에서 다시 살림
+
+#### v2 기둥
+- **미래 예측성 강화** (CP204 plan §0 의 lagging 진단을 직접 풀기) — 1번 목표
+- **Conformal Prediction**: coverage 보장 (Vovk/Romano)
+- **CBM (Concept Bottleneck)**: 위험 concept 설명 (Koh 2020)
 - **Selective output**: 확신 없으면 침묵
-- band 는 coverage/breach/width 지표가 명확 → 자동 검증(MLOps) 붙이기 쉬움
+- **XAI 통합**: 모델 판단을 사용자가 이해할 수 있는 방향
+- band 는 coverage/breach/width 지표가 명확 → 자동 검증 (MLOps) 붙이기 쉬움
 
 ### 4.2 Line v2 (별도 paradigm)
 - 현재 Asymmetric MSE + deep backbone = multi-modal collapse 구조적 (CP203 결론)
@@ -336,6 +351,64 @@ v2:
 - LLM 통합 시점: v2 초반 vs 후반
 - 공개 범위: 완전 공개 데모 vs 링크 공유 반공개
 - 자동 탐색 주기: weekly vs 월 2회
+- 모델 버전 토글 UI 위치 (§11.5 참조): 카드 내 아코디언 vs "모델 진화" 별도 섹션 vs 탭
+- **XAI 트랙 신설 여부** (사용자 제기, 2026-05-30) — 정확도 야망 낮추는 결정과 짝. SHAP / Integrated Gradients / Attention 시각화 / LLM 자연어 설명. v1 마무리 후 v2 재설계 시점에 박기. 후보 위치: §0 차별화 축, §3 모델 서빙, §7 제품 기능 중 한 곳
+- **Band v2 — 전통 통계 (GARCH walk-forward, historical_quantile) 이기는 게 명시 목표** (사용자 제기, 2026-05-30). CP216.2 결과 = 현 1D/1W 밴드는 두 베이스라인 못 이김. Conformal/CBM 야망을 "calibration 정직성"에서 "pinball/coverage 둘 다 통계 베이스라인 이김"으로 격상. v1 마무리 후 v2 재설계 시점에 §4.1 Band v2 야망 갱신
+
+## 11.5 v2 프론트 표현 — 모델 버전 토글 (후속안)
+
+v1 끝까지는 정적이고 운영 모델은 (CP210 라인 / CP153 1D 밴드 / CP178 1W 밴드) 한 세트뿐이다. v2에서 line v2 / band v2 가 붙는 시점부터 "이전 모델 / 현재 모델" 비교가 화면에 필요하다.
+
+**원칙**
+- 1D / 1W × 라인 / 밴드의 4개 슬롯은 고정. 슬롯 자체는 안 바꾼다.
+- 각 슬롯 안에서 "모델 버전"만 토글로 갈아낀다 (v1 / v2 / v3 ...). 선택 즉시 해당 모델 설명·평가·매니페스트가 화면에 갱신.
+- "이전 모델을 영구히 볼 수 있다"는 점을 명시 — v2 붙는다고 v1 모델 설명을 지우지 않는다.
+
+**적용 화면 (2단계)**
+1. AI 모델 화면 — 모델 설명 패널 상단에 버전 셀렉터. 운영 모델만이 아니라 이전 v1 운영 모델도 선택 가능.
+2. 주식 보기 화면 — 차트 오버레이가 버전별 예측선/밴드를 보여주도록 (v2 붙은 뒤 진행). v1까지는 운영 버전 한 가지만 그린다.
+
+**구조 제안 (frontend)**
+- `frontend/src/lib/training/registry.ts` (v2 도입 시 신설)
+  - `MODEL_REGISTRY: Record<SlotId, ModelVersion[]>` — 슬롯당 버전 배열
+  - `ModelVersion = { id, label, cp, status: 'current'|'archived', manifest_path, evaluation_targets }`
+  - v2가 붙을 때 객체 한 줄 추가만으로 화면이 늘어남 (= 갈아엎지 않음)
+
+**열린 질문**
+- UI 위치: 카드 내 아코디언 vs 별도 "모델 진화" 섹션 vs 탭 (§11에 등록)
+- 주식 보기에서 v1/v2 동시 비교 모드를 줄지, 단일 버전만 선택할지
+
+## 11.6 도커 트랙 (v2 첫 CP)
+
+**왜 v1이 아니라 v2 첫 CP인가**
+- 재현성의 5축 (코드 / 데이터 / config / 환경 / 시드) 중 도커는 환경만 잠근다. 라인 v1 재현 사고는 데이터 윈도우/시드/config가 원인이었지 환경이 아니었음.
+- v1 막바지엔 데이터·config·시드 lock (Stage 1 DB 적재 + manifest)이 더 효율적.
+- 도커는 v2 mlops (champion/challenger 자동 루프 + GitHub Actions CI)의 전제조건이라 그 직전에 박는 게 자연스럽다.
+
+**2단 구성**
+1. **도커 dev (CPU)** — 백엔드 + 프론트 dev 환경. CI 회귀 테스트용. 학습 X.
+2. **도커 train (GPU)** — 학습 파이프라인 재현용. `nvidia-container-toolkit` + CUDA 12.8 base + torch nightly (사용자 GPU = RTX 5060 Ti `sm_120` `cu128`).
+
+**예상 난점**
+- `sm_120` 은 일반 PyTorch 빌드에 없을 수 있어 nightly 또는 자체 빌드 필요. base image 잠그기 까다로움.
+- 학습 한 번 재현하려면 데이터 parquet 마운트 + checkpoint 경로 mount 정책 필요.
+
+**ROI 우선순위**
+1. 데이터/config/seed lock — 재현성 +80%, 비용 낮음 → v1
+2. requirements pin — +10%, 무료 → v1
+3. 도커 dev — +5% → v2 첫 CP
+4. 도커 train (GPU) — +5% → v2 mlops 트랙 안
+
+## 11.7 재현성 lock 확장 (v2)
+
+v1에서 운영 모델 3개 한정 매니페스트로 시작 (`docs/v1_operating_models_reproducibility.md`). v2에서는 다음 확장이 필요:
+
+- 모든 학습 스크립트가 표준 manifest JSON을 자동 생성 (run_id / cp / git_sha / dataset_hash / feature_pack / hyperparams / seeds / GPU / wall_clock)
+- 학습 시점 코드 git tag 자동 박기 (`v2/<cp>-<run_id>`)
+- 모델 카드 (Google Model Cards 표준) 자동 생성: intended use / data / metrics / limitations / ethical considerations
+- 회귀 스냅샷 테스트: AAPL 등 고정 ticker의 예측 vs 저장된 기댓값 (허용 오차 안에서) → PR CI 게이트
+- GitHub Actions CI: ruff + mypy + pytest + 스냅샷 → main 머지 게이트
+- 실험 메타데이터 자동 적재 (DB의 `experiment_runs` 테이블) — v1.5 trgtraffic만 정적이고, v2부터는 새 실험 추가 시 프론트가 자동으로 읽어 표시
 
 ---
 

@@ -6,12 +6,41 @@
 # 공개할 필요가 있는 판단/제품/확정 모델 문서는 별도 선별 후 docs 하위에 정리한다.
 docs/cp*
 docs/cp*/
+
+# CP220 — 운영 진입한 3개 실험의 핵심 보고서만 깃 예외 (산출물 화면 노출 + 외부 재현 안내용)
+!docs/cp210_ensemble_report.md
+!docs/cp210_progress_latest.md
+!docs/cp153_bm_1d_band_primary_product_candidate_save_run_report.md
+!docs/cp178_wflock_1w_band_walk_forward_lower_report.md
+!docs/cp216_2_significance_baseline_fairness_directive.md
+!docs/cp216_2_significance/
+!docs/cp216_2_significance/*.csv
+!docs/cp216_2_significance/*.json
+
 ai/cp*.py
 ai/tests/test_cp*.py
 backend/tests/test_cp*.py
 scripts/cp*.py
 scripts/cp*.ps1
 logs/cp*/
+
+# CP220 — 운영 진입한 3개 실험 학습 스크립트 예외 (학습 재현 가능하게)
+# 4 entry + 9 cascade dependency = 13개. wrapper 한 줄로 재현 가능.
+!ai/cp209_lm_f4_f6_pre_ship_verification.py
+!ai/cp210_lm_ensemble_ship_verification.py
+!ai/cp153_bm_1d_band_primary_save_run.py
+!ai/cp178_wflock_1w_band_walk_forward_lower.py
+# 라인 cascade (cp210 → cp209 → cp208z → cp164/cp175 → cp160/cp171)
+!ai/cp208z_lm_1d_line_final_smoke.py
+!ai/cp164_lm_calendar_split_line_risk_smoke.py
+!ai/cp175_lm_1d_conservative_line_learning_revisit.py
+!ai/cp160_lm_1d_line_overlay_rejudgement.py
+!ai/cp171_lm_1d_line_warning_stage0_2_smoke.py
+# 1D 밴드 cascade (cp153_primary → stage2_5_to_5/stage2_model_zoo/stage4r_5t → stage0_1_baseline)
+!ai/cp153_bm_1d_band_500_stage0_1_baseline.py
+!ai/cp153_bm_1d_band_500_stage2_model_zoo.py
+!ai/cp153_bm_1d_band_500_stage2_5_to_5.py
+!ai/cp153_bm_1d_band_500_stage4r_5t.py
 data/**/cp*/
 data/raw/**
 data/models/**

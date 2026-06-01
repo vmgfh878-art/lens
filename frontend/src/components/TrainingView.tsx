@@ -64,10 +64,51 @@ import {
   getRunRole,
   isLegacyRun,
 } from "@/lib/training/runUtils";
+import StatusInline from "@/components/StatusInline";
+import ExperimentTimeline from "@/components/training/ExperimentTimeline";
+import LineExperimentArchive from "@/components/training/LineExperimentArchive";
+import Band1dExperimentArchive from "@/components/training/Band1dExperimentArchive";
+import Band1wExperimentArchive from "@/components/training/Band1wExperimentArchive";
+import {
+  ApiError,
+  classifyApiError,
+  describeApiError,
+} from "@/lib/apiErrors";
+import { BAND_TIMELINE } from "@/lib/training/bandTimeline";
+import { LINE_TIMELINE } from "@/lib/training/lineTimeline";
+import {
+  getPptMapping,
+  getStaticEvaluation,
+  getStaticSignificance,
+  getV1ExtraIndicators,
+  type StaticGoalCard,
+} from "@/lib/training/staticEvaluation";
 
 type SelectedItem =
   | { kind: "slot"; slotId: ProductSlotId }
   | { kind: "experiment"; runId: string; category: ExperimentCategory };
+
+// 계획서 모델 소개 (PatchTST / TiDE / CNN-LSTM). 쉬운 한마디 → 깊은 상세의 "쉬운" 진입부.
+const MODEL_ARCHITECTURES = [
+  {
+    name: "PatchTST",
+    role: "예측선에 사용",
+    type: "Transformer 계열",
+    desc: "가격 흐름을 여러 조각(patch)으로 나눠 학습합니다. 긴 흐름을 효율적으로 보는 데 강해, 예측선의 다중 seed 앙상블로 씁니다.",
+  },
+  {
+    name: "TiDE",
+    role: "AI 밴드에 사용",
+    type: "MLP 기반 · Google 2023",
+    desc: "Transformer 없이도 빠르고 가벼운 구조입니다. 예상 변동 범위를 분위수로 안정적으로 만드는 데 강해 밴드에 씁니다.",
+  },
+  {
+    name: "CNN-LSTM",
+    role: "비교 실험",
+    type: "CNN + LSTM 결합",
+    desc: "로컬 패턴(CNN)과 시계열 흐름(LSTM)을 합친 검증된 구조입니다. 성능 비교 기준으로 둡니다.",
+  },
+];
 
 interface ComparisonRow {
   id: string;
@@ -89,6 +130,10 @@ interface GoalCardProps {
   judgement: "통과" | "보통" | "개선 필요" | "준비 중" | "저장 없음";
   description: string;
   tone?: "good" | "neutral" | "warn";
+  /** CP216 — 출처 배지 (예: "CP210"). */
+  source?: string;
+  /** 목표를 왜 이 값으로 잡았는지. */
+  targetRationale?: string;
 }
 
 interface GoalCardData extends GoalCardProps {
@@ -290,13 +335,14 @@ function hasDisplayableComparison(detail: AiRunDetail, productDetail: AiRunDetai
 // run 분류 / config 추출 / experiment 명명 helper 는 @/lib/training/runUtils 로 이동했다.
 // 아래는 component 내부에서만 쓰는 helper 만 남긴다.
 
-function GoalCard({ title, target, actual, diff, judgement, description, tone = "neutral" }: GoalCardProps) {
+function GoalCard({ title, target, actual, diff, judgement, description, tone = "neutral", source, targetRationale }: GoalCardProps) {
   return (
     <article className={`goal-card goal-card--${tone}`}>
       <div className="goal-card__topline">
         <strong>{title}</strong>
         <span>{judgement}</span>
       </div>
+      {source ? <span className="goal-card__source">{source}</span> : null}
       <div className="goal-card__rows">
         <div>
           <span>목표</span>
@@ -306,11 +352,8 @@ function GoalCard({ title, target, actual, diff, judgement, description, tone = 
           <span>실제</span>
           <strong>{actual}</strong>
         </div>
-        <div>
-          <span>차이</span>
-          <strong>{diff}</strong>
-        </div>
       </div>
+      {targetRationale ? <p className="goal-card__rationale"><em>목표 근거</em><br />{targetRationale}</p> : null}
       <p>{description}</p>
     </article>
   );
@@ -329,9 +372,236 @@ function GoalCardGrid({ cards }: { cards: GoalCardData[] }) {
           judgement={card.judgement}
           description={card.description}
           tone={card.tone}
+          source={card.source}
+          targetRationale={card.targetRationale}
         />
       ))}
     </div>
+  );
+}
+
+/** CP216 — StaticGoalCard 를 GoalCardData 로 변환. judgement / tone 셋이 호환되므로 단순 매핑. */
+function staticCardsToGoalCardData(cards: StaticGoalCard[]): GoalCardData[] {
+  return cards.map((card) => ({
+    id: card.id,
+    title: card.title,
+    target: card.target,
+    actual: card.actual,
+    diff: card.diff,
+    judgement: card.judgement,
+    description: card.description,
+    tone: card.tone,
+    source: card.source,
+    targetRationale: card.targetRationale,
+  }));
+}
+
+/** CP217.2 — CP216.2 통계 검정 (학계 톤). 메인 8셀 · narrow 화면은 d/p/CI 접힘. 1W 만 GW regime sub-table. */
+function SignificanceSection({ slotId }: { slotId: string | null | undefined }) {
+  const block = getStaticSignificance(slotId);
+  if (!block) {
+    return null;
+  }
+  const verdictClass = (verdict: string) =>
+    verdict === "통계 우위" ? "good" : verdict === "통계 열위" ? "warn" : "neutral";
+  const hasPartial = block.rows.some((row) => row.partialWindow);
+  return (
+    <section className="significance">
+      <div className="panel-heading panel-heading--compact">
+        <h3>통계 검정</h3>
+      </div>
+      <p className="significance__headline">{block.headline}</p>
+
+      {/* CP217.2 모델별 결과 박스 — 검정 종류(DM / Bootstrap CI / GW)별 묶음. */}
+      <div className="significance__findings">
+        {block.findings.map((f, fi) => (
+          <article key={fi} className={`significance__finding significance__finding--${f.tone}`}>
+            <div className="significance__finding-title">{f.title}</div>
+            <div className="significance__finding-question">{f.question}</div>
+            <div className="significance__finding-verdict">{f.verdict}</div>
+            <div className="significance__finding-detail">{f.detail}</div>
+          </article>
+        ))}
+      </div>
+
+      <details className="significance__details-table">
+        <summary>통계 검정 상세 표 (DM · Bootstrap CI{block.gwRegime ? " · GW regime" : ""})</summary>
+      <div className="significance__meta">
+        <div className="significance__meta-guide">
+          이 표 읽는 법 — <strong>&ldquo;모델&rdquo; / &ldquo;비교군&rdquo;</strong> 컬럼은 각각의 지표 값입니다. 그 외 컬럼 (<strong>Δ · Cohen&apos;s d · Bonf. p · 95% CI</strong>) 은 모두 <strong>&ldquo;모델 vs 비교군&rdquo; 의 차이</strong> 를 분석한 결과입니다 (개별 점수 X).
+        </div>
+        <span className="significance__meta-key">지표</span>{" "}<strong>{block.metricLabel}</strong>{" · "}{block.metricDirection}
+        <br />
+        <span className="significance__meta-key">Δ</span>{" "}모델 ({block.opsLabel}) − 비교군. <strong>{block.metricDirection.includes("낮") ? "음수면 모델이 더 좋음 (loss 감소)" : "양수면 모델이 더 좋음 (지표 상승)"}.</strong>
+        <br />
+        <span className="significance__meta-key">Cohen&apos;s d</span>{" "}두 모델 차이를 표준화한 효과 크기. 0.2 작음 · 0.5 중간 · 0.8 큼.
+        <br />
+        <span className="significance__meta-key">Bonf. p</span>{" "}그 차이가 우연일 확률 (n=11 검정 다중비교 보정 후). <strong>0.05 미만이면 우연 아님.</strong>
+        <br />
+        <span className="significance__meta-key">95% CI</span>{" "}차이가 들어있을 95% 범위. <strong>0 포함하면 우열 못 가림 (= 동등).</strong> 티커별 / 시간 block 별 둘 다 같은 부호면 결과 신뢰 가능.
+        <br />
+        <span className="significance__meta-key">표본</span>{" "}베이스라인 공통 구간 · Bonferroni n_tests=11
+      </div>
+      <div className="significance__table" role="table">
+        <div className="significance__row significance__row--head" role="row">
+          <span role="columnheader">베이스라인</span>
+          <span role="columnheader">모델 ({block.opsLabel})</span>
+          <span role="columnheader">비교군</span>
+          <span role="columnheader">Δ</span>
+          <span role="columnheader" className="significance__cell--wide-only">Cohen&apos;s d</span>
+          <span role="columnheader" className="significance__cell--wide-only">Bonferroni p</span>
+          <span role="columnheader" className="significance__cell--wide-only">95% CI (Bootstrap)</span>
+          <span role="columnheader">판정</span>
+        </div>
+        {block.rows.flatMap((row, i) => [
+          <div key={`row-${i}`} className="significance__row" role="row">
+            <span role="cell" className="significance__cell--baseline">
+              <strong>{row.baseline}</strong>{row.partialWindow ? <sup className="significance__mark">†</sup> : null}
+              <span className="significance__code">{row.baselineCode}</span>
+            </span>
+            <span role="cell" className="significance__num significance__ops">{row.opsValue}</span>
+            <span role="cell" className="significance__num">{row.baselineValue}</span>
+            <span role="cell" className="significance__num">{row.delta}</span>
+            <span role="cell" className="significance__num significance__cell--wide-only">{row.cohensD}</span>
+            <span role="cell" className="significance__num significance__cell--wide-only">{row.bonferroniP}</span>
+            <span role="cell" className="significance__cell--ci significance__cell--wide-only">
+              <span className="significance__ci-line">
+                <em>티커</em>
+                <span className="significance__ci-value">{row.ciCluster === "—" ? <span className="significance__ci-na">미적용 *</span> : row.ciCluster}</span>
+              </span>
+              <span className="significance__ci-line">
+                <em>시간</em>
+                <span className="significance__ci-value">{row.ciBlock}</span>
+              </span>
+            </span>
+            <span role="cell">
+              <span className={`significance__verdict significance__verdict--${verdictClass(row.verdict)}`}>{row.verdict}</span>
+            </span>
+          </div>,
+          <details key={`extras-${i}`} className="significance__row-extras">
+            <summary>{row.baseline} 상세 (Cohen&apos;s d · Bonf. p · 95% CI)</summary>
+            <dl className="significance__extras-dl">
+              <div><dt>Cohen&apos;s d</dt><dd>{row.cohensD}</dd></div>
+              <div><dt>Bonf. p</dt><dd>{row.bonferroniP}</dd></div>
+              <div><dt>95% CI (티커별 Bootstrap)</dt><dd>{row.ciCluster}</dd></div>
+              <div><dt>95% CI (시간 block 별 Bootstrap, √T)</dt><dd>{row.ciBlock}</dd></div>
+            </dl>
+          </details>,
+        ])}
+      </div>
+      {block.rows.some((row) => row.ciCluster === "—") ? (
+        <p className="significance__footnote">
+          * 라인 IC 는 일별 cross-section 통계라 ticker 단위 cluster bootstrap 미적용 (cluster_n=0). 시간 block 별만 산출.
+        </p>
+      ) : null}
+      {hasPartial ? (
+        <p className="significance__footnote">
+          † walk-forward 한정 구간 — 해당 행의 {block.opsLabel} 값도 같은 fold 영역 기준.
+        </p>
+      ) : null}
+      {block.gwRegime && block.gwRegime.length > 0 ? (
+        <div className="significance__gw">
+          <div className="significance__gw-title">Giacomini–White (GW) regime-conditional test · walk-forward GARCH 대비</div>
+          <div className="significance__gw-table" role="table">
+            <div className="significance__gw-row significance__gw-row--head" role="row">
+              <span role="columnheader">Regime</span>
+              <span role="columnheader">β</span>
+              <span role="columnheader">wald p (Bonferroni)</span>
+              <span role="columnheader">판정</span>
+            </div>
+            {block.gwRegime.map((g) => (
+              <div key={g.regimeCode} className="significance__gw-row" role="row">
+                <span role="cell" className="significance__cell--baseline">
+                  <strong>{g.regime}</strong>
+                  <span className="significance__code">{g.regimeCode}</span>
+                </span>
+                <span role="cell" className="significance__num">{g.betaCoef}</span>
+                <span role="cell" className="significance__num">{g.bonferroniP}</span>
+                <span role="cell">
+                  <span className="significance__verdict significance__verdict--neutral">{g.verdict}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="significance__footnote">
+            나머지 3 베이스라인 (bollinger · historical_quantile · garch_p_q_1_1) 도 동일하게 3 regime 모두 wald Bonferroni p&lt;0.001 — regime effect 일관.
+          </p>
+          {block.gwInterpretation ? (
+            <div className="significance__gw-interpretation">
+              <div className="significance__gw-interpretation-title">GW 결과 해석 — 구간별 무엇이 어떻게 다른가</div>
+              <p className="significance__gw-interpretation-baseline">{block.gwInterpretation.baselineMeanDiff}</p>
+              <dl className="significance__gw-interpretation-dl">
+                {block.gwInterpretation.paragraphs.map((p, pi) => (
+                  <div key={pi}>
+                    <dt>{p.heading}</dt>
+                    <dd>{p.body}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="significance__gw-interpretation-trigger">{block.gwInterpretation.triggerImplication}</div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      </details>
+    </section>
+  );
+}
+
+function PptMappingSection({ slotId }: { slotId: string | null | undefined }) {
+  const rows = getPptMapping(slotId);
+  if (rows.length === 0) {
+    return null;
+  }
+  return (
+    <section className="ppt-mapping">
+      <div className="panel-heading panel-heading--compact">
+        <h3>초기 계획 평가</h3>
+      </div>
+      <div className="ppt-mapping__table" role="table">
+        <div className="ppt-mapping__row ppt-mapping__row--head" role="row">
+          <span role="columnheader">계획 지표</span>
+          <span role="columnheader">계획 목표</span>
+          <span role="columnheader">v1 운영 대응</span>
+          <span role="columnheader">차이 / 사유</span>
+        </div>
+        {rows.map((row) => (
+          <div key={row.pptMetric} className="ppt-mapping__row" role="row">
+            <span role="cell"><strong>{row.pptMetric}</strong></span>
+            <span role="cell">{row.pptTarget}</span>
+            <span role="cell">{row.v1Reality}</span>
+            <span role="cell" className="ppt-mapping__diff">{row.diff}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** CP216 — 초기 계획과 차이점 (v1 운영에서 추가/대체된 지표). 모델별. */
+function V1ExtraIndicatorsSection({ slotId }: { slotId: string | null | undefined }) {
+  const extras = getV1ExtraIndicators(slotId);
+  if (extras.length === 0) {
+    return null;
+  }
+  return (
+    <section className="v1-extra">
+      <div className="panel-heading panel-heading--compact">
+        <h3>초기 계획과 차이점</h3>
+      </div>
+      <ul className="v1-extra__list">
+        {extras.map((item) => (
+          <li key={item.metricKey} className="v1-extra__row">
+            <div className="v1-extra__head">
+              <strong>{item.title}</strong>
+              <span className="v1-extra__value">{item.value}</span>
+              <span className="v1-extra__source">{item.source}</span>
+            </div>
+            <p>{item.note}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -483,71 +753,6 @@ function ProductSlotCard({
   );
 }
 
-function ExperimentButton({
-  run,
-  detail,
-  active,
-  category,
-  onSelect,
-}: {
-  run: AiRunSummary;
-  detail: AiRunDetail;
-  active: boolean;
-  category: ExperimentCategory;
-  onSelect: (runId: string, category: ExperimentCategory) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`experiment-row${active ? " experiment-row--active" : ""}`}
-      onClick={() => onSelect(run.run_id, category)}
-    >
-      <strong>{formatExperimentName(detail)}</strong>
-      <span>
-        {getExperimentKind(detail) === "band" ? "밴드 실험" : "예측선 실험"} · {detail.timeframe ?? "-"} · h{detail.horizon ?? "-"}
-      </span>
-      <em>{getExperimentTag(run, category)}</em>
-    </button>
-  );
-}
-
-function ExperimentDisclosure({
-  title,
-  items,
-  selected,
-  onSelect,
-}: {
-  title: string;
-  items: ExperimentListItem[];
-  selected: SelectedItem;
-  onSelect: (runId: string, category: ExperimentCategory) => void;
-}) {
-  return (
-    <details className="experiment-disclosure">
-      <summary>
-        <span>{title}</span>
-        <em>{items.length}개</em>
-      </summary>
-      {items.length > 0 ? (
-        <div className="experiment-row-list">
-          {items.map((item) => (
-            <ExperimentButton
-              key={`${item.category}-${item.run.run_id}`}
-              run={item.run}
-              detail={item.detail}
-              category={item.category}
-              active={selected.kind === "experiment" && selected.runId === item.run.run_id}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="compact-note">표시할 실험이 없습니다.</div>
-      )}
-    </details>
-  );
-}
-
 function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
   const description =
     slot.id === "line-1w"
@@ -589,7 +794,13 @@ function StoredEvaluationSection({ cards }: { cards: GoalCardData[] }) {
 }
 
 function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: ProductSlot | null }) {
-  const cards = detail ? buildLineExperimentCards(detail) : [];
+  // CP216 — 정적 평가 카드 우선. 운영 모델 (CP210) 은 v1 동안 안 바뀌므로 detail 동적 read 보다 정적 박은 값 사용.
+  const staticBlock = getStaticEvaluation(slot?.id);
+  const cards: GoalCardData[] = staticBlock
+    ? staticCardsToGoalCardData(staticBlock.cards)
+    : detail
+    ? buildLineExperimentCards(detail)
+    : [];
   const hasEvaluation = cards.length > 0;
   const isWeekly = (detail?.timeframe ?? slot?.timeframe) === "1W";
   const status: ProductSlotStatus = slot?.runId ? "사용 중" : "준비 중";
@@ -598,7 +809,7 @@ function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
   const summary =
     slot?.summary ??
     (isWeekly
-      ? "1W 보수적 기준선은 v1에서 제공하지 않습니다."
+      ? "1W 보수적 기준선은 v1에서 제공하지 않습니다. 여러 walk-forward 실험을 돌렸지만 1D 라인만큼의 안정 성능(IC·severe recall)을 주간 단위에서 확보하지 못해 v1 제외했습니다."
       : "수익 방향과 종목 순위 판단에는 사용할 수 있지만, 위험 회피 품질은 개선 중입니다.");
 
   return (
@@ -609,61 +820,65 @@ function LineModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
         <p>{summary}</p>
       </div>
 
+      <article className="model-role-card">
+        <h3>모델 역할</h3>
+        <p>
+          PatchTST 5-seed 앙상블 예측선입니다. 최근 가격과 시장 스트레스 지표를 보고 앞으로 {horizonLabel} 동안의
+          도착가를 보수적으로 추정합니다. 차트에는 미래 각 거래일 위치에 표시되고, 매일 새 예측으로 갱신됩니다.
+        </p>
+      </article>
+
+      <div className="notice">
+        출력 계약: 수익률 단위 score 를 학습하고, 화면에는 기준 종가에 환산해 미래 5거래일 구간에
+        표시합니다. 모델은 CP210 F4 β=4, 5-seed 앙상블이며, 낙관 오차에 더 큰 페널티를 주는 비대칭 손실로 보수적으로
+        학습했습니다.
+      </div>
+
       <section className="model-story-grid">
         <article>
-          <h3>모델 역할</h3>
-          <p>
-            Line v2 기반 제품 모델입니다. 최근 데이터를 보고 앞으로 {horizonLabel} 후 도착가를 보수적으로 추정합니다.
-            출력은 수익률 단위 score이며 화면에서는 기준 종가를 곱해 가격으로 환산합니다.
-          </p>
+          <h3>좋은 점</h3>
+          <ul className="model-copy-list">
+            <li><strong>큰 하락 포착률 0.7727</strong> — 통계 베이스라인·이전 모델 0.62~0.79 평균 위. 위험 회피 모델로 안정.</li>
+            <li><strong>위험 오판율 0.2048</strong> — 안전 판정 구간의 실제 손실 비율. 목표 0.210 통과, CP175 0.197 와 비슷한 수준 유지.</li>
+            <li><strong>상위 하위 수익 차 0.0055</strong> — 양수 = 종목 순위 구분력 존재. 비대칭 손실 α=1 β=4 로 낙관 오차를 누른 결과.</li>
+          </ul>
         </article>
         <article>
-          <h3>사용 데이터</h3>
-          <DataList items={["가격", "거래량", "기술적 지표", "재무·거시·시장 폭 관련 피처"]} />
+          <h3>아쉬운 점</h3>
+          <ul className="model-copy-list">
+            <li><strong>수익 순위 예측력 0.0325</strong> — 통계 베이스라인 0.042~0.044 보다 낮음. 정밀한 순위 예측보다 위험 회피 보조에 적합.</li>
+            <li><strong>시장 구간 별 안정성 0.0457</strong> — walk-forward 4 fold 간 IC 편차가 ship 기준 0.040 초과. NO_SHIP 사유. 단독 판정 신호가 아닌 참고선으로 사용.</li>
+          </ul>
         </article>
       </section>
 
-      <div className="notice">
-        계약: 수익률 단위 score. asof 종가 × (1 + score)로 가격 환산 후 표시합니다.
-        출력 의미: 5거래일 후 도착가 보수 추정 (h5 horizon, β=5).
+      <div className="notice notice--muted">
+        커트라인 기준: 직전 수익률을 그대로 가정하는 naive 예측·과거 평균 수익률을 쓰는 historical mean 같은 통계
+        베이스라인과, 이전 운영 모델 CP175 v1 을 기준선으로 두고, 그보다 의미 있게 높은 지표만 장점으로 인정했습니다.
       </div>
 
-      {hasEvaluation ? (
-        <>
-          <div className="notice">현재 품질 판정: 저장된 평가 결과 기준으로 방향성과 순위 판단은 확인됐지만, 위험 오판율 개선이 필요합니다.</div>
-          <section className="model-story-grid">
-            <article>
-              <h3>좋은 점</h3>
-              <ul className="model-copy-list">
-                <li>저장된 평가 지표로 방향성과 순위 판단 신호를 확인했습니다.</li>
-                <li>상위-하위 구분력은 목표 대비 평가 카드에서 확인할 수 있습니다.</li>
-                <li>수수료 반영 안정성도 저장된 metric 기준으로만 판단합니다.</li>
-              </ul>
-            </article>
-            <article>
-              <h3>아쉬운 점</h3>
-              <ul className="model-copy-list">
-                <li>위험 오판율과 큰 하락 포착률은 계속 개선해야 합니다.</li>
-                <li>단독 매매 신호라기보다는 참고선으로 보는 것이 맞습니다.</li>
-              </ul>
-            </article>
-          </section>
-        </>
-      ) : (
-        <div className="notice">저장된 평가 없음: 평가 metric이 확인되기 전에는 성능을 판단하지 않습니다.</div>
-      )}
-
       <StoredEvaluationSection cards={cards} />
+      {staticBlock?.note ? <div className="notice notice--muted">{staticBlock.note}</div> : null}
 
-      {hasEvaluation ? <div className="notice">다음 개선 방향: 위험 오판율을 낮추는 loss/selector 개선이 다음 과제입니다.</div> : null}
-      <div className="notice">이 모델은 투자 조언이 아니라 보조 판단선입니다. 특히 위험 회피 품질은 계속 개선 중입니다.</div>
+      <V1ExtraIndicatorsSection slotId={slot?.id} />
+      <PptMappingSection slotId={slot?.id} />
+      <SignificanceSection slotId={slot?.id} />
+      <LineExperimentArchive />
+
+      <div className="notice">이 모델은 투자 조언이 아니라 보조 판단선입니다.</div>
       <ModelRunDetails detail={detail} metricDefinitions={LINE_METRICS} />
     </div>
   );
 }
 
 function BandModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: ProductSlot | null }) {
-  const cards = detail ? buildBandExperimentCards(detail) : [];
+  // CP216 — 정적 평가 카드 우선.
+  const staticBlock = getStaticEvaluation(slot?.id);
+  const cards: GoalCardData[] = staticBlock
+    ? staticCardsToGoalCardData(staticBlock.cards)
+    : detail
+    ? buildBandExperimentCards(detail)
+    : [];
   const hasEvaluation = cards.length > 0;
   const status: ProductSlotStatus = slot?.runId ? "사용 중" : "준비 중";
   const isWeekly = (detail?.timeframe ?? slot?.timeframe) === "1W";
@@ -683,49 +898,75 @@ function BandModelDetail({ detail, slot }: { detail: AiRunDetail | null; slot?: 
         <p>{summary}</p>
       </div>
 
-      <section className="model-story-grid">
-        <article>
-          <h3>모델 역할</h3>
-          <p>
-            TiDE 기반 제품 밴드입니다. 최근 가격·변동성 흐름을 보고 앞으로 {horizonLabel}의 예상 변동 범위를 계산합니다.
-            밴드가 넓어지는 구간은 모델이 더 큰 변동 가능성을 보는 구간입니다.
-          </p>
-        </article>
-        <article>
-          <h3>사용 데이터</h3>
-          <DataList items={["가격", "변동성", "거래량"]} />
-        </article>
-      </section>
+      <article className="model-role-card">
+        <h3>모델 역할</h3>
+        <p>
+          TiDE 기반 제품 밴드입니다. 최근 가격·변동성 흐름을 보고 앞으로 {horizonLabel}의 예상 변동 범위를 분위수로
+          계산합니다. 밴드가 넓어지는 구간은 모델이 더 큰 변동 가능성을 보는 구간입니다.
+        </p>
+      </article>
 
-      {hasEvaluation ? (
-        <>
-          <div className="notice">현재 품질 판정: 저장된 평가 결과 기준으로 목표 포함률과 밴드 반응도를 확인했습니다.</div>
-          <section className="model-story-grid">
-            <article>
-              <h3>좋은 점</h3>
-              <ul className="model-copy-list">
-                <li>저장된 평가 metric으로 포함률과 이탈률을 확인했습니다.</li>
-                <li>밴드 폭 반응도는 목표 대비 평가 카드에서 확인할 수 있습니다.</li>
-                <li>밴드는 매수/매도 신호가 아니라 위험 범위로 해석합니다.</li>
-              </ul>
-            </article>
-            <article>
-              <h3>아쉬운 점</h3>
-              <ul className="model-copy-list">
-                <li>종목별로 과하게 넓거나 좁게 보일 수 있어 계속 검증이 필요합니다.</li>
-                <li>밴드가 넓다고 수익 기회라는 뜻은 아닙니다.</li>
-              </ul>
-            </article>
-          </section>
-        </>
+      <div className="notice">
+        출력 계약: 하단 {isWeekly ? "q10" : "q15"} · 상단 {isWeekly ? "q90" : "q85"} 분위수를 학습하고{" "}
+        {isWeekly ? "walk-forward 별 lower calibration" : "validation lower_focused conformal 보정"}
+        으로 목표 포함 비율
+        {isWeekly ? " 0.80" : " 0.70"} 에 맞춥니다. 예측 기간은 {isWeekly ? "4주 (CP178)" : "5거래일 (CP153)"} 입니다.
+      </div>
+
+      {isWeekly ? (
+        <section className="model-story-grid">
+          <article>
+            <h3>좋은 점</h3>
+            <ul className="model-copy-list">
+              <li><strong>안정 구간 포함률 0.8002</strong> — fold_2 의 3 seed 평균이 목표 0.80 거의 정확히. bootstrap 95% CI 폭 ±0.005p 로 같은 seed 내 모델 일관성 높음.</li>
+              <li><strong>운영 평균 포함률 오차 0.039</strong> — 목표 0.05 안. fold_1·fold_3 미달분을 fold_2 가 정확히 만회.</li>
+              <li><strong>밴드 폭 반응도 0.34</strong> — 1D 0.376 대비 약하지만 양수. 주간 변동성 확장도 어느 정도 따라감.</li>
+              <li><strong>안정 구간 하단 이탈률 0.0922</strong> — q10 분위수 목표 0.10 에 근접. fold 별 lower calibration 으로 fold_1 의 0.124 대비 회복.</li>
+            </ul>
+          </article>
+          <article>
+            <h3>아쉬운 점</h3>
+            <ul className="model-copy-list">
+              <li><strong>분포 이동 구간 포함률 0.7462 / 0.7472</strong> — fold_1·fold_3 에서 목표 0.80 대비 약 5%p 미달. 분포 변화에는 추격 한계.</li>
+              <li><strong>밴드 폭 반응도 0.34</strong> — 1D 0.376 대비 낮음. 주봉 표본 수가 적어 폭 신호가 일봉만큼 정밀하지 않음.</li>
+              <li><strong>분포 이동 구간 하단 이탈률 0.124</strong> — q10 목표 0.10 대비 +0.024 초과. 분포 이동 구간 calibration 한계.</li>
+            </ul>
+          </article>
+        </section>
       ) : (
-        <div className="notice">저장된 평가 없음: 평가 metric이 확인되기 전에는 성능을 판단하지 않습니다.</div>
+        <section className="model-story-grid">
+          <article>
+            <h3>좋은 점</h3>
+            <ul className="model-copy-list">
+              <li><strong>포함률 오차 0.0099</strong> — 목표 0.05 대비 5배 마진. Stage 5T TiDE 참조값 0.0254 대비 0.016 개선.</li>
+              <li><strong>밴드 폭 반응도 0.376</strong> — 강한 양수, Stage 5T 참조값 0.374 와 동등 이상. 위험 확장 잘 반영.</li>
+              <li><strong>하방 폭 손실 반영도 0.0866</strong> — 양수 = 하방 위험 반영. tail risk calibration 효과.</li>
+              <li><strong>상단 이탈률 0.1513</strong> — q85 분위수 목표 0.15 에 거의 일치, +0.0013.</li>
+            </ul>
+          </article>
+          <article>
+            <h3>아쉬운 점</h3>
+            <ul className="model-copy-list">
+              <li><strong>하단 이탈률 0.1586</strong> — q15 분위수 목표 0.15 보다 +0.0086 초과. Stage 5T 참조값 0.1425 대비 +0.016. 하방 calibration 의 살짝 느슨함.</li>
+              <li><strong>목표 포함률 70%</strong> — 초기 계획서의 90% CI 대비 좁힘. 90% 가 5거래일 단위에서 너무 넓어 실용성 떨어진다고 판단한 결과, 정직하게 70% 로 운영.</li>
+            </ul>
+          </article>
+        </section>
       )}
 
-      <StoredEvaluationSection cards={cards} />
+      <div className="notice notice--muted">
+        커트라인 기준: GARCH·historical quantile·볼린저 같은 통계 베이스라인을 기준선으로 두고, 그보다 명확한 장점이
+        있는 후보만 제품 모델로 채택했습니다.
+      </div>
 
-      {hasEvaluation ? <div className="notice">다음 개선 방향: 종목별 밴드 폭 안정성과 하방 반응도 개선이 다음 과제입니다.</div> : null}
-      <div className="notice">AI 밴드는 수익 목표가 아니라 위험 범위입니다. 가격 목표선처럼 해석하지 마세요.</div>
+      <StoredEvaluationSection cards={cards} />
+      {staticBlock?.note ? <div className="notice notice--muted">{staticBlock.note}</div> : null}
+
+      <V1ExtraIndicatorsSection slotId={slot?.id} />
+      <PptMappingSection slotId={slot?.id} />
+      <SignificanceSection slotId={slot?.id} />
+      {isWeekly ? <Band1wExperimentArchive /> : <Band1dExperimentArchive />}
+
       <ModelRunDetails detail={detail} metricDefinitions={BAND_METRICS} />
     </div>
   );
@@ -1071,6 +1312,8 @@ export default function TrainingView() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [runsApiError, setRunsApiError] = useState<ApiError | null>(null);
+  const [detailApiError, setDetailApiError] = useState<ApiError | null>(null);
 
   const experimentGroups = useMemo(() => {
     const candidates = [
@@ -1125,12 +1368,15 @@ export default function TrainingView() {
       return;
     }
     setIsDetailLoading(true);
+    setDetailApiError(null);
     try {
       const detailResponse = await fetchAiRun(runId, { includeConfig: false });
       setDetail(detailResponse.data);
     } catch (error) {
       setDetail(null);
-      setErrorMessage(extractErrorMessage(error, "실행 상세를 불러오지 못했습니다."));
+      const classified = classifyApiError(error, `/api/v1/ai/runs/${runId}`);
+      setDetailApiError(classified);
+      setErrorMessage(describeApiError(classified));
     } finally {
       setIsDetailLoading(false);
     }
@@ -1193,7 +1439,9 @@ export default function TrainingView() {
       setProductBandDetail(null);
       setProductWeeklyLineDetail(null);
       setDetail(null);
-      setErrorMessage(extractErrorMessage(error, "AI 모델 목록을 불러오지 못했습니다."));
+      const classified = classifyApiError(error, "/api/v1/ai/runs");
+      setRunsApiError(classified);
+      setErrorMessage(describeApiError(classified));
     } finally {
       setIsLoading(false);
     }
@@ -1223,18 +1471,38 @@ export default function TrainingView() {
     <div className="view-stack">
       <header className="view-header">
         <div className="view-header__title">
-          <div className="eyebrow">제품 모델 설명</div>
           <h1>AI 모델</h1>
-          <p>Lens는 예측선 모델과 AI 밴드 모델을 분리해서 평가하고, 검증된 모델만 주식 보기 화면에 사용합니다.</p>
+          <p>딥러닝 모델로 예측선과 AI 밴드를 만들고, 검증된 모델만 화면에 씁니다.</p>
         </div>
       </header>
 
-      {errorMessage ? <div className="notice notice--error">{errorMessage}</div> : null}
+      {runsApiError ? (
+        <StatusInline kind="error" label="AI 실행 목록" error={runsApiError} hint="백엔드 /ai/runs 응답 또는 로그 확인" />
+      ) : detailApiError ? (
+        <StatusInline kind="error" label="실행 상세" error={detailApiError} hint="해당 run_id 응답 또는 백엔드 로그 확인" />
+      ) : errorMessage ? (
+        <div className="notice notice--error">{errorMessage}</div>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>사용한 딥러닝 모델</h2>
+        </div>
+        <div className="model-arch-grid">
+          {MODEL_ARCHITECTURES.map((model) => (
+            <article key={model.name} className="model-arch-card">
+              <span className="model-arch-card__role">{model.role}</span>
+              <h3>{model.name}</h3>
+              <p className="model-arch-card__type">{model.type}</p>
+              <p>{model.desc}</p>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="panel model-status-panel">
         <div className="panel-heading">
-          <div className="eyebrow">제품 모델 현황</div>
-          <h2>현재 사용 상태</h2>
+          <h2>현재 사용 중인 모델</h2>
         </div>
         <div className="product-slot-grid">
           {PRODUCT_SLOTS.map((slot) => (
@@ -1271,18 +1539,20 @@ export default function TrainingView() {
           <h2>이전 실험</h2>
         </div>
         <div className="experiment-disclosure-grid">
-          <ExperimentDisclosure
-            title="예측선 실험 보기"
-            items={experimentGroups.line}
-            selected={selected}
-            onSelect={(runId, nextCategory) => void loadDetail({ kind: "experiment", runId, category: nextCategory }, runId)}
-          />
-          <ExperimentDisclosure
-            title="밴드 실험 보기"
-            items={experimentGroups.band}
-            selected={selected}
-            onSelect={(runId, nextCategory) => void loadDetail({ kind: "experiment", runId, category: nextCategory }, runId)}
-          />
+          {/* CP218 — 라인 실험 정적 타임라인 (1W 사이드 트랙 + 1D 메인 흐름). */}
+          <details className="experiment-disclosure">
+            <summary>예측선 실험 보기</summary>
+            <div className="experiment-row-list">
+              <ExperimentTimeline nodes={LINE_TIMELINE} kind="line" />
+            </div>
+          </details>
+          {/* CP219 — 밴드 실험 정적 타임라인 (CP153 1D + CP178 1W + 공통 후속). */}
+          <details className="experiment-disclosure">
+            <summary>밴드 실험 보기</summary>
+            <div className="experiment-row-list">
+              <ExperimentTimeline nodes={BAND_TIMELINE} kind="band" />
+            </div>
+          </details>
         </div>
       </section>
     </div>

@@ -42,7 +42,7 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     refreshPolicy: "auto",
     freshAfterDays: 1,
     staleAfterDays: 5,
-    summary: "활성 1D 보수적 기준선입니다. raw output은 가격이 아니라 safe_line_score이며, asof 종가에 곱해 가격으로 환산합니다.",
+    summary: "활성 1D 보수적 기준선입니다.\n앞으로 5거래일의 보수적 도착가를 추정해 차트에 표시합니다.",
     endpoint: "/api/v1/predictions/line/{ticker}",
   },
   "band-1d": {
@@ -61,7 +61,7 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     refreshPolicy: "auto",
     freshAfterDays: 1,
     staleAfterDays: 5,
-    summary: "자동 갱신된 1D AI 밴드입니다. 최신 parquet 결과를 읽어 예상 변동 범위를 가격 차트에 표시합니다.",
+    summary: "자동 갱신되는 1D AI 밴드입니다.\n앞으로 5거래일의 예상 변동 범위를 차트에 표시합니다.",
     endpoint: "/api/v1/predictions/band/1d/{ticker}",
   },
   "line-1w": {
@@ -80,7 +80,7 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     refreshPolicy: "deferred",
     freshAfterDays: null,
     staleAfterDays: null,
-    summary: "1W 보수적 기준선은 v1에서 제공하지 않습니다.",
+    summary: "1W 보수적 기준선은 v1에서 제공하지 않습니다.\n주간 단위에서 안정 성능이 안 나와 제외했습니다.",
     endpoint: null,
   },
   "band-1w": {
@@ -99,7 +99,7 @@ export const PRODUCT_SLOT_BY_ID: Record<ProductSlotId, ProductSlot> = {
     refreshPolicy: "auto",
     freshAfterDays: 7,
     staleAfterDays: 14,
-    summary: "자동 갱신된 1W AI 밴드입니다. asof 가격에 밴드 수익률을 곱해 주간 위험 범위를 가격 차트에 표시합니다.",
+    summary: "자동 갱신되는 1W AI 밴드입니다.\n앞으로 4주의 예상 변동 범위를 차트에 표시합니다.",
     endpoint: "/api/v1/predictions/band/1w/{ticker}",
   },
 };

@@ -4,7 +4,6 @@ import { FormEvent, startTransition, useCallback, useDeferredValue, useEffect, u
 
 import {
   DisplayTimeframe,
-  EvaluationSummary,
   fetchIndicators,
   fetchPrices,
   fetchTickers,
@@ -25,13 +24,24 @@ import {
 import Chart from "@/components/Chart";
 import IndicatorPanel, { IndicatorChartPoint, IndicatorChartSeries } from "@/components/IndicatorPanel";
 import LayerToggle from "@/components/LayerToggle";
+import StatusInline from "@/components/StatusInline";
 import {
+  ApiError,
+  buildEmptyPayloadError,
   buildPriceMissingMessage,
+  buildShapeMismatchError,
+  classifyApiError,
+  describeApiError,
   extractApiError,
   extractErrorMessage,
   isBackendConnectionError,
   isResourceNotFound,
 } from "@/lib/apiErrors";
+import {
+  BAND_STALE_THRESHOLD_BUSINESS_DAYS,
+  PRICE_LOOKBACK_LIMIT_1D,
+  PRICE_LOOKBACK_LIMIT_1W,
+} from "@/lib/constants";
 import {
   buildDefaultPriceWindow,
   buildFullPriceWindows,
@@ -67,6 +77,7 @@ import {
 } from "@/lib/predictionOverlay";
 import { getProductBandSlot, getProductLineSlot, PRODUCT_SLOT_BY_ID, ProductSlot } from "@/lib/productSlots";
 import {
+  evaluateBandStaleness,
   formatFreshnessStatus,
   getFreshnessClass,
   getFutureForecastDates,
@@ -78,6 +89,7 @@ import {
   buildBandPredictionFromV1,
   buildLineHistoryFromV1,
   buildLinePredictionFromV1,
+  diagnoseBandShape,
 } from "@/lib/v1Adapter";
 
 type ChartType = "candles" | "line";
@@ -105,9 +117,17 @@ const TIMEFRAME_OPTIONS: Array<{ value: DisplayTimeframe; label: string }> = [
 ];
 
 const PRODUCT_HISTORY_LOOKBACK_DAYS = 370;
-const DEFAULT_PRICE_LOOKBACK_DAYS = 365;
 const FULL_PRICE_HISTORY_START_YEAR = 2015;
 const LINE_OVERLAY_HELD = false;
+
+// CP215 — 1D/1W timeframe 별 가격 lookback (calendar days).
+function getPriceLookbackDays(timeframe: DisplayTimeframe) {
+  if (timeframe === "1W") {
+    return PRICE_LOOKBACK_LIMIT_1W;
+  }
+  // 1D + 1M 모두 일봉 단위 fetch. 1M 은 별도 표시 모드이지만 lookback 은 1D 와 동일.
+  return PRICE_LOOKBACK_LIMIT_1D;
+}
 
 function getLastPrice(rows: PriceBar[]) {
   return rows.length > 0 ? rows[rows.length - 1] : null;
@@ -158,7 +178,7 @@ function buildAiState(timeframe: DisplayTimeframe): AiState {
 
 async function fetchPriceHistory(ticker: string, timeframe: DisplayTimeframe, fullHistory = false) {
   if (!fullHistory) {
-    const window = buildDefaultPriceWindow(DEFAULT_PRICE_LOOKBACK_DAYS);
+    const window = buildDefaultPriceWindow(getPriceLookbackDays(timeframe));
     const response = await fetchPrices(ticker, {
       timeframe,
       start: window.start,
@@ -203,9 +223,14 @@ export default function StockView() {
     selectedRunId: null,
     isFallback: false,
   });
-  const [bandEvaluation, setBandEvaluation] = useState<EvaluationSummary | null>(null);
   const [aiState, setAiState] = useState<AiState>({ kind: "loading", message: "예측 확인 중" });
   const [priceState, setPriceState] = useState<PriceState>({ kind: "loading", message: "가격 확인 중" });
+  // CP213 — fetch/build 단계별 ApiError 가시화.
+  const [linePredictionError, setLinePredictionError] = useState<ApiError | null>(null);
+  const [bandPredictionError, setBandPredictionError] = useState<ApiError | null>(null);
+  const [bandShapeReason, setBandShapeReason] = useState<string | null>(null);
+  const [priceFetchError, setPriceFetchError] = useState<ApiError | null>(null);
+  const [indicatorFetchError, setIndicatorFetchError] = useState<ApiError | null>(null);
   const [suggestions, setSuggestions] = useState<StockSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -260,7 +285,11 @@ export default function StockView() {
     setBandPrediction(null);
     setLinePredictionHistory([]);
     setBandPredictionHistory([]);
-    setBandEvaluation(null);
+    setLinePredictionError(null);
+    setBandPredictionError(null);
+    setBandShapeReason(null);
+    setPriceFetchError(null);
+    setIndicatorFetchError(null);
     setPredictionProvenance({
       latestRunId: null,
       selectedRunId: null,
@@ -285,6 +314,7 @@ export default function StockView() {
         } else {
           const safeMessage = extractErrorMessage(priceError);
           setPriceState({ kind: "error", message: safeMessage });
+          setPriceFetchError(classifyApiError(priceError, `/api/v1/stocks/${nextTicker}/prices`));
           if (isBackendConnectionError(priceError)) {
             setErrorMessage(safeMessage);
           }
@@ -295,9 +325,12 @@ export default function StockView() {
         const indicatorsResponse = await fetchIndicators(nextTicker, { timeframe: nextTimeframe, limit: 300 });
         setIndicatorData(sortUniqueByDate(indicatorsResponse.data.data));
         setIndicatorErrorMessage(null);
-      } catch {
+        setIndicatorFetchError(null);
+      } catch (indicatorError) {
         setIndicatorData([]);
-        setIndicatorErrorMessage("보조지표를 불러오지 못했습니다.");
+        const classified = classifyApiError(indicatorError, `/api/v1/stocks/${nextTicker}/indicators`);
+        setIndicatorErrorMessage(describeApiError(classified));
+        setIndicatorFetchError(classified);
       }
 
       if (!isPredictionTimeframeEnabled(nextTimeframe)) {
@@ -319,15 +352,29 @@ export default function StockView() {
 
       const lineSlot = getProductLineSlot(nextTimeframe);
       const bandSlot = getProductBandSlot(nextTimeframe);
+      const lineEndpoint = `/api/v1/predictions/line/${nextTicker}`;
+      const bandEndpoint =
+        nextTimeframe === "1W"
+          ? `/api/v1/predictions/band/1w/${nextTicker}`
+          : `/api/v1/predictions/band/1d/${nextTicker}`;
       const linePromise =
         !LINE_OVERLAY_HELD && nextTimeframe === "1D" && lineSlot?.status === "active"
-          ? fetchV1LinePrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS }).catch(() => null)
+          ? fetchV1LinePrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS }).catch((err) => {
+              setLinePredictionError(classifyApiError(err, lineEndpoint));
+              return null;
+            })
           : Promise.resolve(null);
       const bandPromise =
         bandSlot?.status === "active"
           ? nextTimeframe === "1W"
-            ? fetchV1Band1wPrediction(nextTicker, { days: 730 }).catch(() => null)
-            : fetchV1Band1dPrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS }).catch(() => null)
+            ? fetchV1Band1wPrediction(nextTicker, { days: 730 }).catch((err) => {
+                setBandPredictionError(classifyApiError(err, bandEndpoint));
+                return null;
+              })
+            : fetchV1Band1dPrediction(nextTicker, { days: PRODUCT_HISTORY_LOOKBACK_DAYS }).catch((err) => {
+                setBandPredictionError(classifyApiError(err, bandEndpoint));
+                return null;
+              })
           : Promise.resolve(null);
 
       const [lineResponse, bandResponse] = await Promise.all([linePromise, bandPromise]);
@@ -340,11 +387,33 @@ export default function StockView() {
       const bandReady = Boolean(bandLatest && isActualBandPrediction(bandLatest) && checkBandOverlay(bandLatest).ok);
       const lineReady = lineSlot?.status === "active" && (lineHistory.length > 0 || Boolean(lineLatest));
 
+      // CP213 — 응답은 정상이지만 build 단계에서 떨어진 경우 shape_mismatch 로 분류해서 사유 노출.
+      if (bandResponse && !bandReady) {
+        const shapeReason = diagnoseBandShape(bandResponse.data, bandSlot?.horizon ?? 5, priceRows);
+        if (shapeReason) {
+          setBandShapeReason(shapeReason);
+          setBandPredictionError(buildShapeMismatchError(bandEndpoint, shapeReason));
+        } else if (bandLatest && !isActualBandPrediction(bandLatest)) {
+          setBandShapeReason("meta.role 이 band_model 이 아님 (composite 또는 legacy)");
+          setBandPredictionError(buildShapeMismatchError(bandEndpoint, "meta.role 이 band_model 이 아님"));
+        } else if (bandLatest && !checkBandOverlay(bandLatest).ok) {
+          const reason = checkBandOverlay(bandLatest).message ?? "overlay 검사 실패";
+          setBandShapeReason(reason);
+          setBandPredictionError(buildShapeMismatchError(bandEndpoint, reason));
+        }
+      } else if (bandResponse && bandResponse.data?.data && bandResponse.data.data.length === 0) {
+        setBandPredictionError(buildEmptyPayloadError(bandEndpoint, "응답 행 0건"));
+      }
+      if (lineResponse && !lineReady && lineSlot?.status === "active") {
+        if (!lineLatest && lineHistory.length === 0) {
+          setLinePredictionError(buildEmptyPayloadError(lineEndpoint, "응답 매핑 결과 0건"));
+        }
+      }
+
       setLinePredictionHistory(lineHistory);
       setBandPredictionHistory(bandHistory);
       setPrediction(lineLatest);
       setBandPrediction(bandReady ? bandLatest : null);
-      setBandEvaluation(null);
       setPredictionProvenance({
         latestRunId: lineSlot?.runId ?? null,
         selectedRunId: lineLatest?.run_id ?? lineHistory.at(-1)?.run_id ?? bandLatest?.run_id ?? null,
@@ -386,7 +455,6 @@ export default function StockView() {
         selectedRunId: null,
         isFallback: false,
       });
-      setBandEvaluation(null);
       setAiState({ kind: "empty", message: "가격 데이터 또는 예측 상태를 확인할 수 없습니다." });
       setErrorMessage(extractErrorMessage(error));
     } finally {
@@ -505,18 +573,90 @@ export default function StockView() {
     [chartActualDateSet, indicatorData]
   );
   const conservativeValue = getLastFinite(getPredictionLineValues(activePrediction));
+  // CP220-디버그 — 백엔드 evaluation mock 에 운영 band run 없음 (cnn_lstm 만 있음).
+  // bandPrediction 의 (upper - lower) 평균 / 기준종가 % 로 직관 표시.
+  // 임계값: 1D < 3% 좁음 / > 7% 넓음, 1W < 6% 좁음 / > 12% 넓음.
+  const bandWidthSummary = useMemo(() => {
+    const baseClose = latestPrice?.close;
+    if (!bandPrediction || !Number.isFinite(baseClose) || (baseClose as number) <= 0) return null;
+    const upper = bandPrediction.upper_band_series;
+    const lower = bandPrediction.lower_band_series;
+    const widths: number[] = [];
+    for (let i = 0; i < upper.length; i++) {
+      const u = upper[i];
+      const l = lower[i];
+      if (Number.isFinite(u) && Number.isFinite(l)) widths.push(u - l);
+    }
+    if (widths.length === 0) return null;
+    const avgWidth = widths.reduce((s, w) => s + w, 0) / widths.length;
+    const pct = (avgWidth / (baseClose as number)) * 100;
+    const isWeekly = bandPrediction.timeframe === "1W";
+    const [narrow, wide] = isWeekly ? [6, 12] : [3, 7];
+    const label: "좁음" | "보통" | "넓음" = pct < narrow ? "좁음" : pct > wide ? "넓음" : "보통";
+    return { pct, label };
+  }, [bandPrediction, latestPrice]);
   const lineAsofDate = activePrediction?.asof_date ?? activeLineHistory.at(-1)?.asof_date ?? null;
   const bandAsofDate = activeBandPrediction?.asof_date ?? activeBandHistory.at(-1)?.asof_date ?? null;
+  // CP215 — 토글 가드용 raw band asof. activeBandPrediction 이 overlay 검사 실패로 null 이어도
+  // bandPrediction 자체의 asof 가 있으면 그걸 사용 (stale 판정은 모델 응답 기준).
+  const rawBandAsofDate = bandPrediction?.asof_date ?? activeBandHistory.at(-1)?.asof_date ?? null;
   const lineFreshness = getSlotFreshness(currentLineSlot, lineAsofDate, latestPriceDate, priceData);
   const bandFreshness = getSlotFreshness(currentBandSlot, bandAsofDate, latestPriceDate, priceData);
+  // CP215 — 가격 latest 와 밴드 latest asof 의 거래일 gap > 5 면 stale.
+  const bandStaleness = evaluateBandStaleness(
+    latestPriceDate,
+    rawBandAsofDate,
+    BAND_STALE_THRESHOLD_BUSINESS_DAYS
+  );
   const lineFuturePointCount = lineFutureForecastDates.length;
   const bandFuturePointCount = bandFutureForecastDates.length;
   const lineFutureHidden = Boolean(activePrediction && lineFuturePointCount < 2);
   const bandFutureHidden = Boolean(activeBandPrediction && bandFuturePointCount < 2);
   const changeClass = changePercent == null ? "is-flat" : changePercent < 0 ? "is-down" : "is-up";
-  const bandLayerDisabled = aiDisabled || !hasPriceData || (!activeBandPrediction && activeBandHistory.length === 0);
+  // CP215 — base close 조회 실패(=adapter normalize 실패) 케이스 명시 사유.
+  const bandBaseCloseMissing = Boolean(
+    bandShapeReason &&
+      (bandShapeReason.includes("가격 lookback 부족") || bandShapeReason.includes("환산 불가"))
+  );
+  // CP215 — stale 또는 base close 누락도 토글 disable.
+  const bandLayerDisabled =
+    aiDisabled ||
+    !hasPriceData ||
+    (!activeBandPrediction && activeBandHistory.length === 0) ||
+    bandStaleness.isStale;
   const lineLayerDisabled = aiDisabled || !hasPriceData || (!activePrediction && activeLineHistory.length === 0);
   const volumeLayerDisabled = priceData.every((row) => !Number.isFinite(row.volume) || row.volume == null || row.volume <= 0);
+  // CP213 + CP215 — disable 사유 (LayerToggle.disabledReason 으로 전달).
+  // 우선순위: 환경/가격 → stale → base close 누락 → 일반 응답 에러 → shape mismatch → 슬롯 상태.
+  const bandDisabledReason = !bandLayerDisabled
+    ? undefined
+    : aiDisabled
+    ? "AI 기능 비활성"
+    : !hasPriceData
+    ? "가격 데이터 없음"
+    : bandStaleness.isStale
+    ? bandStaleness.reason
+    : bandBaseCloseMissing
+    ? "밴드 기준일 가격 조회 실패"
+    : bandPredictionError
+    ? describeApiError(bandPredictionError)
+    : bandShapeReason
+    ? `응답 매핑 실패 — ${bandShapeReason}`
+    : currentBandSlot?.status !== "active"
+    ? "슬롯이 active 가 아님"
+    : "응답 없음";
+  const lineDisabledReason = !lineLayerDisabled
+    ? undefined
+    : aiDisabled
+    ? "AI 기능 비활성"
+    : !hasPriceData
+    ? "가격 데이터 없음"
+    : linePredictionError
+    ? describeApiError(linePredictionError)
+    : currentLineSlot?.status !== "active"
+    ? "슬롯이 active 가 아님"
+    : "응답 없음";
+  const volumeDisabledReason = !volumeLayerDisabled ? undefined : "가격 응답에 volume 컬럼이 0이거나 비어 있음";
   const aiBandWidthPoints = useMemo(
     () => buildAiBandWidthPoints(activeBandHistory, activeBandPrediction).filter((point) => chartActualDateSet.has(point.date)),
     [activeBandHistory, activeBandPrediction, chartActualDateSet]
@@ -563,7 +703,12 @@ export default function StockView() {
     : activeBandPrediction || activeBandHistory.length > 0
     ? formatFreshnessStatus(bandFreshness)
     : currentBandSlot?.status === "active"
-    ? "데이터 없음"
+    ? // CP213 — "데이터 없음" 단정 대신 실제 원인 표시.
+      bandPredictionError
+      ? describeApiError(bandPredictionError)
+      : bandShapeReason
+      ? `매핑 실패 — ${bandShapeReason}`
+      : "응답 없음"
     : "-";
   const provenanceLabel = isLegacyArtifact
     ? "이전 실험 결과"
@@ -595,12 +740,14 @@ export default function StockView() {
       : activeBandPrediction || activePrediction
       ? "미래 구간 부족"
       : "-";
-  const staleNotice =
-    bandFreshness === "stale"
-      ? "AI 밴드는 마지막 저장된 기준으로 표시됩니다."
-      : bandFreshness === "delayed"
-      ? "AI 밴드는 가격 최신일보다 조금 이전 기준으로 표시됩니다."
-      : null;
+  // CP215 — stale 일 땐 토글이 disable 되어 차트에 안 그려지므로 notice 도 명시적 사유로.
+  const staleNotice = bandStaleness.isStale
+    ? `${bandStaleness.reason} — AI 밴드 토글이 비활성화됐습니다.`
+    : bandFreshness === "stale"
+    ? "AI 밴드는 마지막 저장된 기준으로 표시됩니다."
+    : bandFreshness === "delayed"
+    ? "AI 밴드는 가격 최신일보다 조금 이전 기준으로 표시됩니다."
+    : null;
   const futureHiddenNotice =
     bandFutureHidden || lineFutureHidden
       ? "가격 최신일 이후의 forecast가 2개 미만이라 최신 미래 예측선은 숨기고 저장된 이력만 표시합니다."
@@ -725,6 +872,15 @@ export default function StockView() {
                 timelineDates={chartTimelineDates}
                 onVisibleDatesChange={handleVisibleDatesChange}
               />
+            ) : priceFetchError ? (
+              <StatusInline
+                kind="error"
+                label="가격 데이터"
+                error={priceFetchError}
+                hint="백엔드 로그 또는 네트워크 상태 확인"
+                onRetry={() => void loadStock(selectedTicker, timeframe)}
+                variant="block"
+              />
             ) : (
               <div className="empty-state empty-state--stacked">
                 <strong>가격 데이터 없음</strong>
@@ -760,7 +916,11 @@ export default function StockView() {
               <span>AI 밴드 상태</span>
               <strong>
                 <span className={`freshness-badge freshness-badge--${getFreshnessClass(bandFreshness)}`}>
-                  {formatFreshnessStatus(bandFreshness)}
+                  {bandStaleness.isStale
+                    ? bandStaleness.reason
+                    : bandBaseCloseMissing
+                    ? "기준일 가격 조회 실패"
+                    : formatFreshnessStatus(bandFreshness)}
                 </span>
               </strong>
               <span>보수적 기준선 상태</span>
@@ -782,10 +942,6 @@ export default function StockView() {
                 <div className="provenance-grid provenance-grid--composite">
                   <span>표시 기준</span>
                   <strong>{provenanceLabel}</strong>
-                  <span>보수적 기준선 상태</span>
-                  <strong>{lineStatusLabel}</strong>
-                  <span>밴드 상태</span>
-                  <strong>{bandStatusLabel}</strong>
                   <span>보수적 기준선 ID</span>
                   <strong>{rawActivePrediction?.run_id ?? currentLineSlot?.runId ?? "준비 중"}</strong>
                   <span>밴드 실행 ID</span>
@@ -801,6 +957,7 @@ export default function StockView() {
               label="보수적 기준선"
               checked={!lineLayerDisabled && layers.conservativeLine}
               disabled={lineLayerDisabled}
+              disabledReason={lineDisabledReason}
               onChange={(checked) => setLayers((previous) => ({ ...previous, conservativeLine: checked }))}
             />
             <p className="layer-description">
@@ -812,24 +969,21 @@ export default function StockView() {
               label="AI 밴드"
               checked={!bandLayerDisabled && layers.aiBand}
               disabled={bandLayerDisabled}
+              disabledReason={bandDisabledReason}
               onChange={(checked) => setLayers((previous) => ({ ...previous, aiBand: checked }))}
             />
             <p className="layer-description">
-              {bandFreshness === "stale"
-                ? "최근 저장된 기준으로 표시 중입니다."
-                : timeframe === "1W"
-                ? "주간 예상 변동 범위입니다. 넓을수록 불확실성이 큽니다."
-                : "5거래일 후 예상 변동 범위입니다. 넓을수록 불확실성이 큽니다."}
+              {timeframe === "1W"
+                ? "주간 예상 변동 범위입니다. q10~q90 분위수로 실제 종가의 약 80% 가 밴드 안에 들어오도록 설계됐습니다. 넓을수록 불확실성이 큽니다."
+                : "5거래일 후 예상 변동 범위입니다. q15~q85 분위수로 실제 종가의 약 70% 가 밴드 안에 들어오도록 설계됐습니다. 넓을수록 불확실성이 큽니다."}
             </p>
-            {!bandLayerDisabled && layers.aiBand ? (
+            {!bandLayerDisabled && layers.aiBand && bandWidthSummary ? (
               <div className="layer-metrics">
                 <div>
-                  <span>커버리지</span>
-                  <strong>{formatRatio(bandEvaluation?.coverage)}</strong>
-                </div>
-                <div>
                   <span>평균 밴드 폭</span>
-                  <strong>{formatNumber(bandEvaluation?.avg_band_width)}</strong>
+                  <strong>
+                    {bandWidthSummary.pct.toFixed(1)}% (<span className={`band-width-label band-width-label--${bandWidthSummary.label === "좁음" ? "narrow" : bandWidthSummary.label === "넓음" ? "wide" : "normal"}`}>{bandWidthSummary.label}</span>)
+                  </strong>
                 </div>
               </div>
             ) : null}
@@ -853,6 +1007,7 @@ export default function StockView() {
               label="거래량 bar"
               checked={!volumeLayerDisabled && layers.volumeBar}
               disabled={volumeLayerDisabled}
+              disabledReason={volumeDisabledReason}
               onChange={(checked) => setLayers((previous) => ({ ...previous, volumeBar: checked }))}
             />
           </div>

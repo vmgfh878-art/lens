@@ -77,12 +77,20 @@ def _compress_strings(df: pd.DataFrame) -> pd.DataFrame:
     same string in every row (e.g. 1 unique value × 597 k rows ≈ 44 MB as
     object, < 1 MB as ordered category).
 
-    ordered=True is required so that .max() / .min() / sort_values() work on
-    date-string columns like asof_date (lexicographic sort == chronological for
-    ISO-format dates).  For other columns (ticker, model_id) it is harmless.
+    CP214 — `asof_date` / `forecast_date` 는 **categorical 에서 제외**한다.
+    이유:
+      - Categorical[str] vs str 비교 (`sub["asof_date"] >= cutoff`) 가 TypeError 발생
+        (predictions.py 라우터에서 `Invalid comparison between dtype=category and str`).
+      - `pd.to_datetime(Categorical[str])` 가 dtype 을 datetime64 가 아닌 **Categorical[datetime]**
+        으로 유지 → strategy_backtest_svc 의 merge 가 `datetime64[ns] vs category` 충돌로 실패.
+    날짜 컬럼은 unique 수가 700~2000 정도라 categorical 효과가 크지 않고, object 로 유지해도
+    메모리 절감 효과의 대부분(ticker / model_id / source_cp)은 유지된다.
     """
     cat_dtype = pd.CategoricalDtype(ordered=True)
+    skip = {"asof_date", "forecast_date"}
     for col in df.select_dtypes(include="object").columns:
+        if col in skip:
+            continue
         df[col] = df[col].astype(cat_dtype)
     return df
 

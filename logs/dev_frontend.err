@@ -1,2 +1,115 @@
 'npm'Àº(´Â) ³»ºÎ ¶Ç´Â ¿ÜºÎ ¸í·É, ½ÇÇàÇÒ ¼ö ÀÖ´Â ÇÁ·Î±×·¥, ¶Ç´Â
 ¹èÄ¡ ÆÄÀÏÀÌ ¾Æ´Õ´Ï´Ù.
+ âš  ./src/api/client.ts
+export 'fetchPrediction' (reexported as 'fetchPrediction') was not found in './endpoints/predictions' (possible exports: fetchProductPredictionHistory, fetchV1Band1dPrediction, fetchV1Band1wPrediction, fetchV1LinePrediction)
+
+Import trace for requested module:
+./src/api/client.ts
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/api/client.ts
+export 'fetchPredictionHistory' (reexported as 'fetchPredictionHistory') was not found in './endpoints/predictions' (possible exports: fetchProductPredictionHistory, fetchV1Band1dPrediction, fetchV1Band1wPrediction, fetchV1LinePrediction)
+
+Import trace for requested module:
+./src/api/client.ts
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/api/client.ts
+export 'fetchPrediction' (reexported as 'fetchPrediction') was not found in './endpoints/predictions' (possible exports: fetchProductPredictionHistory, fetchV1Band1dPrediction, fetchV1Band1wPrediction, fetchV1LinePrediction)
+
+Import trace for requested module:
+./src/api/client.ts
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/api/client.ts
+export 'fetchPredictionHistory' (reexported as 'fetchPredictionHistory') was not found in './endpoints/predictions' (possible exports: fetchProductPredictionHistory, fetchV1Band1dPrediction, fetchV1Band1wPrediction, fetchV1LinePrediction)
+
+Import trace for requested module:
+./src/api/client.ts
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+ âš  ./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+ âš  ./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx
+
+./src/components/BacktestView.tsx
+Attempted import error: 'fetchPredictionHistory' is not exported from '@/api/client' (imported as 'fetchPredictionHistory').
+
+Import trace for requested module:
+./src/components/BacktestView.tsx
+./src/components/DashboardPage.tsx

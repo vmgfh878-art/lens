@@ -124,3 +124,15 @@ INFO:     127.0.0.1:50057 - "GET /api/v1/predictions/line/AAPL?days=370 HTTP/1.1
 INFO:     127.0.0.1:54650 - "GET /api/v1/predictions/band/1d/AAPL?days=370 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:54650 - "GET /api/v1/predictions/line/AAPL?days=370 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:50057 - "GET /api/v1/predictions/band/1d/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63683 - "GET /api/v1/predictions/line/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51794 - "GET /api/v1/predictions/band/1d/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51806 - "GET /api/v1/health/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51807 - "GET /api/v1/predictions/line/AAPL?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51808 - "GET /api/v1/predictions/band/1d/AAPL?days=30&horizon=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51810 - "GET /api/v1/predictions/band/1w/AAPL?days=60&horizon=4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "GET /api/v1/predictions/line/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54295 - "GET /api/v1/predictions/band/1d/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55543 - "GET /api/v1/strategies/indicator_balance_v2/scan?limit=500 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49758 - "GET /api/v1/strategies/indicator_balance_v2/backtest/AAPL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63594 - "GET /api/v1/predictions/line/AAPL?days=370 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62398 - "GET /api/v1/predictions/band/1d/AAPL?days=370 HTTP/1.1" 200 OK

@@ -252,6 +252,57 @@ export function buildBandHistoryFromV1(
   return sortUniqueByAsofDate(rows);
 }
 
+/**
+ * CP213 — buildBandPredictionFromV1 이 null을 반환할 때의 사유를 사람이 읽을 한 줄로 반환.
+ * 정상이면 null. 가시성 강화용으로 build 결과와 별도로 호출한다 (build 시그니처 무변경 보장).
+ */
+export function diagnoseBandShape(
+  response: V1BandPredictionResult,
+  preferredHorizon: number,
+  priceRows: PriceBar[]
+): string | null {
+  if (!response.data || response.data.length === 0) {
+    return "응답 행 0건 (백엔드는 200이지만 data 비어있음)";
+  }
+  const sortedRows = [...response.data]
+    .filter((row) => isValidDate(row.asof_date))
+    .sort((left, right) => {
+      const byDate = left.asof_date.localeCompare(right.asof_date);
+      return byDate !== 0 ? byDate : left.horizon_step - right.horizon_step;
+    });
+  if (sortedRows.length === 0) {
+    return "asof_date 유효 행 0건 (응답 형식 깨짐)";
+  }
+  const latestAsof = sortedRows.at(-1)?.asof_date;
+  if (!latestAsof) {
+    return "latestAsof 추출 실패";
+  }
+  const latestRows = sortedRows.filter((row) => row.asof_date === latestAsof);
+  const rows = latestRows.filter((row) => row.horizon_step <= preferredHorizon);
+  if (rows.length === 0) {
+    return `horizon_step <= ${preferredHorizon} 행 0건 (응답 horizon 범위 불일치)`;
+  }
+  const baseClose = findCloseOnOrBefore(priceRows, latestAsof);
+  const hasReturnValue = rows.some(
+    (row) => Math.abs(row.band_upper ?? 0) < 1 || Math.abs(row.band_lower ?? 0) < 1
+  );
+  if (baseClose == null && hasReturnValue) {
+    return `밴드 asof_date(${latestAsof})에 매칭되는 가격 종가가 없어 수익률→가격 환산 불가 (가격 lookback 부족)`;
+  }
+  const upperBad = rows.some((row) => {
+    const value = finiteOrNull(row.band_upper);
+    return value == null ? true : normalizeBandValueToPrice(value, baseClose) == null;
+  });
+  const lowerBad = rows.some((row) => {
+    const value = finiteOrNull(row.band_lower);
+    return value == null ? true : normalizeBandValueToPrice(value, baseClose) == null;
+  });
+  if (upperBad || lowerBad) {
+    return "응답에 finite 하지 않은 band 값 포함";
+  }
+  return null;
+}
+
 export function buildBandPredictionFromV1(
   response: V1BandPredictionResult,
   timeframe: "1D" | "1W",
