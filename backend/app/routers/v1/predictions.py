@@ -95,18 +95,13 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 
 @router.get("/health")
 def health(request: Request):
-    """캐시 상태 확인."""
-    status = {}
-    for slot, df in _CACHE.items():
-        if df is None:
-            status[slot] = {"loaded": False}
-        else:
-            status[slot] = {
-                "loaded": True,
-                "rows": len(df),
-                "tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else 0,
-            }
-    return success_response(request, {"slots": status})
+    """캐시 상태 확인.
+
+    CP221: 정의되지 않은 모듈 변수 `_CACHE` 참조로 NameError(500)가 나던 버그 수정.
+    parquet_store.stats() 가 동일 정보(slot별 status/rows/tickers/mb)를 thread-safe 하게 반환한다.
+    라우터가 서비스 내부 캐시를 직접 보지 않고 공개 인터페이스만 사용한다.
+    """
+    return success_response(request, {"slots": parquet_store.stats()})
 
 
 @router.get("/tickers")
