@@ -24,4 +24,9 @@ python_version = "3.10"
 ignore_missing_imports = true
 follow_imports = "silent"
 warn_unused_ignores = false
+# ai/ 는 implicit namespace package (ai/__init__.py 없음). mypy가 동일 파일을
+# 두 이름(blocks / ai.models.blocks)으로 해석해 크래시하는 것을 막는다.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
 # 초기 느슨. 모듈별 strict 는 후속 CP에서 [[tool.mypy.overrides]] 로.
