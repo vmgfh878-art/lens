@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# 초기엔 디렉토리만 본다. cp* 실험/캐시/아티팩트 제외.
+extend-exclude = [".venv", "ai/cache", "ai/artifacts", "data", "logs", "wandb", "frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# 초기 baseline 파악 단계 — 여기선 어떤 룰도 끄지 않는다(검출만 할 거라 안전).
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "ai/tests"]
+# (CP222 진단 4) app.* 와 backend.*/ai.* 동시 해결을 위해 루트와 backend 둘 다.
+pythonpath = [".", "backend"]
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+source = ["backend/app", "ai"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = false
+# 초기 느슨. 모듈별 strict 는 후속 CP에서 [[tool.mypy.overrides]] 로.

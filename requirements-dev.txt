@@ -1,0 +1,12 @@
+# CP222 안전망 도구. 운영 의존성(requirements.txt)과 분리.
+pytest==8.3.3
+pytest-cov==5.0.0
+ruff==0.6.9
+mypy==1.11.2
+pre-commit==3.8.0
+httpx==0.27.0          # FastAPI TestClient 의존 (test_api.py 가 fastapi.testclient 사용)
+pandera==0.20.4        # CP223 데이터프레임 스키마 스냅샷 후보
+# ML 수치 스냅샷 라이브러리 — CP223 에서 택1 확정. 둘 다 후보로 명시:
+#   - syrupy (pytest 플러그인, 직렬화 스냅샷)
+#   - snaptol (수치 허용오차 스냅샷)
+# CP222 에서는 설치하지 않는다(CP223 가 고른 뒤 추가). 여기엔 주석으로만 남긴다.
