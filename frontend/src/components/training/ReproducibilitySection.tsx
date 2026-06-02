@@ -1,7 +1,7 @@
 /**
  * CP220 — 재현 매니페스트 섹션 (전문가용 · 하단 아코디언).
  * 환경 (Python/torch/GPU) + 패키지 표 + fold 윈도우 + 산출물 (깃 / 외부) + 학습 재현 명령.
- * 단일 진리: docs/v1_operating_models_reproducibility.md (§0 환경 + §1~3 모델별).
+ * 단일 진리: docs/v1_operating_models_reproducibility.md (섹션0 환경 + 섹션1~3 모델별).
  * TODO 항목 폐기 (재현성/데이터 설명에 불필요).
  */
 import { getReproducibility } from "@/lib/training/reproducibility";

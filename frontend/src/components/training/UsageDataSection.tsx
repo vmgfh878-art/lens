@@ -1,7 +1,7 @@
 /**
  * CP220 — 사용 데이터 섹션 (전문가용).
  * 메타 (feature_pack/set/version/target/provider/universe/parquet/data_hash) + features 표 + 전처리 리스트.
- * 단일 진리: docs/v1_operating_models_reproducibility.md (§1~3 데이터).
+ * 단일 진리: docs/v1_operating_models_reproducibility.md (섹션1~3 데이터).
  */
 import { getUsageData } from "@/lib/training/usageData";
 

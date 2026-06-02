@@ -1,7 +1,7 @@
 /**
  * CP220 — 운영 3 모델 (CP210 라인 / CP153 1D 밴드 / CP178 1W 밴드) 의 사용 데이터 정적 매니페스트.
  *
- * 단일 진리: `docs/v1_operating_models_reproducibility.md` §1~3 (데이터 섹션).
+ * 단일 진리: `docs/v1_operating_models_reproducibility.md` 섹션1~3 (데이터 섹션).
  * v1 동안 바뀌지 않으므로 코드로 박는다. v2 mlops 도입 시 fetcher 로 교체.
  *
  * 전문가용 노출 — 약어/식별자 그대로 (예: "atr_ratio", "v3_adjusted_ohlc"). 풀어쓰지 말 것.

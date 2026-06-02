@@ -3,7 +3,7 @@
  * 위치: SignificanceSection 다음. 기본 접힘 (details).
  * 사용 데이터 (feature pack / 전처리) + 재현 매니페스트 (환경 / fold / 산출물 / 절차 / TODO) 한 덩어리.
  *
- * 단일 진리: docs/v1_operating_models_reproducibility.md §0 (환경) + §3 (1W 밴드).
+ * 단일 진리: docs/v1_operating_models_reproducibility.md 섹션0 (환경) + 섹션3 (1W 밴드).
  */
 import { USAGE_DATA } from "@/lib/training/usageData";
 import { REPRODUCIBILITY } from "@/lib/training/reproducibility";

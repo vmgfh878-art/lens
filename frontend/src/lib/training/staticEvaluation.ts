@@ -4,7 +4,7 @@
  * 운영 모델 (CP210 라인 / CP153 1D 밴드 / CP178 1W 밴드) 의 평가 카드는 v1 동안 바뀌지 않으므로
  * `detail.metrics.stored_evaluation` 동적 읽기 대신 코드로 박는다.
  *
- * 출처: `docs/v1_operating_models_reproducibility.md` §1~3 (모델별 metrics) + §4.5 (PPT 매핑).
+ * 출처: `docs/v1_operating_models_reproducibility.md` 섹션1~3 (모델별 metrics) + 섹션4.5 (PPT 매핑).
  */
 import type { ProductSlotId } from "@/lib/productSlots";
 
@@ -673,7 +673,7 @@ export function getStaticSignificance(slotId: ProductSlotId | string | null | un
 
 /**
  * 초기 계획(PPT) 평가지표 매핑 — 모델별로 그 모델에 해당하는 지표만.
- * 출처: docs/v1_operating_models_reproducibility.md §4.5.
+ * 출처: docs/v1_operating_models_reproducibility.md 섹션4.5.
  */
 const PPT_MAPPING_BY_SLOT: Record<string, PptMappingRow[]> = {
   "line-1d": [

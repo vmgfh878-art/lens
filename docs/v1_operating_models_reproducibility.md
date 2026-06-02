@@ -49,7 +49,7 @@ v1 전체 실험을 다루지 않는다. **v1의 결론으로 살아남은 3개 
 | 추가 환경 변수 | `KMP_DUPLICATE_LIB_OK=TRUE`, `TORCHDYNAMO_DISABLE=1` |
 | DataLoader | `num_workers=0` (Windows + sm_120 호환 위해 폴백) |
 
-> `sm_120` 은 일반 PyTorch 휠에 항상 들어있지 않다. nightly 또는 자체 빌드가 필요할 수 있어 v2 도커 train 단계에서 base image 잠그기가 까다롭다. (§v2 master plan 11.6)
+> `sm_120` 은 일반 PyTorch 휠에 항상 들어있지 않다. nightly 또는 자체 빌드가 필요할 수 있어 v2 도커 train 단계에서 base image 잠그기가 까다롭다. (섹션 v2 master plan 11.6)
 
 ### 데이터 소스 / 시점
 
@@ -288,7 +288,7 @@ CP153 1D 와 동일한 fold 정의 사용 (1W 표본 수 적음을 감안한 동
 - [ ] 학습 wall clock time, peak GPU memory
 - [ ] 학습 시점 parquet 스냅샷 보존 여부 (없으면 정확 재현 불가)
 
-위 항목은 v2 도입 시 모든 학습 스크립트가 표준 manifest JSON을 자동 생성하도록 잡으면 자연스럽게 해결된다. (§v2 master plan 11.7)
+위 항목은 v2 도입 시 모든 학습 스크립트가 표준 manifest JSON을 자동 생성하도록 잡으면 자연스럽게 해결된다. (섹션 v2 master plan 11.7)
 
 ---
 

@@ -7,7 +7,7 @@
 예측을 단언하지 않고, 보수적 기준선 · calibrated band · 백테스트 · 실패 기록을 통해
 사용자 판단을 보조하는 학술 및 포트폴리오 프로젝트.
 
-**Live Demo**: [lens-ten-delta.vercel.app](https://lens-ten-delta.vercel.app) (Frontend) · [lens-backend-7stj.onrender.com](https://lens-backend-7stj.onrender.com) (Backend, free tier — cold start ~10s)
+**Live Demo**: [lens-ten-delta.vercel.app](https://lens-ten-delta.vercel.app) (백엔드는 Render free tier 라 처음 접속 시 ~10초 cold start)
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
@@ -25,16 +25,16 @@
 ### 문제 정의
 
 일반적인 주가 예측 모델은 점추정만 제공하며, 사용자는 그 값을 얼마나 신뢰해야 할지 알기 어렵습니다.
-Lens 는 약간 보수적인 예측선을 의도적으로 제시하여, 가격이 그 선 아래로 떨어지는 시점을
-stop-loss 신호로 해석할 수 있게 합니다.
+Lens 는 두 가지 보조지표를 제시합니다.
+- **보수적 예측선**: 약간 보수적인 도착가를 의도적으로 제시하여, 가격이 그 선 아래로 떨어지는 시점을 위험 신호로 해석할 수 있게 합니다.
+- **위험 범위 밴드**: 분위수 기반 예측 범위(conformal 보정)로 변동성이 확장되는 구간을 가시화합니다. 넓어질수록 모델이 보는 불확실성이 큽니다.
 
-### 세 가지 출력
+### 두 가지 출력
 
 | 출력 | 의미 | 운영 모델 |
 |---|---|---|
 | Line | h5 보수적 기준선 (5 거래일 후 도착가) | CP210 PatchTST F4 β=4 5-seed ensemble |
 | Band | 예측 범위 (분위수 + conformal 보정) | CP153 TiDE q15/q85 lower_focused (1D) · CP178 TiDE q10/q90 WFLOCK (1W) |
-| Warning | 위험 경고 | v1 미노출. v2 에서 selective output trigger 로 통합 (CP216.2 GW regime 정량 근거 확보) |
 
 ### 진행 / 결과 요약 (2026-05 기준)
 
@@ -129,7 +129,7 @@ stop-loss 신호로 해석할 수 있게 합니다.
 | 방향 정확도 > 55% | IC 0.0325 (라인) — 대체 metric | rank correlation 으로 대체. IC > 0 으로 약하지만 통계 베이스라인과 동등 |
 | MAPE < 5% | 미사용 | 라인이 가격 절대값이 아니라 수익률 score |
 | 모델 비교 | PatchTST (라인) / TiDE (밴드) 채택, CNN-LSTM/TCN 비교 reserve | CP153 model zoo + CP208Z baseline lock |
-| API 응답 < 3초 | 추정 PASS (lru_cache + columns filter) | 정량 측정 미수록 — v2 관측성 트랙에서 박을 것 |
+| API 응답 < 3초 | **라인 9ms / 1D 밴드 27ms / 1W 밴드 10ms** | 정량 측정 완료. 목표 3초 대비 충분한 마진. (lru_cache + columns filter) |
 | Database = Supabase (PostgreSQL) | v1 = local parquet 서빙. Supabase 는 v2 첫 트랙으로 이관 검토 | 운영 비용 / 응답 속도 / 학교 데모 운영 단순성 절충 |
 | Docker 배포 표준화 | v2 트랙 | v1 = git push → Render/Vercel 자동 배포 |
 
@@ -347,38 +347,29 @@ bit-exact 일치는 GPU / CUDA / kernel 구현 차이로 불가능하지만 stat
 
 ## 9. v2 방향
 
-v2 의 핵심은 **단순 정확도 향상이 아닙니다** (CP216.2 통계 검정으로 ML 라인이 단순 통계 베이스라인 못 이김이 학계 통설임을 확인). 대신 다음 축에 집중합니다:
+CP216.2 통계 검정 결과 ML 라인이 단순 통계 베이스라인과 통계적으로 동등 — ML for finance 학계 통설(Welch-Goyal 2008, Makridakis M-competitions)과 일관된 결과로 확인되었습니다. v2 는 정확도 향상이 아니라 밴드 모델의 다음 두 축에 집중합니다.
 
-| 트랙 | 우선순위 | 내용 |
-|---|---|---|
-| Stage 1 — Data Layer (Supabase Pro) | 🔴 v1 막바지 | thin product DB 재연결, egress guard, 자동 갱신 cron |
-| Stage 2 — Inference 클라우드화 | 🟡 v2 초반 | Modal / GitHub Actions CPU 추론. 운영/MLOps 가치 |
-| Stage 3 — 제품 기능 | 🟡 v2 초반 | 전략 백테스트 확장, 알림, 개인화 |
-| Stage 4 — 관측 / 신뢰성 | 🟢 운영 시작 후 | 응답 시간 SLO · 에러 모니터링 |
-| Band v2 — Conformal / CBM | ⚠️ 야망 축소 | 정확도 향상 기대 낮음. **calibration 정직성 + selective output** 으로 정체성 강화 |
-| Line v2 paradigm | 🔴 **포기 권고** | IC 통계 베이스라인과 동등 — 학계 통설상 추가 ROI 낮음 |
-| LLM 통합 (XAI) | 🟢 차별화 핵심 | 자연어 설명 + 정직성 narrative + 침묵 trigger |
-| 자동 후보 탐색 | 🟡 band 한정 | champion / challenger MLOps |
-| Docker 트랙 | 🟡 v2 첫 CP | dev (CPU) + train (GPU). 재현성 환경 잠금 |
+### 미래 예측성 살리기 (밴드 v2 1번 목표)
 
-목표는 **"왜 오늘 이 종목 밴드가 넓어졌는지 + 언제 모델을 믿지 말아야 하는지"** 를 사용자에게 설명하는 것입니다.
+CP202.2 진단으로 현재 v1 밴드의 forward / backward 변동성 상관이 0.34 ~ 0.38 수준임이 확인되었습니다. 변동성이 커진 뒤에 밴드가 따라가는 lagging 성격입니다. v2 는 "변동성이 커지기 전에 미리 넓어지는" 능력을 학습 목표 자체에 박습니다.
 
-자세한 설계는 [`docs/lens_v2_master_plan.md`](docs/lens_v2_master_plan.md) 참조. 본문에 XAI 트랙 / 도커 / 재현성 lock 확장 / Band v2 야망 갱신 결정 항목이 박혀있습니다.
+- forward volatility 를 직접 예측하는 loss 도입 (실현 변동성 회귀 + pinball 결합)
+- event-aware widening regularizer — 실적 / FOMC / OPEX 같은 사전 이벤트에 미리 폭 확장
+- leading indicator feature 확장 — cross-asset stress, insider trading flow, 옵션 IV term structure
 
----
+### 설명 가능성 / XAI (밴드 v2 2번 목표)
 
-## 10. Roadmap
+사용자가 직접 정의한 전략 (예: "RSI<30 AND 밴드 하단 이탈" 같은 규칙) 위에서 "왜 오늘 이 종목의 밴드가 넓어졌는가" 를 자연어로 설명합니다. 모델이 자신 없을 때는 출력을 줄이거나 침묵합니다.
 
-| Version | 마감 | 내용 |
-|---|---|---|
-| v1.0 | 2026-06-21 (딥러닝실습 제출) | 3 slot 운영 (CP210 / CP153 / CP178) + CP216.2 통계 검정 + Vercel/Render 배포 + 학습 재현 wrapper 3개 |
-| v1.5 | v2 진입 직전 | Supabase Pro 데이터 레이어 재연결 + 자동 갱신 cron |
-| v2.0 | 설계 단계 | XAI 트랙 · Docker · MLOps champion/challenger · Band v2 calibration 정직성 + selective output · LLM 설명 |
-| v3.0 | 후보 | Form 4 / 8-K NLP 외부 데이터 통합, 자산군 확장 (ETF · 한국) |
+- Concept Bottleneck Model (Koh 2020) — 밴드 폭을 사람이 이해 가능한 concept (VIX, drawdown, 거래량, ATR, 신용 스프레드 등 12 항목) 으로 분해
+- LLM 통합 — concept 활성도 + 사용자 전략 정의를 자연어 narrative 로 변환
+- Selective output trigger — CP216.2 GW regime 정량 근거를 활용해 위기 구간 (vix>30, drawdown ≤−10%) 에서 침묵 / 낮은 신뢰도 표시
+
+자세한 설계는 [`docs/lens_v2_master_plan.md`](docs/lens_v2_master_plan.md) 참조.
 
 ---
 
-## 11. 면책
+## 10. 면책
 
 Lens 는 학술 및 포트폴리오 목적의 연구 프로젝트입니다. 모든 예측 / 신호 / 백테스트 결과는
 정보 제공 목적이며 투자 자문, 매매 권유, 수익 보장을 의미하지 않습니다.
@@ -387,17 +378,17 @@ Lens 는 학술 및 포트폴리오 목적의 연구 프로젝트입니다. 모�
 
 ---
 
-## 12. 운영 모델 매니페스트
+## 11. 운영 모델 매니페스트
 
 운영 3 모델 (CP210 라인 / CP153 1D 밴드 / CP178 1W 밴드) 의 환경 / fold / seeds / 핵심 metric / 재현 절차는 화면 **AI 모델 → 모델 슬롯 → 재현 매니페스트** 에서 확인할 수 있습니다. 단일 진리 출처는 다음 문서:
 
-- [`docs/v1_operating_models_reproducibility.md`](docs/v1_operating_models_reproducibility.md) — §0 공통 환경 + §1~3 모델별 매니페스트 + §4.5 PPT vs v1 매핑
+- [`docs/v1_operating_models_reproducibility.md`](docs/v1_operating_models_reproducibility.md) — 섹션 0 공통 환경 + 섹션 1~3 모델별 매니페스트 + 섹션 4.5 PPT vs v1 매핑
 
-학습 재현은 본 README §7.5 wrapper 또는 화면의 "학습 재현 — 한 줄 wrapper" 섹션 참조.
+학습 재현은 본 README 섹션 7.5 wrapper 또는 화면의 "학습 재현 — 한 줄 wrapper" 섹션 참조.
 
 ---
 
-## 13. References
+## 12. References
 
 **ML for finance 학계 통설**
 
@@ -423,7 +414,7 @@ Lens 는 학술 및 포트폴리오 목적의 연구 프로젝트입니다. 모�
 
 ---
 
-## 14. 라이선스
+## 13. 라이선스
 
 코드는 [MIT License](LICENSE) 를 따릅니다.
 

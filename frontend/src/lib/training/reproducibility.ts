@@ -1,7 +1,7 @@
 /**
  * CP220 — 운영 3 모델 재현성 매니페스트 (env, fold, seeds, artifacts, repro steps, TODO).
  *
- * 단일 진리: `docs/v1_operating_models_reproducibility.md` §0 (환경 공통) + §1~3 (모델별).
+ * 단일 진리: `docs/v1_operating_models_reproducibility.md` 섹션0 (환경 공통) + 섹션1~3 (모델별).
  * v1 동안 정적. v2 manifest 자동 생성으로 transition 시 fetcher 로 교체.
  */
 import type { ProductSlotId } from "@/lib/productSlots";
@@ -52,7 +52,7 @@ export interface ReproducibilityBlock {
   trainingSteps: string[];
 }
 
-// 공통 환경 — `docs/v1_operating_models_reproducibility.md` §0
+// 공통 환경 — `docs/v1_operating_models_reproducibility.md` 섹션0
 const COMMON_PYTHON = "3.10.0";
 const COMMON_TORCH = "2.11.0+cu128";
 const COMMON_PACKAGES: PackageVersion[] = [

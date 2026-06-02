@@ -129,11 +129,11 @@ CP 로그, raw provider payload
 
 ### 4.1 Band v2 (1순위 — MLOps 첫 대상)
 
-#### v1 의 정직한 한계 (CP204 plan §0 인용)
+#### v1 의 정직한 한계 (CP204 plan 섹션 0 인용)
 - **Lagging forecaster**: 과거 변동성 clustering 따라가는 수준. "변동성 커지기 전 미리 넓어짐" 없음
 - CP202.2 진단: width 의 forward / backward 변동성 상관 = **0.34 (1D), 0.38 (1W)** → 명확한 lagging. 미래 변동성 예측 거의 못 함
 - CP216.2 통계 검정도 같은 결론: 1D 는 단순 분위수 / GARCH walk-forward 못 이김. 1W 는 walk-forward GARCH 보다는 강하지만 historical_quantile 못 이김
-- → v1 평가 narrative 가 "현재 상태 표시" 위주로 굳어진 이유 (= §0 "리스크 인식 도구" 정체성). v1 한계 인정한 정직 narrative
+- → v1 평가 narrative 가 "현재 상태 표시" 위주로 굳어진 이유 (= 섹션 0 "리스크 인식 도구" 정체성). v1 한계 인정한 정직 narrative
 
 #### v2 1번 목표: 미래 예측성 강화
 - v1 의 lagging 한계 자체를 푸는 게 v2 1번 목표 — "변동성 커지기 전에 미리 넓어지는" 밴드
@@ -141,7 +141,7 @@ CP 로그, raw provider payload
 - 라인의 정확도 야망은 ROI 낮음 (CP216.2 결론: 통계 베이스라인과 동등). 정확도 야망은 라인이 아닌 밴드에서 다시 살림
 
 #### v2 기둥
-- **미래 예측성 강화** (CP204 plan §0 의 lagging 진단을 직접 풀기) — 1번 목표
+- **미래 예측성 강화** (CP204 plan 섹션 0 의 lagging 진단을 직접 풀기) — 1번 목표
 - **Conformal Prediction**: coverage 보장 (Vovk/Romano)
 - **CBM (Concept Bottleneck)**: 위험 concept 설명 (Koh 2020)
 - **Selective output**: 확신 없으면 침묵
@@ -351,9 +351,9 @@ v2:
 - LLM 통합 시점: v2 초반 vs 후반
 - 공개 범위: 완전 공개 데모 vs 링크 공유 반공개
 - 자동 탐색 주기: weekly vs 월 2회
-- 모델 버전 토글 UI 위치 (§11.5 참조): 카드 내 아코디언 vs "모델 진화" 별도 섹션 vs 탭
-- **XAI 트랙 신설 여부** (사용자 제기, 2026-05-30) — 정확도 야망 낮추는 결정과 짝. SHAP / Integrated Gradients / Attention 시각화 / LLM 자연어 설명. v1 마무리 후 v2 재설계 시점에 박기. 후보 위치: §0 차별화 축, §3 모델 서빙, §7 제품 기능 중 한 곳
-- **Band v2 — 전통 통계 (GARCH walk-forward, historical_quantile) 이기는 게 명시 목표** (사용자 제기, 2026-05-30). CP216.2 결과 = 현 1D/1W 밴드는 두 베이스라인 못 이김. Conformal/CBM 야망을 "calibration 정직성"에서 "pinball/coverage 둘 다 통계 베이스라인 이김"으로 격상. v1 마무리 후 v2 재설계 시점에 §4.1 Band v2 야망 갱신
+- 모델 버전 토글 UI 위치 (섹션 11.5 참조): 카드 내 아코디언 vs "모델 진화" 별도 섹션 vs 탭
+- **XAI 트랙 신설 여부** (사용자 제기, 2026-05-30) — 정확도 야망 낮추는 결정과 짝. SHAP / Integrated Gradients / Attention 시각화 / LLM 자연어 설명. v1 마무리 후 v2 재설계 시점에 박기. 후보 위치: 섹션 0 차별화 축, 섹션 3 모델 서빙, 섹션 7 제품 기능 중 한 곳
+- **Band v2 — 전통 통계 (GARCH walk-forward, historical_quantile) 이기는 게 명시 목표** (사용자 제기, 2026-05-30). CP216.2 결과 = 현 1D/1W 밴드는 두 베이스라인 못 이김. Conformal/CBM 야망을 "calibration 정직성"에서 "pinball/coverage 둘 다 통계 베이스라인 이김"으로 격상. v1 마무리 후 v2 재설계 시점에 섹션 4.1 Band v2 야망 갱신
 
 ## 11.5 v2 프론트 표현 — 모델 버전 토글 (후속안)
 
@@ -375,7 +375,7 @@ v1 끝까지는 정적이고 운영 모델은 (CP210 라인 / CP153 1D 밴드 / 
   - v2가 붙을 때 객체 한 줄 추가만으로 화면이 늘어남 (= 갈아엎지 않음)
 
 **열린 질문**
-- UI 위치: 카드 내 아코디언 vs 별도 "모델 진화" 섹션 vs 탭 (§11에 등록)
+- UI 위치: 카드 내 아코디언 vs 별도 "모델 진화" 섹션 vs 탭 (섹션 11에 등록)
 - 주식 보기에서 v1/v2 동시 비교 모드를 줄지, 단일 버전만 선택할지
 
 ## 11.6 도커 트랙 (v2 첫 CP)
