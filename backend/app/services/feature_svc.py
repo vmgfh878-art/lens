@@ -7,7 +7,7 @@ Lens 피처 생성 서비스.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -93,7 +93,14 @@ _FUNDAMENTAL_SOURCE_COLUMNS = (
     "total_liabilities",
 )
 _INDICATOR_ONLY_COLUMNS = ["atr_ratio"]
-_OUTPUT_COLUMNS = ["ticker", "date", "timeframe", "regime_label", *FEATURE_COLUMNS, *_INDICATOR_ONLY_COLUMNS]
+_OUTPUT_COLUMNS = [
+    "ticker",
+    "date",
+    "timeframe",
+    "regime_label",
+    *FEATURE_COLUMNS,
+    *_INDICATOR_ONLY_COLUMNS,
+]
 PRICE_DERIVED_FEATURE_COLUMNS = [
     "log_return",
     "open_ratio",
@@ -122,11 +129,6 @@ def normalize_timeframe(timeframe: str) -> str:
     return normalized
 
 
-def default_horizon_for_timeframe(timeframe: str) -> int:
-    normalized = normalize_timeframe(timeframe)
-    return {"1D": 5, "1W": 4, "1M": 3}[normalized]
-
-
 def _ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
@@ -144,7 +146,9 @@ def _validate_adjusted_ohlc_contract(frame: pd.DataFrame, *, context: str) -> No
     ohlc = frame[list(_ADJUSTED_OHLC_COLUMNS)].apply(pd.to_numeric, errors="coerce")
     if not np.isfinite(ohlc.to_numpy(dtype=float)).all():
         invalid_counts = (~np.isfinite(ohlc.to_numpy(dtype=float))).sum(axis=0).tolist()
-        raise ValueError(f"{context}: adjusted OHLC에 non-finite 값이 있습니다: {dict(zip(_ADJUSTED_OHLC_COLUMNS, invalid_counts, strict=False))}")
+        raise ValueError(
+            f"{context}: adjusted OHLC에 non-finite 값이 있습니다: {dict(zip(_ADJUSTED_OHLC_COLUMNS, invalid_counts, strict=False))}"
+        )
 
     high = ohlc["high"]
     low = ohlc["low"]
@@ -178,7 +182,9 @@ def _apply_adjusted_ohlc_contract(df: pd.DataFrame, *, context: str) -> pd.DataF
     return frame
 
 
-def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str, enforce_distribution: bool = True) -> None:
+def _validate_ratio_feature_sanity(
+    frame: pd.DataFrame, *, context: str, enforce_distribution: bool = True
+) -> None:
     if frame.empty:
         return
     ratio_frame = frame[list(_RATIO_SANITY_COLUMNS)].dropna()
@@ -199,7 +205,8 @@ def _validate_ratio_feature_sanity(frame: pd.DataFrame, *, context: str, enforce
             "max_abs": float(max_abs[column]),
         }
         for column in _RATIO_SANITY_COLUMNS
-        if float(p99_abs[column]) > _P99_RATIO_ABS_LIMIT or float(max_abs[column]) > _MAX_RATIO_ABS_LIMIT
+        if float(p99_abs[column]) > _P99_RATIO_ABS_LIMIT
+        or float(max_abs[column]) > _MAX_RATIO_ABS_LIMIT
     }
     if failures:
         raise ValueError(f"{context}: OHLC ratio sanity check 실패: {failures}")
@@ -266,11 +273,15 @@ def _resample_single_ticker(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 
     aggregated = frame.resample(rule).agg(agg_map)
     aggregated = aggregated.dropna(subset=["open", "high", "low", "close"]).reset_index()
-    aggregated = drop_incomplete_resampled_periods(aggregated, timeframe, latest_daily_date=frame.index.max())
+    aggregated = drop_incomplete_resampled_periods(
+        aggregated, timeframe, latest_daily_date=frame.index.max()
+    )
     if "ticker" in df.columns and not aggregated.empty:
         aggregated["ticker"] = df["ticker"].iloc[0]
     if not aggregated.empty:
-        _validate_adjusted_ohlc_contract(aggregated, context=f"resample_price_frame:{timeframe}:aggregated")
+        _validate_adjusted_ohlc_contract(
+            aggregated, context=f"resample_price_frame:{timeframe}:aggregated"
+        )
     return aggregated
 
 
@@ -281,7 +292,9 @@ def resample_price_frame(price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame
     frame = frame.dropna(subset=[col for col in required_price_cols if col in frame.columns])
 
     if timeframe == "1D" or frame.empty:
-        return _apply_adjusted_ohlc_contract(frame, context=f"resample_price_frame:{timeframe}").reset_index(drop=True)
+        return _apply_adjusted_ohlc_contract(
+            frame, context=f"resample_price_frame:{timeframe}"
+        ).reset_index(drop=True)
 
     if "ticker" not in frame.columns:
         return _resample_single_ticker(frame, timeframe)
@@ -293,10 +306,14 @@ def resample_price_frame(price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame
             chunks.append(resampled)
     if not chunks:
         return frame.iloc[0:0].copy()
-    return pd.concat(chunks, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
+    return (
+        pd.concat(chunks, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
+    )
 
 
-def _resample_context_frame(df: pd.DataFrame | None, timeframe: str, columns: Iterable[str]) -> pd.DataFrame:
+def _resample_context_frame(
+    df: pd.DataFrame | None, timeframe: str, columns: Iterable[str]
+) -> pd.DataFrame:
     timeframe = normalize_timeframe(timeframe)
     if df is None or df.empty:
         return pd.DataFrame(columns=["date", *columns])
@@ -321,12 +338,18 @@ def _compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def _compute_features_for_single_ticker(df: pd.DataFrame, *, enforce_ratio_distribution: bool = True) -> pd.DataFrame:
+def _compute_features_for_single_ticker(
+    df: pd.DataFrame, *, enforce_ratio_distribution: bool = True
+) -> pd.DataFrame:
     frame = _apply_adjusted_ohlc_contract(
         df.copy().sort_values("date").reset_index(drop=True),
         context="compute_features",
     )
-    close_base = frame["adjusted_close"].fillna(frame["close"]) if "adjusted_close" in frame.columns else frame["close"]
+    close_base = (
+        frame["adjusted_close"].fillna(frame["close"])
+        if "adjusted_close" in frame.columns
+        else frame["close"]
+    )
     frame["close"] = close_base
 
     previous_close = frame["close"].shift(1)
@@ -338,7 +361,9 @@ def _compute_features_for_single_ticker(df: pd.DataFrame, *, enforce_ratio_distr
 
     for window in (5, 20, 60):
         moving_average = frame["close"].rolling(window=window).mean()
-        frame[f"ma_{window}_ratio"] = (frame["close"] - moving_average) / (moving_average + _EPSILON)
+        frame[f"ma_{window}_ratio"] = (frame["close"] - moving_average) / (
+            moving_average + _EPSILON
+        )
 
     # ATR은 절대값 대신 종가 대비 비율로 정규화해 종목 간 변동성 비교에 쓰기 쉽게 만든다.
     true_range = pd.concat(
@@ -380,7 +405,11 @@ def build_price_features(price_df: pd.DataFrame, timeframe: str = "1D") -> pd.Da
         return pd.DataFrame(columns=["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS])
 
     built_frames: list[pd.DataFrame] = []
-    grouped_frames = price_frame.groupby("ticker", sort=True) if "ticker" in price_frame.columns else [(None, price_frame)]
+    grouped_frames = (
+        price_frame.groupby("ticker", sort=True)
+        if "ticker" in price_frame.columns
+        else [(None, price_frame)]
+    )
     for ticker_name, ticker_frame in grouped_frames:
         feature_frame = _compute_features_for_single_ticker(
             ticker_frame,
@@ -390,11 +419,17 @@ def build_price_features(price_df: pd.DataFrame, timeframe: str = "1D") -> pd.Da
             feature_frame["ticker"] = ticker_name or "UNKNOWN"
         feature_frame["timeframe"] = timeframe
         feature_frame = feature_frame.dropna(subset=PRICE_DERIVED_FEATURE_COLUMNS)
-        built_frames.append(feature_frame[["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS]].copy())
+        built_frames.append(
+            feature_frame[["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS]].copy()
+        )
 
     if not built_frames:
         return pd.DataFrame(columns=["ticker", "date", "timeframe", *PRICE_DERIVED_FEATURE_COLUMNS])
-    return pd.concat(built_frames, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
+    return (
+        pd.concat(built_frames, ignore_index=True)
+        .sort_values(["ticker", "date"])
+        .reset_index(drop=True)
+    )
 
 
 def _apply_regime_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -458,8 +493,12 @@ def _apply_fundamental_features(
         return enriched
 
     fundamentals["filing_date"] = pd.to_datetime(fundamentals["filing_date"], errors="coerce")
-    available_columns = [column for column in _FUNDAMENTAL_SOURCE_COLUMNS if column in fundamentals.columns]
-    fundamentals = fundamentals.dropna(subset=["filing_date"])[available_columns].sort_values("filing_date")
+    available_columns = [
+        column for column in _FUNDAMENTAL_SOURCE_COLUMNS if column in fundamentals.columns
+    ]
+    fundamentals = fundamentals.dropna(subset=["filing_date"])[available_columns].sort_values(
+        "filing_date"
+    )
     if fundamentals.empty:
         for column in _FUNDAMENTAL_FEATURE_COLUMNS:
             enriched[column] = 0.0
@@ -535,7 +574,11 @@ def build_features(
     )
 
     built_frames: list[pd.DataFrame] = []
-    grouped_frames = price_frame.groupby("ticker", sort=True) if "ticker" in price_frame.columns else [(None, price_frame)]
+    grouped_frames = (
+        price_frame.groupby("ticker", sort=True)
+        if "ticker" in price_frame.columns
+        else [(None, price_frame)]
+    )
     for ticker_name, ticker_frame in grouped_frames:
         feature_frame = _compute_features_for_single_ticker(
             ticker_frame,
@@ -569,23 +612,8 @@ def build_features(
 
     if not built_frames:
         return pd.DataFrame(columns=_OUTPUT_COLUMNS)
-    return pd.concat(built_frames, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
-
-
-def build_latest_feature_rows(
-    price_df: pd.DataFrame,
-    macro_df: pd.DataFrame | None = None,
-    breadth_df: pd.DataFrame | None = None,
-    fundamentals_df: pd.DataFrame | None = None,
-    timeframe: str = "1D",
-) -> pd.DataFrame:
-    features = build_features(
-        price_df=price_df,
-        macro_df=macro_df,
-        breadth_df=breadth_df,
-        fundamentals_df=fundamentals_df,
-        timeframe=timeframe,
+    return (
+        pd.concat(built_frames, ignore_index=True)
+        .sort_values(["ticker", "date"])
+        .reset_index(drop=True)
     )
-    if features.empty:
-        return features
-    return features.groupby("ticker", as_index=False).tail(1).reset_index(drop=True)

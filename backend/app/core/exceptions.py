@@ -30,7 +30,12 @@ class ResourceNotFoundError(AppError):
 
 
 class UpstreamUnavailableError(AppError):
-    def __init__(self, message: str = "상위 데이터 저장소에 접근할 수 없습니다.", *, details: object | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "상위 데이터 저장소에 접근할 수 없습니다.",
+        *,
+        details: object | None = None,
+    ) -> None:
         super().__init__(
             message,
             code="UPSTREAM_UNAVAILABLE",
@@ -54,26 +59,6 @@ class TimeframeDisabledError(AppError):
         super().__init__(
             message,
             code="TIMEFRAME_DISABLED",
-            status_code=409,
-            details=details,
-        )
-
-
-class InvalidRunStatusError(AppError):
-    def __init__(self, message: str, *, details: object | None = None) -> None:
-        super().__init__(
-            message,
-            code="RUN_NOT_COMPLETED",
-            status_code=409,
-            details=details,
-        )
-
-
-class InsufficientHistoryError(AppError):
-    def __init__(self, message: str, *, details: object | None = None) -> None:
-        super().__init__(
-            message,
-            code="INSUFFICIENT_HISTORY",
             status_code=409,
             details=details,
         )

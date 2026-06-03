@@ -15,6 +15,7 @@
 이 흐름은 자동 갱신 파이프라인 (run_v1_unified_refresh_local.ps1) 과 독립이라
 전략을 바꿔도 데이터 갱신 흐름은 변하지 않는다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -66,9 +67,7 @@ STRATEGIES: dict[str, StrategyRule] = {
             "line_score ≥ -2% & MA60 ≥ 0 & MA20 ≥ -4% & "
             "(밴드 하단 ≥ -6% 또는 밴드폭 확장 < 1.25x)."
         ),
-        exit_desc=(
-            "(line 약함 < -6% & 밴드 위험) 또는 MA20 < -10% 또는 (ATR > 12% & MA20 < 0)."
-        ),
+        exit_desc=("(line 약함 < -6% & 밴드 위험) 또는 MA20 < -10% 또는 (ATR > 12% & MA20 < 0)."),
         risk_desc="밴드 하단 < -6% 또는 밴드폭 확장 > 1.25x 또는 가격/변동성 붕괴.",
     ),
     "ai_band_defense_v1": StrategyRule(
@@ -91,7 +90,3 @@ STRATEGIES: dict[str, StrategyRule] = {
         risk_desc="밴드 스트레스 / 추세 붕괴 / 변동성 급등.",
     ),
 }
-
-
-def list_strategies() -> list[StrategyRule]:
-    return list(STRATEGIES.values())

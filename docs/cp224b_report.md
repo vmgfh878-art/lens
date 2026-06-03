@@ -1,6 +1,6 @@
 # CP224b 보고서 — Dead Code 검출 + 안전 제거
 
-- **상태**: 진행 중 (Step 2 dump 단계)
+- **상태**: ✅ 완료
 - **기간**: 2026-06-03
 - **모드**: code
 - **선행 의존**: CP222 ✅ / CP223 ✅
@@ -187,4 +187,98 @@ dead code를 자동 도구로 후보 산출 → **각 후보를 grep으로 호�
 
 ---
 
-(Step 4, 5는 후속)
+---
+
+## Step 4 — 후보 grep 검증
+
+### 백엔드 D분류 15 → 확정 dead 12 + 오탐 2 + lru_cache 1
+
+| 심볼 | grep 결과 | 판정 |
+|---|---|---|
+| _safe_gt/_gte/_lt/_lte (strategy_backtest_svc) | 자기 파일 정의 4건만, 호출 0 | **확정 dead 4** |
+| default_horizon_for_timeframe (feature_svc:125) | 외부 호출 0 | **확정 dead** |
+| build_price_features (feature_svc:375) | `ai/preprocessing.py:929` 호출 | **오탐, 사용 중** |
+| build_latest_feature_rows (feature_svc:575) | 외부 호출 0 | **확정 dead** |
+| normalize_model_name (model_svc:22) | 외부 호출 0 | **확정 dead** |
+| resolve_horizon (model_svc:52) | 외부 호출 0 | **확정 dead** |
+| require (parquet_store:49) | 외부 호출 0 | **확정 dead** |
+| mtime (product_prediction_history_svc:83) | `@lru_cache` 인자 → cache key | **오탐, 사용 중** |
+| list_strategies (strategy_rules:96) | 라우터의 list_strategies는 별개 함수 | **확정 dead** |
+| InvalidRunStatusError (exceptions:62) | `raise InvalidRunStatusError` 0건 | **확정 dead** |
+| InsufficientHistoryError (exceptions:72) | `raise InsufficientHistoryError` 0건 | **확정 dead** |
+| PredictionData (schemas/stocks:52) | 외부 import 0 (Step 1 F401 후) | **확정 dead** |
+
+### 프론트 G분류 23 → 확정 dead 4 + 오탐 19
+
+| 그룹 | 심볼 | grep 결과 | 판정 |
+|---|---|---|---|
+| client.ts | api/getBackendBaseUrl/ApiMeta/ApiResponse/PriceResult/IndicatorResult 등 19개 | **18 파일이 `@/api/client`에서 import** (BacktestView, StockView, TrainingView, lib/*.ts 등) | **모두 오탐, ts-prune이 re-export aggregator 잘못 분류** |
+| 컴포넌트 | ReproducibilitySection.tsx default | `training/ReproducibilitySection` import 0 | **확정 dead 파일** |
+| 컴포넌트 | UsageDataSection.tsx default | `training/UsageDataSection` import 0 | **확정 dead 파일** |
+| 타입 alias | LineExperimentCategory, LineExperimentNode (lineTimeline:48,49) | 자기 파일만 (CP218 호환 alias 주석, 다른 import 0) | **확정 dead 2 alias** |
+
+---
+
+## Step 5 — 확정 dead 제거 + 회귀 검증
+
+### 백엔드 (12 dead 제거)
+- `backend/app/services/strategy_backtest_svc.py`: `_safe_gt/_gte/_lt/_lte` 4 함수 제거.
+- `backend/app/services/feature_svc.py`: `default_horizon_for_timeframe` + `build_latest_feature_rows` 2 함수 제거.
+- `backend/app/services/model_svc.py`: `normalize_model_name` + `resolve_horizon` 2 함수 제거.
+- `backend/app/services/parquet_store.py`: `require` 함수 제거.
+- `backend/app/schemas/stocks.py`: `PredictionData` 클래스 제거 (+ chain F401 fix로 `Any, Field` import 제거).
+- `backend/app/strategies/strategy_rules.py`: `list_strategies` 함수 제거.
+- `backend/app/core/exceptions.py`: `InvalidRunStatusError` + `InsufficientHistoryError` 클래스 제거.
+
+### 프론트 (4 dead 제거)
+- `frontend/src/components/training/ReproducibilitySection.tsx` 파일 삭제.
+- `frontend/src/components/training/UsageDataSection.tsx` 파일 삭제.
+- `frontend/src/lib/training/lineTimeline.ts`: `LineExperimentCategory` + `LineExperimentNode` alias 제거 (CP218 호환).
+
+### 회귀 검증 (모두 ✅)
+- pytest backend/tests: **87 passed** (CP223 baseline 78+9 동일, 신규 실패 0).
+- ruff check backend/app --select F401: **0** (chain F401 2건 자동 fix 포함).
+- CP223 9 snapshot: 그대로 통과 (응답 schema 무변경).
+- frontend tsc --noEmit: **0 에러**.
+- Vitest: **107 passed / 12 todo / 0 failed**.
+- Playwright e2e: **4 passed (9.2s, screenshot diff 0)**.
+
+---
+
+## Step 5 후속/잔여
+
+### 별도 청소 CP 권장
+- **ts-prune 분류 E (50건)**: `(used in module)` 항목. `export` 키워드만 제거해도 안전. 별도 일괄 청소 CP에서.
+  - 대표: `lib/apiErrors.ts`(ApiErrorShape/ApiErrorKind/extractHttpStatus), `lib/dateUtils.ts:37 formatDate`, `lib/productSlots.ts` 3 타입, `lib/v1Adapter.ts` 4 함수, `lib/chart/utils.ts` 9 함수, `lib/training/*` 다수, `components/{IndicatorPanel,StatusInline}.tsx` props 타입.
+
+### 보류 (Supabase 정책)
+- `db.py:38 reset_supabase_client` (Supabase 재연결 예정)
+- `repositories/market_repo.py:97,146,335` fetch_price_rows / fetch_indicator_rows / fetch_stocks (Supabase 미연결 시 호출 0이지만 재연결 시 부활)
+
+### 오탐 (기록만)
+- vulture 65건: FastAPI router/handler 25 + Pydantic field 36 + Supabase 4.
+- ts-prune 25건: config/Next.js 6 + client.ts re-export 19.
+
+---
+
+## 성공 기준 충족표
+
+| 항목 | 기준 | 실측 | 결과 |
+|---|---|---|---|
+| ruff F401 violations | 0 | 0 (Step 1 + chain) | ✅ |
+| vulture 후보 문서화 | 전체 표 | 75건 분류 A~D | ✅ |
+| ts-prune 후보 문서화 | 전체 표 | 76건 분류 E~G | ✅ |
+| 확정 dead 제거 | grep 확인분만 | 백엔드 12 + 프론트 4 | ✅ |
+| 백엔드 pytest 회귀 | 0 | 87 passed (78+9 baseline) | ✅ |
+| CP223 snapshot diff | 0 | 0 | ✅ |
+| 프론트 tsc --noEmit | 0 | 0 | ✅ |
+| 프론트 e2e | 4 passed | 4 passed (diff 0) | ✅ |
+| mypy 신규 error | 0 추가 | 0 | ✅ |
+
+---
+
+## 자가 점검
+
+- **[Plan v3 정합]** **PASS** — read-path만 손댐. 모델·calibration·EODHD·밴드 파이프라인 무관. Plan v3 결정 (α=1/β=2, fidelity, EODHD 유지) 영향 0.
+- **[구조 결함]** **PASS** — dead code 제거로 결합도 감소. CP223 snapshot diff 0이 schema 보존 증명. Supabase·테스트·collector 명시 제외로 안전 경계 유지. 오탐 65 + 25 + 보류 4는 보고서에 명시.
+- **[모델 영향]** **PASS** — 학습/추론/calibration/RevIN/dropout 코드 미변경. snapshot diff 0 → 모델 출력 불변. parquet read-only.

@@ -7,6 +7,7 @@ two copies of the same 60-80 MB DataFrames alive simultaneously.
 This module loads each prediction parquet exactly once and lets all callers
 share the same object reference.  Thread-safe via per-store Lock.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,17 +45,6 @@ def get_raw(name: str) -> pd.DataFrame | None:
         if name not in _FRAMES:
             _FRAMES[name] = _load(name)
         return _FRAMES[name]
-
-
-def require(name: str) -> pd.DataFrame:
-    """Like get_raw but raises FileNotFoundError when the file is missing."""
-    df = get_raw(name)
-    if df is None:
-        raise FileNotFoundError(
-            f"Required parquet not found: {name!r} "
-            f"(expected at {_BASE / _FILE_MAP[name]})"
-        )
-    return df
 
 
 def _load(name: str) -> pd.DataFrame | None:

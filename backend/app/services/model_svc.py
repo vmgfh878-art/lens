@@ -19,13 +19,6 @@ DEFAULT_HORIZONS = {
 }
 
 
-def normalize_model_name(model_name: str) -> str:
-    normalized = model_name.strip().lower()
-    if normalized not in SUPPORTED_MODELS:
-        raise ValueError(f"Unsupported model '{model_name}'. Expected one of: {', '.join(SUPPORTED_MODELS)}")
-    return normalized
-
-
 def normalize_display_timeframe(timeframe: str) -> str:
     normalized = timeframe.strip().upper()
     if normalized not in SUPPORTED_DISPLAY_TIMEFRAMES:
@@ -47,14 +40,3 @@ def normalize_prediction_timeframe(timeframe: str) -> str:
             },
         )
     return normalized
-
-
-def resolve_horizon(timeframe: str, horizon: int | None = None) -> int:
-    normalized_timeframe = normalize_prediction_timeframe(timeframe)
-    if horizon is None:
-        return DEFAULT_HORIZONS[normalized_timeframe]
-
-    resolved = int(horizon)
-    if resolved <= 0:
-        raise ValueError("horizon must be a positive integer.")
-    return resolved

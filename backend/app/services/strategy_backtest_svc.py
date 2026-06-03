@@ -7,14 +7,12 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import HTTPException
-
 from app.services import parquet_store
 
 # 전략 정의 (StrategyRule + STRATEGIES) 는 strategy_rules.py 에서 단일 관리한다 (모델 급 관리).
 # 이 파일은 전략의 "실행" (pandas 조건 계산 + 백테스트) 만 담당한다.
 from app.strategies.strategy_rules import STRATEGIES, StrategyRule
-
+from fastapi import HTTPException
 
 FEE_RATE = 0.001
 MIN_EVAL_DAYS = 120
@@ -66,22 +64,6 @@ def _normalize_rsi(values: pd.Series) -> pd.Series:
 
 def _safe(series: pd.Series, default: float = np.nan) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(default)
-
-
-def _safe_gt(series: pd.Series, threshold: float, default: float = np.nan) -> pd.Series:
-    return _safe(series, default) > threshold
-
-
-def _safe_gte(series: pd.Series, threshold: float, default: float = np.nan) -> pd.Series:
-    return _safe(series, default) >= threshold
-
-
-def _safe_lt(series: pd.Series, threshold: float, default: float = np.nan) -> pd.Series:
-    return _safe(series, default) < threshold
-
-
-def _safe_lte(series: pd.Series, threshold: float, default: float = np.nan) -> pd.Series:
-    return _safe(series, default) <= threshold
 
 
 def _total_return(returns: np.ndarray) -> float:
@@ -147,18 +129,31 @@ def _load_frame() -> pd.DataFrame:
         axis=1,
     ).max(axis=1)
     price["atr_ratio_calc"] = (
-        true_range.groupby(price["ticker"]).transform(lambda values: values.rolling(14, min_periods=5).mean())
+        true_range.groupby(price["ticker"]).transform(
+            lambda values: values.rolling(14, min_periods=5).mean()
+        )
         / price["close"]
     )
 
     indicators = pd.read_parquet(base / "market_indicators_1d.parquet")
     indicators["ticker"] = indicators["ticker"].astype(str).str.upper()
     indicators["date"] = pd.to_datetime(indicators["date"])
-    indicators = indicators.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
-    for column in ["ma_5_ratio", "ma_20_ratio", "ma_60_ratio", "macd_ratio", "bb_position", "vol_change"]:
+    indicators = indicators.sort_values(["ticker", "date"]).drop_duplicates(
+        ["ticker", "date"], keep="last"
+    )
+    for column in [
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "macd_ratio",
+        "bb_position",
+        "vol_change",
+    ]:
         if column in indicators.columns:
             indicators[column] = pd.to_numeric(indicators[column], errors="coerce")
-    indicators["rsi_norm"] = _normalize_rsi(indicators["rsi"]) if "rsi" in indicators.columns else np.nan
+    indicators["rsi_norm"] = (
+        _normalize_rsi(indicators["rsi"]) if "rsi" in indicators.columns else np.nan
+    )
 
     # Use shared parquet_store to avoid loading a second copy of these files
     # (predictions.py already holds them; store ensures only one in-process copy).
@@ -181,9 +176,8 @@ def _load_frame() -> pd.DataFrame:
     band["date"] = pd.to_datetime(band["asof_date"])
     for column in ["band_lower", "band_upper"]:
         band[column] = pd.to_numeric(band[column], errors="coerce")
-    band = (
-        band.groupby(["ticker", "date"], as_index=False, observed=True)
-        .agg(band_lower=("band_lower", "min"), band_upper=("band_upper", "max"))
+    band = band.groupby(["ticker", "date"], as_index=False, observed=True).agg(
+        band_lower=("band_lower", "min"), band_upper=("band_upper", "max")
     )
 
     # CP214 — 머지 직전 date dtype 평탄화 (방어). 근본 fix 는 parquet_store 에서 했지만
@@ -194,22 +188,47 @@ def _load_frame() -> pd.DataFrame:
     band = _align_date_dtype(band)
 
     frame = price.merge(
-        indicators[["ticker", "date", "ma_5_ratio", "ma_20_ratio", "ma_60_ratio", "macd_ratio", "bb_position", "vol_change", "rsi_norm"]],
+        indicators[
+            [
+                "ticker",
+                "date",
+                "ma_5_ratio",
+                "ma_20_ratio",
+                "ma_60_ratio",
+                "macd_ratio",
+                "bb_position",
+                "vol_change",
+                "rsi_norm",
+            ]
+        ],
         on=["ticker", "date"],
         how="left",
     )
     frame = frame.merge(
-        line[["ticker", "date", "line_score", "safe_line_score", "line_rank_by_date", "safe_line_rank_by_date"]],
+        line[
+            [
+                "ticker",
+                "date",
+                "line_score",
+                "safe_line_score",
+                "line_rank_by_date",
+                "safe_line_rank_by_date",
+            ]
+        ],
         on=["ticker", "date"],
         how="left",
     )
     frame = frame.merge(band, on=["ticker", "date"], how="left")
 
     frame["ma_20_ratio"] = frame["ma_20_ratio"].fillna(
-        frame.groupby("ticker")["close"].transform(lambda values: values / values.rolling(20, min_periods=15).mean() - 1.0)
+        frame.groupby("ticker")["close"].transform(
+            lambda values: values / values.rolling(20, min_periods=15).mean() - 1.0
+        )
     )
     frame["ma_60_ratio"] = frame["ma_60_ratio"].fillna(
-        frame.groupby("ticker")["close"].transform(lambda values: values / values.rolling(60, min_periods=40).mean() - 1.0)
+        frame.groupby("ticker")["close"].transform(
+            lambda values: values / values.rolling(60, min_periods=40).mean() - 1.0
+        )
     )
     frame["band_lower_return"] = frame["band_lower"] / frame["close"] - 1.0
     frame["band_upper_return"] = frame["band_upper"] / frame["close"] - 1.0
@@ -217,7 +236,9 @@ def _load_frame() -> pd.DataFrame:
     width_reference = frame.groupby("ticker")["band_width_return"].transform(
         lambda values: values.rolling(60, min_periods=20).median().shift(1)
     )
-    frame["band_width_expansion"] = (frame["band_width_return"] / width_reference).replace([np.inf, -np.inf], np.nan)
+    frame["band_width_expansion"] = (frame["band_width_return"] / width_reference).replace(
+        [np.inf, -np.inf], np.nan
+    )
     frame["band_width_expansion"] = frame["band_width_expansion"].fillna(1.0)
     frame["band_width_percentile"] = frame.groupby("ticker")["band_width_return"].rank(pct=True)
     return frame.sort_values(["ticker", "date"]).reset_index(drop=True)
@@ -256,7 +277,12 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
         return entry, exit_signal, risk_signal
 
     if rule.id == "ai_balance_v2":
-        entry = (line >= -0.02) & (ma60 >= 0.0) & (ma20 >= -0.04) & ((lower >= -0.06) | (width_expansion < 1.25))
+        entry = (
+            (line >= -0.02)
+            & (ma60 >= 0.0)
+            & (ma20 >= -0.04)
+            & ((lower >= -0.06) | (width_expansion < 1.25))
+        )
         line_weak = line < -0.06
         band_risk = (lower < -0.06) | (width_expansion > 1.25)
         price_break = ma20 < -0.10
@@ -288,7 +314,11 @@ def _reason(rule: StrategyRule, position: int, target: int, risk: bool) -> tuple
     if position == 1 and risk:
         return "risk", "위험 확대", f"{rule.label} 기준 위험 조건이 감지되어 청산 확인 중입니다."
     if risk:
-        return "risk", "위험 확대", f"{rule.label} 기준 위험 조건이 강해서 신규 진입에 부적합합니다."
+        return (
+            "risk",
+            "위험 확대",
+            f"{rule.label} 기준 위험 조건이 강해서 신규 진입에 부적합합니다.",
+        )
     return "watch", "관망", f"{rule.label} 기준 신규 진입 조건이 아직 충분하지 않습니다."
 
 
@@ -304,7 +334,9 @@ def _compute_signal_frame(ticker_frame: pd.DataFrame, rule: StrategyRule) -> pd.
     labels: list[str] = []
     reasons: list[str] = []
 
-    for wants_entry, wants_exit, risky in zip(entry.to_numpy(bool), exit_signal.to_numpy(bool), risk_signal.to_numpy(bool)):
+    for wants_entry, wants_exit, risky in zip(
+        entry.to_numpy(bool), exit_signal.to_numpy(bool), risk_signal.to_numpy(bool), strict=False
+    ):
         if current == 0:
             target = 1 if wants_entry else 0
             entry_streak = entry_streak + 1 if wants_entry else 0
@@ -340,8 +372,12 @@ def _signal_row(row: pd.Series, rule: StrategyRule) -> dict[str, Any]:
         "conservativeReturn": _jsonable(row.get("line_score")) if rule.uses_line else None,
         "lowerBandReturn": _jsonable(row.get("band_lower_return")) if rule.uses_band else None,
         "bandWidthReturn": _jsonable(row.get("band_width_return")) if rule.uses_band else None,
-        "bandWidthExpansion": _jsonable(row.get("band_width_expansion")) if rule.uses_band else None,
-        "bandWidthPercentile": _jsonable(row.get("band_width_percentile")) if rule.uses_band else None,
+        "bandWidthExpansion": _jsonable(row.get("band_width_expansion"))
+        if rule.uses_band
+        else None,
+        "bandWidthPercentile": _jsonable(row.get("band_width_percentile"))
+        if rule.uses_band
+        else None,
         "ma60Ratio": _jsonable(row.get("ma_60_ratio")),
         "ma20Ratio": _jsonable(row.get("ma_20_ratio")),
         "macdRatio": _jsonable(row.get("macd_ratio")),
@@ -375,10 +411,14 @@ def _ticker_metrics(signal_frame: pd.DataFrame) -> dict[str, Any]:
             if abs(_total_return(buy_hold_returns)) > 1e-12
             else None
         ),
-        "excessReturnPct": (_total_return(strategy_returns) - _total_return(buy_hold_returns)) * 100.0,
+        "excessReturnPct": (_total_return(strategy_returns) - _total_return(buy_hold_returns))
+        * 100.0,
         "maxDrawdownPct": _max_drawdown(strategy_returns) * 100.0,
         "buyHoldMaxDrawdownPct": _max_drawdown(buy_hold_returns) * 100.0,
-        "maxDrawdownImprovementPct": (_max_drawdown(strategy_returns) - _max_drawdown(buy_hold_returns)) * 100.0,
+        "maxDrawdownImprovementPct": (
+            _max_drawdown(strategy_returns) - _max_drawdown(buy_hold_returns)
+        )
+        * 100.0,
         "feeAdjustedReturnPct": _total_return(strategy_returns) * 100.0,
         "feeAdjustedSharpe": _sharpe(strategy_returns),
         "buyHoldSharpe": _sharpe(buy_hold_returns),
@@ -391,8 +431,12 @@ def _ticker_metrics(signal_frame: pd.DataFrame) -> dict[str, Any]:
         "averageHoldingDays": _average_holding_days(positions),
         "avoidedLargeLossDays": avoided_large_loss_days,
         "largeLossDays": large_loss_days,
-        "largeLossAvoidanceRate": avoided_large_loss_days / large_loss_days if large_loss_days else None,
-        "largeLossThresholdPct": large_loss_threshold * 100.0 if large_loss_threshold is not None else None,
+        "largeLossAvoidanceRate": avoided_large_loss_days / large_loss_days
+        if large_loss_days
+        else None,
+        "largeLossThresholdPct": large_loss_threshold * 100.0
+        if large_loss_threshold is not None
+        else None,
     }
 
 
@@ -464,9 +508,13 @@ def _strategy_results(strategy_id: str) -> dict[str, Any]:
     if rule.uses_line:
         frame = frame[frame["line_score"].notna()].copy()
     if rule.uses_band:
-        frame = frame[frame["band_lower_return"].notna() & frame["band_width_return"].notna()].copy()
+        frame = frame[
+            frame["band_lower_return"].notna() & frame["band_width_return"].notna()
+        ].copy()
     if frame.empty:
-        raise HTTPException(status_code=404, detail=f"{rule.label}에 사용할 로컬 데이터가 없습니다.")
+        raise HTTPException(
+            status_code=404, detail=f"{rule.label}에 사용할 로컬 데이터가 없습니다."
+        )
 
     end_date = frame["date"].max()
     start_date = end_date - pd.Timedelta(days=365)
@@ -483,7 +531,9 @@ def _strategy_results(strategy_id: str) -> dict[str, Any]:
         metrics_rows.append({"ticker": str(ticker), **metrics})
 
     if not metrics_rows:
-        raise HTTPException(status_code=404, detail=f"{rule.label}에 필요한 평가 가능 티커가 없습니다.")
+        raise HTTPException(
+            status_code=404, detail=f"{rule.label}에 필요한 평가 가능 티커가 없습니다."
+        )
 
     metrics_frame = pd.DataFrame(metrics_rows)
     pass_mask = (
@@ -535,21 +585,37 @@ def get_strategy_scan(strategy_id: str, limit: int = 500) -> dict[str, Any]:
                 "reason": str(row["reason"]),
                 "asofDate": pd.Timestamp(row["date"]).date().isoformat(),
                 "conservativeReturn": _jsonable(row.get("line_score")) if rule.uses_line else None,
-                "lowerBandReturn": _jsonable(row.get("band_lower_return")) if rule.uses_band else None,
-                "bandWidthReturn": _jsonable(row.get("band_width_return")) if rule.uses_band else None,
-                "bandWidthExpansion": _jsonable(row.get("band_width_expansion")) if rule.uses_band else None,
-                "bandWidthPercentile": _jsonable(row.get("band_width_percentile")) if rule.uses_band else None,
+                "lowerBandReturn": _jsonable(row.get("band_lower_return"))
+                if rule.uses_band
+                else None,
+                "bandWidthReturn": _jsonable(row.get("band_width_return"))
+                if rule.uses_band
+                else None,
+                "bandWidthExpansion": _jsonable(row.get("band_width_expansion"))
+                if rule.uses_band
+                else None,
+                "bandWidthPercentile": _jsonable(row.get("band_width_percentile"))
+                if rule.uses_band
+                else None,
                 "ma60Ratio": _jsonable(row.get("ma_60_ratio")),
                 "ma20Ratio": _jsonable(row.get("ma_20_ratio")),
                 "macdRatio": _jsonable(row.get("macd_ratio")),
                 "rsi": _jsonable(row.get("rsi_norm")),
                 "atrRatio": _jsonable(row.get("atr_ratio_calc")),
-                "strategyScore": _jsonable(row.get("line_score")) if rule.uses_line else _jsonable(row.get("ma_60_ratio")),
+                "strategyScore": _jsonable(row.get("line_score"))
+                if rule.uses_line
+                else _jsonable(row.get("ma_60_ratio")),
                 "hasUsableSignal": has_usable_signal,
             }
         )
     group_order = {"buy": 0, "hold": 1, "risk": 2, "watch": 3}
-    cards.sort(key=lambda row: (group_order.get(row["group"], 9), -(row["strategyScore"] or -9999.0), row["ticker"]))
+    cards.sort(
+        key=lambda row: (
+            group_order.get(row["group"], 9),
+            -(row["strategyScore"] or -9999.0),
+            row["ticker"],
+        )
+    )
     return {
         "strategyId": rule.id,
         "strategyLabel": rule.label,
@@ -578,7 +644,10 @@ def get_strategy_backtest(strategy_id: str, ticker: str) -> dict[str, Any]:
     rule: StrategyRule = result["rule"]
     normalized = ticker.upper()
     if normalized not in result["by_ticker"]:
-        raise HTTPException(status_code=404, detail=f"{normalized}에는 {rule.label} 백테스트에 필요한 로컬 데이터가 없습니다.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"{normalized}에는 {rule.label} 백테스트에 필요한 로컬 데이터가 없습니다.",
+        )
 
     signal_frame = result["by_ticker"][normalized]
     metrics = _ticker_metrics(signal_frame)

@@ -44,10 +44,6 @@ export interface ExperimentNode {
   reportRef?: string;
 }
 
-// CP218 호환 alias — 다른 코드가 LineExperimentNode 로 import 한 경우.
-export type LineExperimentCategory = ExperimentCategory;
-export type LineExperimentNode = ExperimentNode;
-
 export const LINE_TIMELINE: ExperimentNode[] = [
   // ────────── 100 ticker 시기 묶음 (라인 1D + 1W) ──────────
   {
