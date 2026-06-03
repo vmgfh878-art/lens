@@ -1,3 +1,18 @@
+"""
+전략 스캔 / 백테스트 — 공개 API facade.
+
+이 파일은 라우터 (strategies.py, admin.py) 와의 import 계약을 유지하기 위한
+얇은 facade. 실제 구현은 CP226 분리 산출 3 모듈에 있다:
+  - strategy_indicators       : 전략 규칙 / 지표 / 상태머신 (순수)
+  - strategy_backtest_engine  : 수익률 / 드로우다운 / 샤프 / 시뮬레이션 지표 (순수)
+  - strategy_scan             : parquet I/O / lru_cache / 티커별 집계 (상태)
+
+기존 caller (라우터) 의 import 경로 (`app.services.strategy_backtest_svc.X`) 와
+공개 + 사설 심볼 (`STRATEGIES`, `StrategyRule`, `get_strategy_scan`,
+`get_strategy_backtest`, `clear_strategy_cache`, 그리고 일부 진단 / 호환 목적의
+사설 심볼) 을 보존한다.
+"""
+
 from __future__ import annotations
 
 from typing import Any
