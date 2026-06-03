@@ -35,7 +35,6 @@ import {
   getStructureDescription,
 } from "@/lib/training/detailFields";
 import {
-  extractErrorMessage,
   formatComparisonDiff,
   formatConfigLabel,
   formatFeatureSet,
@@ -46,7 +45,6 @@ import {
   formatSignedNumber,
   formatSignedPctPoint,
   formatStatusLabel,
-  formatValue,
 } from "@/lib/training/formatters";
 import {
   formatDetailValue,
@@ -77,10 +75,7 @@ import {
 import { BAND_TIMELINE } from "@/lib/training/bandTimeline";
 import { LINE_TIMELINE } from "@/lib/training/lineTimeline";
 import {
-  getPptMapping,
   getStaticEvaluation,
-  getStaticSignificance,
-  getV1ExtraIndicators,
   type StaticGoalCard,
 } from "@/lib/training/staticEvaluation";
 import type { GoalCardData, GoalCardProps } from "@/lib/training/cardTypes";
@@ -99,6 +94,7 @@ import { PptMappingSection, V1ExtraIndicatorsSection } from "@/components/traini
 import type { ComparisonRow } from "@/lib/training/comparisonTypes";
 import { ComparisonTable } from "@/components/training/ComparisonTable";
 import { SignificanceSection } from "@/components/training/SignificanceSection";
+import { GoalCard, StoredEvaluationSection, staticCardsToGoalCardData } from "@/components/training/GoalCards";
 
 type SelectedItem =
   | { kind: "slot"; slotId: ProductSlotId }
@@ -275,67 +271,6 @@ function hasDisplayableComparison(detail: AiRunDetail, productDetail: AiRunDetai
 // run 분류 / config 추출 / experiment 명명 helper 는 @/lib/training/runUtils 로 이동했다.
 // 아래는 component 내부에서만 쓰는 helper 만 남긴다.
 
-function GoalCard({ title, target, actual, diff, judgement, description, tone = "neutral", source, targetRationale }: GoalCardProps) {
-  return (
-    <article className={`goal-card goal-card--${tone}`}>
-      <div className="goal-card__topline">
-        <strong>{title}</strong>
-        <span>{judgement}</span>
-      </div>
-      {source ? <span className="goal-card__source">{source}</span> : null}
-      <div className="goal-card__rows">
-        <div>
-          <span>목표</span>
-          <strong>{target}</strong>
-        </div>
-        <div>
-          <span>실제</span>
-          <strong>{actual}</strong>
-        </div>
-      </div>
-      {targetRationale ? <p className="goal-card__rationale"><em>목표 근거</em><br />{targetRationale}</p> : null}
-      <p>{description}</p>
-    </article>
-  );
-}
-
-function GoalCardGrid({ cards }: { cards: GoalCardData[] }) {
-  return (
-    <div className="goal-grid">
-      {cards.map((card) => (
-        <GoalCard
-          key={card.id}
-          title={card.title}
-          target={card.target}
-          actual={card.actual}
-          diff={card.diff}
-          judgement={card.judgement}
-          description={card.description}
-          tone={card.tone}
-          source={card.source}
-          targetRationale={card.targetRationale}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** CP216 — StaticGoalCard 를 GoalCardData 로 변환. judgement / tone 셋이 호환되므로 단순 매핑. */
-function staticCardsToGoalCardData(cards: StaticGoalCard[]): GoalCardData[] {
-  return cards.map((card) => ({
-    id: card.id,
-    title: card.title,
-    target: card.target,
-    actual: card.actual,
-    diff: card.diff,
-    judgement: card.judgement,
-    description: card.description,
-    tone: card.tone,
-    source: card.source,
-    targetRationale: card.targetRationale,
-  }));
-}
-
 /** CP217.2 — CP216.2 통계 검정 (학계 톤). 메인 8셀 · narrow 화면은 d/p/CI 접힘. 1W 만 GW regime sub-table. */
 function DataList({ items }: { items: string[] }) {
   return (
@@ -510,18 +445,6 @@ function PreparingSlotDetail({ slot }: { slot: ProductSlot }) {
         />
       </div>
     </div>
-  );
-}
-
-function StoredEvaluationSection({ cards }: { cards: GoalCardData[] }) {
-  return (
-    <section>
-      <div className="panel-heading panel-heading--compact">
-        <h3>목표 대비 평가</h3>
-      </div>
-      <div className="trust-note">이 값은 저장된 평가 결과 기준입니다. 평가가 없으면 성능을 판단하지 않습니다.</div>
-      {cards.length > 0 ? <GoalCardGrid cards={cards} /> : <div className="empty-state empty-state--compact">저장된 평가 없음</div>}
-    </section>
   );
 }
 
