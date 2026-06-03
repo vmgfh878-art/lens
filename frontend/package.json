@@ -12,6 +12,7 @@
     "test:unit:watch": "vitest"
   },
   "dependencies": {
+    "@microsoft/clarity": "^1.0.2",
     "axios": "^1.7.2",
     "lightweight-charts": "^4.1.3",
     "next": "14.2.3",
