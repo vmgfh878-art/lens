@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import hashlib
 
-from fastapi import APIRouter, Query, Request, Response
-
 from app.core.http import success_response
 from app.schemas.common import ApiResponse, ErrorResponse
 from app.schemas.stocks import (
     IndicatorResponseData,
-    PredictionData,
     PriceResponseData,
     ProductPredictionHistoryResponseData,
     StockSummary,
@@ -19,6 +16,7 @@ from app.services.api_service import (
     get_stocks,
 )
 from app.services.product_prediction_history_svc import get_product_prediction_history_data
+from fastapi import APIRouter, Query, Request, Response
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -26,9 +24,13 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 def _build_price_etag(payload: dict) -> str:
     rows = payload.get("data") or []
     latest_date = rows[-1]["date"] if rows else "empty"
-    raw = f"{payload['ticker']}|{payload['timeframe']}|{payload.get('start')}|{payload.get('end')}|{latest_date}|{len(rows)}"
+    raw = (
+        f"{payload['ticker']}|{payload['timeframe']}"
+        f"|{payload.get('start')}|{payload.get('end')}"
+        f"|{latest_date}|{len(rows)}"
+    )
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    return f"W/\"{digest}\""
+    return f'W/"{digest}"'
 
 
 @router.get(
@@ -50,7 +52,11 @@ def list_stocks(
 @router.get(
     "/{ticker}/prices",
     response_model=ApiResponse[PriceResponseData],
-    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 def get_prices(
     request: Request,
@@ -99,7 +105,9 @@ def get_product_prediction_history(
     timeframe: str = Query(default="1D", description="제품 rolling history timeframe"),
     roles: str = Query(default="all", description="all, line, band 또는 line,band"),
     run_id: str | None = Query(default=None, description="선택 run_id 필터"),
-    limit: int | None = Query(default=None, ge=1, le=1500, description="role별 최근 history row 수"),
+    limit: int | None = Query(
+        default=None, ge=1, le=1500, description="role별 최근 history row 수"
+    ),
     lookback_days: int | None = Query(default=None, ge=1, le=1500, description="최근 N일 history"),
 ):
     data = get_product_prediction_history_data(
