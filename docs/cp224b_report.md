@@ -115,4 +115,76 @@ dead code를 자동 도구로 후보 산출 → **각 후보를 grep으로 호�
 
 ---
 
-(Step 3, 4, 5는 후속)
+---
+
+## Step 3 — ts-prune 후보 (76건)
+
+명령: `cd frontend; npx ts-prune` (일회성, 영구 devDep 추가 없음).
+
+### 분류 E — `(used in module)` 50건: export만 불필요, 코드는 사용 중
+
+`export` 키워드만 제거 가능 (안전). 그러나 일괄 제거는 위험 → 별도 청소 CP로 분리 권장. 본 CP는 dump만.
+
+대표:
+- `src/components/{IndicatorPanel,StatusInline}.tsx` props 타입
+- `src/lib/apiErrors.ts` 내부 타입 (ApiErrorShape, ApiErrorKind, extractHttpStatus)
+- `src/lib/dateUtils.ts:37 formatDate`
+- `src/lib/productSlots.ts` 3 타입 (Kind/Status/RefreshPolicy)
+- `src/lib/staleness.ts:100 BandStaleness`
+- `src/lib/v1Adapter.ts` 4 함수 (normalizeBandValueToPrice 등)
+- `src/lib/chart/utils.ts` 9 함수
+- `src/lib/training/` 다수 (detailFields, lineTimeline, reproducibility, runUtils, staticEvaluation, usageData)
+
+→ **50건 모두 "export-only 제거" 후보, 별도 청소 CP 권장**. 본 CP에서는 grep 검증 없이 batch 제거 금지.
+
+### 분류 F — 완전 unused, 도구 오탐 가능 (검토 필요)
+
+| 파일:줄 | 심볼 | 비고 |
+|---|---|---|
+| playwright.config.ts:16 | default | Playwright가 자동 import → 오탐 |
+| vitest.config.ts:12 | default | Vitest가 자동 import → 오탐 |
+| .next/types/app/layout.ts:49 | PageProps | Next.js build 결과 → 오탐 |
+| .next/types/app/layout.ts:53 | LayoutProps (used in module) | 동상 |
+| .next/types/app/page.ts:49 | PageProps (used in module) | 동상 |
+| .next/types/app/page.ts:53 | LayoutProps | 동상 |
+
+→ **6 오탐 (config/build 자동 생성)**.
+
+### 분류 G — 진짜 검증 필요 (Step 4 grep 대상)
+
+| 파일:줄 | 심볼 | 종류 | 판정 |
+|---|---|---|---|
+| src/api/client.ts:6 | api | namespace export | grep TBD |
+| src/api/client.ts:6 | getBackendBaseUrl | function | grep TBD |
+| src/api/client.ts:9 | ApiMeta | type | grep TBD |
+| src/api/client.ts:10 | ApiResponse | type | grep TBD |
+| src/api/client.ts:16 | PriceResult | type | grep TBD |
+| src/api/client.ts:17 | IndicatorResult | type | grep TBD |
+| src/api/client.ts:22 | ProductPredictionHistoryManifestSummary | type | grep TBD |
+| src/api/client.ts:23 | ProductPredictionHistoryResult | type | grep TBD |
+| src/api/client.ts:24 | V1BandPredictionPoint | type | grep TBD |
+| src/api/client.ts:26 | V1LinePredictionPoint | type | grep TBD |
+| src/api/client.ts:31 | AiRunStatus | type | grep TBD |
+| src/api/client.ts:33 | BacktestSummary | type | grep TBD |
+| src/api/client.ts:34 | EvaluationSummary | type | grep TBD |
+| src/api/client.ts:37 | StrategyBacktestResult | type | grep TBD |
+| src/api/client.ts:38 | StrategyPortfolioMetrics | type | grep TBD |
+| src/api/client.ts:39 | StrategyScanResult | type | grep TBD |
+| src/api/client.ts:48 | fetchProductPredictionHistory | function | grep TBD |
+| src/api/client.ts:56 | fetchRunBacktests | function | grep TBD |
+| src/api/client.ts:57 | fetchRunEvaluations | function | grep TBD |
+| src/components/training/ReproducibilitySection.tsx:13 | default | component | grep TBD |
+| src/components/training/UsageDataSection.tsx:12 | default | component | grep TBD |
+| src/lib/training/lineTimeline.ts:48 | LineExperimentCategory | type | grep TBD |
+| src/lib/training/lineTimeline.ts:49 | LineExperimentNode | type | grep TBD |
+
+→ **23 진짜 검증 후보, Step 4에서 grep**.
+
+**판정 합계 (ts-prune)**:
+- 분류 E 50: 별도 청소 CP 권장 (export-only 정리, 안전하지만 큰 변경)
+- 분류 F 6: 도구 오탐 (config/Next.js)
+- 분류 G 23: Step 4 grep 대상
+
+---
+
+(Step 4, 5는 후속)
