@@ -1,7 +1,7 @@
-import logging
 import os
 from pathlib import Path
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,22 +10,26 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
+from app.core.logging import configure_logging
 from app.middleware.request_id import request_id_middleware
 from app.routers.v1 import admin, ai, health, stocks, predictions as v1_predictions, strategies
 
-logger = logging.getLogger("lens.api")
+configure_logging()
+logger = structlog.get_logger("lens.api")
 
 
 def _parse_cors_origins() -> list[str]:
     # 기본: 로컬 dev + Vercel production 도메인.
     # 새 vercel alias 가 추가될 때마다 손대지 않도록 regex 도 같이 사용.
     # Production 배포 시 BACKEND_CORS_ORIGINS 환경변수로 명시 override 가능.
-    default_origins = ",".join([
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://lens-kimjihyeong-s-projects.vercel.app",
-        "https://lens-ten-delta.vercel.app",
-    ])
+    default_origins = ",".join(
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://lens-kimjihyeong-s-projects.vercel.app",
+            "https://lens-ten-delta.vercel.app",
+        ]
+    )
     raw = os.environ.get("BACKEND_CORS_ORIGINS", default_origins)
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
@@ -72,7 +76,9 @@ def _load_v1_predictions_cache() -> None:
     필요 시 LENS_EAGER_V1_CACHE=1 로 강제 활성.
     """
     if os.environ.get("LENS_EAGER_V1_CACHE", "0") != "1":
-        logger.info("v1 predictions cache eager load disabled (set LENS_EAGER_V1_CACHE=1 to enable)")
+        logger.info(
+            "v1 predictions cache eager load disabled (set LENS_EAGER_V1_CACHE=1 to enable)"
+        )
         return
     base = Path(__file__).resolve().parent.parent / "data" / "v1"
     try:
