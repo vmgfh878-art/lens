@@ -5,7 +5,6 @@ import { FormEvent, Fragment, startTransition, useDeferredValue, useEffect, useM
 import {
   DisplayTimeframe,
   fetchIndicators,
-  fetchPrices,
   fetchStrategyBacktest,
   fetchStrategyScan,
   fetchTickers,
@@ -17,13 +16,7 @@ import {
 import MetricCard from "@/components/MetricCard";
 import {
   DEFAULT_FEE_BPS,
-  DEFAULT_PRICE_LOOKBACK_DAYS,
   getStrategyDefinition,
-  INDICATOR_BASELINE_RULE,
-  LENS_BALANCE_RULE,
-  PREDICTION_HISTORY_LIMIT,
-  PRODUCT_BAND_RUN_ID,
-  PRODUCT_LINE_RUN_ID,
   SIGNAL_GROUP_DEFAULT_LIMIT,
   SIGNAL_GROUP_MAX_LIMIT,
   SIGNAL_GROUPS,
@@ -34,52 +27,30 @@ import {
   strategyNeedsLine,
 } from "@/lib/backtest/constants";
 import {
-  describeAvoidanceStrength,
   evaluateDrawdown,
   evaluateFollowReturn,
   evaluateLossAvoidance,
   evaluateTradeFrequency,
 } from "@/lib/backtest/evaluators";
-import {
-  getBandWidthValue,
-  getConservativeValue,
-  getHighestUpperBandValue,
-  getWorstLowerBandValue,
-  median,
-  percentileRank,
-} from "@/lib/backtest/predictionHelpers";
 import { runStrategyBacktest } from "@/lib/backtest/simulationEngine";
 import { MiniLineChart, PositionStrip } from "@/components/backtest/Charts";
 import { getBandWidthState } from "@/lib/backtest/signalBuilder";
 import { fetchPriceHistory, loadStrategySignalCard } from "@/lib/backtest/signalCardLoader";
 import type {
-  BacktestPoint,
   BacktestSimulationResult,
   DecisionFactorId,
-  LineSeries,
-  RiskSignal,
   SignalGroupId,
-  StrategyDefinition,
   StrategyId,
   StrategySignalCard,
-  TradeEvent,
   TradeRecord,
 } from "@/lib/backtest/types";
+import { sortUniqueByDate } from "@/lib/dateUtils";
 import {
-  buildDefaultPriceWindow,
-  isValidDate,
-  sortPriceRows,
-  sortUniqueByDate,
-} from "@/lib/dateUtils";
-import {
-  formatCompact,
   formatNumber,
   formatPercent,
   formatRatioAsPercent,
   formatUnsignedRatioAsPercent,
-  isFiniteNumber,
 } from "@/lib/formatters";
-import { PRODUCT_SLOT_BY_ID } from "@/lib/productSlots";
 import StatusInline from "@/components/StatusInline";
 import {
   ApiError,
