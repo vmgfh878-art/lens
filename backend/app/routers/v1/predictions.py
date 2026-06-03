@@ -8,8 +8,10 @@ Endpoints:
   GET /api/v1/predictions/tickers
   GET /api/v1/predictions/health
 """
+
 from __future__ import annotations
 
+import logging
 import math
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,6 +22,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.core.http import success_response
 from app.services import parquet_store
+
+logger = logging.getLogger("lens.predictions")
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -36,7 +40,8 @@ def load_caches(base_dir: Path) -> dict[str, Any]:
     for slot in _SLOTS:
         try:
             df = parquet_store.get_raw(slot)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — admin reload 응답 유지. 원인은 로그로.
+            logger.warning("load_caches slot '%s' 실패", slot, exc_info=exc)
             summary[slot] = {"status": "error", "error": str(exc)}
             continue
         if df is None:
@@ -143,7 +148,9 @@ def get_line(
             "ticker": ticker,
             "slot": "1D Line",
             "model_id": _jsonable(sub["model_id"].iloc[0]) if "model_id" in sub.columns else None,
-            "source_cp": _jsonable(sub["source_cp"].iloc[0]) if "source_cp" in sub.columns else None,
+            "source_cp": _jsonable(sub["source_cp"].iloc[0])
+            if "source_cp" in sub.columns
+            else None,
             "rows": len(sub),
             "data": _df_to_records(sub),
         },
@@ -175,8 +182,12 @@ def get_band_1d(
         {
             "ticker": ticker,
             "slot": "1D Band",
-            "model_id": _jsonable(sub["model_id"].iloc[0]) if "model_id" in sub.columns and len(sub) else None,
-            "source_cp": _jsonable(sub["source_cp"].iloc[0]) if "source_cp" in sub.columns and len(sub) else None,
+            "model_id": _jsonable(sub["model_id"].iloc[0])
+            if "model_id" in sub.columns and len(sub)
+            else None,
+            "source_cp": _jsonable(sub["source_cp"].iloc[0])
+            if "source_cp" in sub.columns and len(sub)
+            else None,
             "horizons": sorted(sub["horizon_step"].unique().tolist()) if len(sub) else [],
             "rows": len(sub),
             "data": _df_to_records(sub),
@@ -209,8 +220,12 @@ def get_band_1w(
         {
             "ticker": ticker,
             "slot": "1W Band",
-            "model_id": _jsonable(sub["model_id"].iloc[0]) if "model_id" in sub.columns and len(sub) else None,
-            "source_cp": _jsonable(sub["source_cp"].iloc[0]) if "source_cp" in sub.columns and len(sub) else None,
+            "model_id": _jsonable(sub["model_id"].iloc[0])
+            if "model_id" in sub.columns and len(sub)
+            else None,
+            "source_cp": _jsonable(sub["source_cp"].iloc[0])
+            if "source_cp" in sub.columns and len(sub)
+            else None,
             "horizons": sorted(sub["horizon_step"].unique().tolist()) if len(sub) else [],
             "rows": len(sub),
             "data": _df_to_records(sub),

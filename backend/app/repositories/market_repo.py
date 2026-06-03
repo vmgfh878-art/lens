@@ -5,10 +5,14 @@ import os
 
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase
+
 try:
     from collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame
 except ModuleNotFoundError:
-    from backend.collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame
+    from backend.collector.repositories.local_snapshots import (
+        local_snapshots_required,
+        read_snapshot_frame,
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +61,9 @@ def resolve_market_data_provider(
     if market_data_provider:
         return _normalize_provider_name(market_data_provider)
     if warn_if_default:
-        logger.warning("market data source/provider가 명시되지 않아 MARKET_DATA_PROVIDER 기본값을 사용합니다.")
+        logger.warning(
+            "market data source/provider가 명시되지 않아 MARKET_DATA_PROVIDER 기본값을 사용합니다."
+        )
     return _normalize_provider_name(os.environ.get("MARKET_DATA_PROVIDER", "yfinance"))
 
 
@@ -87,7 +93,9 @@ def _local_rows(frame, columns: list[str]) -> list[dict]:
         return []
     normalized = frame.copy()
     if "date" in normalized.columns:
-        normalized["date"] = normalized["date"].map(lambda value: str(value)[:10] if value is not None else None)
+        normalized["date"] = normalized["date"].map(
+            lambda value: str(value)[:10] if value is not None else None
+        )
     for column in columns:
         if column not in normalized.columns:
             normalized[column] = None
@@ -123,7 +131,9 @@ def fetch_price_rows(
     if local_frame is not None:
         return _local_rows(_filter_local_provider(local_frame, provider), PRICE_COLUMN_NAMES)
     if local_snapshots_required():
-        raise UpstreamUnavailableError("로컬 snapshot 모드에서는 가격 API가 Supabase price_data를 조회하지 않습니다.")
+        raise UpstreamUnavailableError(
+            "로컬 snapshot 모드에서는 가격 API가 Supabase price_data를 조회하지 않습니다."
+        )
     try:
         client = get_supabase()
         query = (
@@ -140,6 +150,7 @@ def fetch_price_rows(
     except ConfigError:
         raise
     except Exception as exc:
+        logger.warning("fetch_price_rows '%s' 실패", ticker, exc_info=exc)
         raise UpstreamUnavailableError("가격 데이터를 조회할 수 없습니다.") from exc
 
 
@@ -172,7 +183,9 @@ def fetch_indicator_rows(
             local_frame = local_frame.sort_values("date").tail(limit)
         return _local_rows(local_frame, INDICATOR_COLUMN_NAMES)
     if local_snapshots_required():
-        raise UpstreamUnavailableError("로컬 snapshot 모드에서는 보조지표 API가 Supabase indicators를 조회하지 않습니다.")
+        raise UpstreamUnavailableError(
+            "로컬 snapshot 모드에서는 보조지표 API가 Supabase indicators를 조회하지 않습니다."
+        )
 
     try:
         rows = []
@@ -192,7 +205,11 @@ def fetch_indicator_rows(
                 break
             except Exception as exc:
                 missing_column = _extract_missing_indicator_column(exc)
-                if missing_column and missing_column in selected_columns and missing_column != "date":
+                if (
+                    missing_column
+                    and missing_column in selected_columns
+                    and missing_column != "date"
+                ):
                     selected_columns.remove(missing_column)
                     missing_columns.add(missing_column)
                     continue
@@ -209,6 +226,9 @@ def fetch_indicator_rows(
     except ConfigError:
         raise
     except Exception as exc:
+        logger.warning(
+            "fetch_indicator_rows '%s' timeframe '%s' 실패", ticker, timeframe, exc_info=exc
+        )
         raise UpstreamUnavailableError("보조지표 데이터를 조회할 수 없습니다.") from exc
 
 
@@ -224,7 +244,9 @@ def _extract_missing_indicator_column(exc: Exception) -> str | None:
     return message[start:end]
 
 
-def _merge_indicator_volume(*, ticker: str, timeframe: str, rows: list[dict], provider: str) -> None:
+def _merge_indicator_volume(
+    *, ticker: str, timeframe: str, rows: list[dict], provider: str
+) -> None:
     if timeframe != "1D" or not rows:
         return
 
@@ -242,7 +264,8 @@ def _merge_indicator_volume(*, ticker: str, timeframe: str, rows: list[dict], pr
         )
         query = _apply_source_filter(query, provider)
         volume_rows = query.execute().data or []
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — volume merge 는 best-effort. 실패해도 indicator 응답은 유효.
+        logger.debug("_merge_indicator_volume best-effort 실패", exc_info=exc)
         return
 
     volume_by_date = {str(row.get("date")): row.get("volume") for row in volume_rows}
@@ -279,7 +302,15 @@ def _filter_stock_rows(rows: list[dict], *, search: str | None, limit: int) -> l
 
 def _fetch_stock_info_rows(client, *, search: str | None, limit: int) -> list[dict]:
     scan_limit = max(limit * 50, 1000) if search else limit
-    rows = client.table("stock_info").select(STOCK_COLUMNS).order("ticker").limit(scan_limit).execute().data or []
+    rows = (
+        client.table("stock_info")
+        .select(STOCK_COLUMNS)
+        .order("ticker")
+        .limit(scan_limit)
+        .execute()
+        .data
+        or []
+    )
     return _filter_stock_rows(rows, search=search, limit=limit)
 
 
@@ -293,7 +324,9 @@ def _fetch_stock_info_rows_via_local(*, search: str | None, limit: int) -> list[
     return _filter_stock_rows(frame.to_dict(orient="records"), search=search, limit=limit)
 
 
-def _fetch_price_ticker_fallback_via_local(*, search: str | None, limit: int, provider: str) -> list[dict] | None:
+def _fetch_price_ticker_fallback_via_local(
+    *, search: str | None, limit: int, provider: str
+) -> list[dict] | None:
     try:
         frame = read_snapshot_frame(
             "price_data",
@@ -309,7 +342,9 @@ def _fetch_price_ticker_fallback_via_local(*, search: str | None, limit: int, pr
     return _filter_stock_rows(frame.to_dict(orient="records"), search=search, limit=limit)
 
 
-def _fetch_price_ticker_fallback(client, *, search: str | None, limit: int, provider: str) -> list[dict]:
+def _fetch_price_ticker_fallback(
+    client, *, search: str | None, limit: int, provider: str
+) -> list[dict]:
     # stock_info가 비어 있거나 일시적으로 조회되지 않을 때도 데모 검색은 가격 데이터 기준으로 동작해야 한다.
     if search:
         exact_query = (
@@ -326,7 +361,9 @@ def _fetch_price_ticker_fallback(client, *, search: str | None, limit: int, prov
             return exact_matches[:limit]
 
     scan_limit = max(limit * 50, 1000)
-    query = client.table("price_data").select(PRICE_TICKER_COLUMNS).order("ticker").limit(scan_limit)
+    query = (
+        client.table("price_data").select(PRICE_TICKER_COLUMNS).order("ticker").limit(scan_limit)
+    )
     query = _apply_source_filter(query, provider)
     rows = query.execute().data or []
     return _filter_stock_rows(rows, search=search, limit=limit)
@@ -347,16 +384,21 @@ def fetch_stocks(
     local_rows = _fetch_stock_info_rows_via_local(search=search, limit=limit)
     if local_rows:
         return local_rows
-    local_fallback = _fetch_price_ticker_fallback_via_local(search=search, limit=limit, provider=provider)
+    local_fallback = _fetch_price_ticker_fallback_via_local(
+        search=search, limit=limit, provider=provider
+    )
     if local_fallback:
         return local_fallback
     if local_snapshots_required():
-        raise UpstreamUnavailableError("로컬 snapshot 모드에서는 종목 검색 API가 Supabase를 조회하지 않습니다.")
+        raise UpstreamUnavailableError(
+            "로컬 snapshot 모드에서는 종목 검색 API가 Supabase를 조회하지 않습니다."
+        )
     try:
         client = get_supabase()
         try:
             rows = _normalize_stock_rows(_fetch_stock_info_rows(client, search=search, limit=limit))
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — stock_info 1차 폴백. 실패 시 price_data 폴백으로 전환.
+            logger.debug("stock_info 1차 폴백 실패, price_data 진행", exc_info=exc)
             rows = []
         if rows:
             return rows
@@ -364,4 +406,5 @@ def fetch_stocks(
     except ConfigError:
         raise
     except Exception as exc:
+        logger.warning("fetch_stocks search='%s' 실패", search, exc_info=exc)
         raise UpstreamUnavailableError("종목 목록을 조회할 수 없습니다.") from exc
