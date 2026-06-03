@@ -4,7 +4,7 @@
 백엔드 분리 리팩토링의 동작 보존을 byte/tolerance 비교로 증명.
 
 설계:
-- sys.path 이중 보정: ROOT(`...\lens`) + BACKEND(`...\lens\backend`) 모두
+- sys.path 이중 보정: ROOT(`.../lens`) + BACKEND(`.../lens/backend`) 모두
   insert. app.* / backend.* / ai.* 혼합 import 동시 해결. (pyproject.toml의
   pytest pythonpath와 중복 보장.)
 - `LENS_FORCE_LOCAL=1`: Supabase 경로 차단, local parquet only. v1 정책 준수.
