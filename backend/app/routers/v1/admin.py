@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -15,6 +15,7 @@ from app.services import local_market_svc, parquet_store
 from app.services.product_prediction_history_svc import clear_product_history_cache
 from app.services.strategy_backtest_svc import clear_strategy_cache
 
+logger = logging.getLogger("lens.admin")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -34,7 +35,11 @@ def _require_reload_allowed(request: Request, token: str | None) -> None:
             )
         return
 
-    allow_local = os.environ.get("LENS_ALLOW_LOCAL_ADMIN_RELOAD", "0").strip().lower() in {"1", "true", "yes"}
+    allow_local = os.environ.get("LENS_ALLOW_LOCAL_ADMIN_RELOAD", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     if allow_local and _is_local_request(request):
         return
 
@@ -89,8 +94,10 @@ def debug_state(request: Request):
                     "exists": True,
                     "size_mb": round(size / 1024 / 1024, 2),
                 }
-            except Exception as exc:  # noqa: BLE001
-                parquet_files[p.name] = {"exists": False, "error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
+                rid = getattr(request.state, "request_id", "-")
+                logger.warning("[%s] debug-state parquet stat '%s' 실패", rid, p.name, exc_info=exc)
+                parquet_files[p.name] = {"exists": False}
 
     # 2) 관심 환경변수 (값 노출 X, 존재 여부만)
     interesting_keys = [
@@ -107,9 +114,7 @@ def debug_state(request: Request):
         "RENDER",
         "RENDER_SERVICE_NAME",
     ]
-    interesting_env = {
-        k: ("set" if os.environ.get(k) else "empty") for k in interesting_keys
-    }
+    interesting_env = {k: ("set" if os.environ.get(k) else "empty") for k in interesting_keys}
 
     # 3) 메모리 (Linux /proc/self/status 또는 resource fallback)
     memory: dict[str, str | float] = {}
@@ -125,8 +130,9 @@ def debug_state(request: Request):
 
             ru = resource.getrusage(resource.RUSAGE_SELF)
             memory["max_rss_mb"] = round(ru.ru_maxrss / 1024, 2)
-        except Exception as exc:  # noqa: BLE001
-            memory["error"] = str(exc)
+        except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
+            rid = getattr(request.state, "request_id", "-")
+            logger.warning("[%s] debug-state memory probe 실패", rid, exc_info=exc)
 
     # 4) market 경로 probe — 실제 lazy-load 가 어떻게 행동하는지
     market_probes: dict[str, dict] = {}
@@ -146,13 +152,10 @@ def debug_state(request: Request):
                     "rows": int(len(df)),
                     "tickers": int(df["ticker"].nunique()) if "ticker" in df.columns else None,
                 }
-        except Exception as exc:  # noqa: BLE001
-            market_probes[slot] = {
-                "status": "error",
-                "exc_type": type(exc).__name__,
-                "exc_msg": str(exc)[:500],
-                "traceback_tail": traceback.format_exc()[-1000:],
-            }
+        except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
+            rid = getattr(request.state, "request_id", "-")
+            logger.warning("[%s] debug-state market probe '%s' 실패", rid, slot, exc_info=exc)
+            market_probes[slot] = {"status": "error"}
 
     return success_response(
         request,
