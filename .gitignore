@@ -7,6 +7,9 @@
 docs/cp*
 docs/cp*/
 
+# 리팩토링 작업 문서(로컬 실행용, git 미포함). 런북/지시서는 docs/cp* 로 이미 제외됨.
+docs/refactoring_master_plan.md
+
 # CP220 — 운영 진입한 3개 실험의 핵심 보고서만 깃 예외 (산출물 화면 노출 + 외부 재현 안내용)
 !docs/cp210_ensemble_report.md
 !docs/cp210_progress_latest.md
