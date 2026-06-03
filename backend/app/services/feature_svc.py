@@ -12,112 +12,30 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
-_BASE_FEATURE_COLUMNS = [
-    "log_return",
-    "open_ratio",
-    "high_ratio",
-    "low_ratio",
-    "vol_change",
-    "ma_5_ratio",
-    "ma_20_ratio",
-    "ma_60_ratio",
-    "rsi",
-    "macd_ratio",
-    "bb_position",
-    "us10y",
-    "yield_spread",
-    "vix_close",
-    "credit_spread_hy",
-    "nh_nl_index",
-    "ma200_pct",
-]
-_REGIME_FEATURE_COLUMNS = [
-    "regime_calm",
-    "regime_neutral",
-    "regime_stress",
-]
-_FUNDAMENTAL_FEATURE_COLUMNS = [
-    "revenue",
-    "net_income",
-    "equity",
-    "eps",
-    "roe",
-    "debt_ratio",
-]
-_MACRO_FEATURE_COLUMNS = [
-    "us10y",
-    "yield_spread",
-    "vix_close",
-    "credit_spread_hy",
-]
-_BREADTH_FEATURE_COLUMNS = [
-    "nh_nl_index",
-    "ma200_pct",
-]
-_FUNDAMENTAL_FLAG_COLUMN = "has_fundamentals"
-_MACRO_FLAG_COLUMN = "has_macro"
-_BREADTH_FLAG_COLUMN = "has_breadth"
-REQUIRED_FEATURE_COLUMNS = [
-    *_BASE_FEATURE_COLUMNS,
-    *_REGIME_FEATURE_COLUMNS,
-    _MACRO_FLAG_COLUMN,
+from backend.app.services.feature_definition import (
+    _ADJUSTED_OHLC_COLUMNS,
+    _BASE_FEATURE_COLUMNS,  # noqa: F401 (re-export)
+    _BREADTH_FEATURE_COLUMNS,
     _BREADTH_FLAG_COLUMN,
+    _CONTEXT_COLUMNS,
+    _EPSILON,
+    _FUNDAMENTAL_FEATURE_COLUMNS,
     _FUNDAMENTAL_FLAG_COLUMN,
-]
-FEATURE_COLUMNS = [
-    *_BASE_FEATURE_COLUMNS,
-    *_REGIME_FEATURE_COLUMNS,
-    *_FUNDAMENTAL_FEATURE_COLUMNS,
+    _FUNDAMENTAL_SOURCE_COLUMNS,
+    _INDICATOR_ONLY_COLUMNS,  # noqa: F401 (re-export)
+    _MACRO_FEATURE_COLUMNS,
     _MACRO_FLAG_COLUMN,
-    _BREADTH_FLAG_COLUMN,
-    _FUNDAMENTAL_FLAG_COLUMN,
-]
-
-SUPPORTED_TIMEFRAMES = ("1D", "1W", "1M")
-_EPSILON = 1e-9
-_CONTEXT_COLUMNS = (
-    "us10y",
-    "yield_spread",
-    "vix_close",
-    "credit_spread_hy",
-    "nh_nl_index",
-    "ma200_pct",
+    _MAX_RATIO_ABS_LIMIT,
+    _OUTPUT_COLUMNS,
+    _P99_RATIO_ABS_LIMIT,
+    _RATIO_SANITY_COLUMNS,
+    _REGIME_COLUMNS,
+    _REGIME_FEATURE_COLUMNS,  # noqa: F401 (re-export)
+    FEATURE_COLUMNS,  # noqa: F401 (re-export)
+    PRICE_DERIVED_FEATURE_COLUMNS,
+    REQUIRED_FEATURE_COLUMNS,
+    SUPPORTED_TIMEFRAMES,
 )
-_REGIME_COLUMNS = ("regime_calm", "regime_neutral", "regime_stress")
-_FUNDAMENTAL_SOURCE_COLUMNS = (
-    "filing_date",
-    "revenue",
-    "net_income",
-    "equity",
-    "eps",
-    "total_liabilities",
-)
-_INDICATOR_ONLY_COLUMNS = ["atr_ratio"]
-_OUTPUT_COLUMNS = [
-    "ticker",
-    "date",
-    "timeframe",
-    "regime_label",
-    *FEATURE_COLUMNS,
-    *_INDICATOR_ONLY_COLUMNS,
-]
-PRICE_DERIVED_FEATURE_COLUMNS = [
-    "log_return",
-    "open_ratio",
-    "high_ratio",
-    "low_ratio",
-    "vol_change",
-    "ma_5_ratio",
-    "ma_20_ratio",
-    "ma_60_ratio",
-    "rsi",
-    "macd_ratio",
-    "bb_position",
-]
-_ADJUSTED_OHLC_COLUMNS = ("open", "high", "low", "close")
-_RATIO_SANITY_COLUMNS = ("open_ratio", "high_ratio", "low_ratio")
-_MAX_RATIO_ABS_LIMIT = 5.0
-_P99_RATIO_ABS_LIMIT = 1.0
 
 
 def normalize_timeframe(timeframe: str) -> str:
