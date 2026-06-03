@@ -96,6 +96,8 @@ import {
   hasDisplayableExperimentMetrics,
 } from "@/lib/training/experimentBuilder";
 import { PptMappingSection, V1ExtraIndicatorsSection } from "@/components/training/ProductMetricsSection";
+import type { ComparisonRow } from "@/lib/training/comparisonTypes";
+import { ComparisonTable } from "@/components/training/ComparisonTable";
 
 type SelectedItem =
   | { kind: "slot"; slotId: ProductSlotId }
@@ -122,18 +124,6 @@ const MODEL_ARCHITECTURES = [
     desc: "로컬 패턴(CNN)과 시계열 흐름(LSTM)을 합친 검증된 구조입니다. 성능 비교 기준으로 둡니다.",
   },
 ];
-
-interface ComparisonRow {
-  id: string;
-  label: string;
-  productValue: number;
-  experimentValue: number;
-  productText: string;
-  experimentText: string;
-  diffText: string;
-  interpretation: string;
-  result: "better" | "worse" | "similar" | "neutral";
-}
 
 interface ExperimentListItem {
   run: AiRunSummary;
@@ -917,38 +907,6 @@ function getFinalJudgement(detail: AiRunDetail, rows: ComparisonRow[], category:
     return "품질 기준을 통과하지 못해 제품 화면에는 쓰지 않습니다.";
   }
   return "일부 지표는 제품 모델과 비슷했지만, 현재 제품 모델을 대체할 만큼 명확한 우위가 확인되지 않아 이전 실험으로 남겼습니다.";
-}
-
-function ComparisonTable({ rows }: { rows: ComparisonRow[] }) {
-  if (rows.length === 0) {
-    return <div className="compact-note">제품 기준 미확정 상태입니다.</div>;
-  }
-  return (
-    <div className="comparison-table-wrap">
-      <table className="comparison-table">
-        <thead>
-          <tr>
-            <th>항목</th>
-            <th>제품 모델</th>
-            <th>이 실험</th>
-            <th>차이</th>
-            <th>해석</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td>{row.label}</td>
-              <td>{row.productText}</td>
-              <td>{row.experimentText}</td>
-              <td>{row.diffText}</td>
-              <td>{row.interpretation}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 function ExperimentDetail({
