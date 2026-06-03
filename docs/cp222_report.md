@@ -106,7 +106,31 @@
 
 **해석**: 어제(2026-06-02) `build_v1_market_local` 같은 빌드 스크립트가 작업 트리에 modified 잔여 남겼고, 첫 pytest read access가 git stat 캐시를 무효화하면서 그제서야 modified로 노출됐을 가능성 가장 높음. **pytest 자체 부수효과 가능성 낮음** (재현 0/4). 차단 트리거 미달.
 
-**후속 권장**: CP223 시작 전 별도 작은 작업으로 `conftest.py`에 `backend/data/v1/*.parquet` SHA256 스냅샷 → 세션 종료 시 검증 + RuntimeError 가드 추가. 운영 데이터 보호 정책 명문화.
+**원인 추정의 한계**: 1차 색출은 의심 모듈을 특정하지 못한 채 끝났다. 재현 안 됨 = "원인 모름 + 재폭발 가능성 잔존". → **사용자 결정으로 영구 가드 도입**.
+
+### CP222 보강 — v1 parquet 영구 가드 (커밋 후행, 2026-06-03)
+
+**도입 동기**: 차단 트리거(런북 §0.8 "운영 parquet 덮어쓰기 금지")가 한 번 발동한 이상, 원인 모르고 진행하면 매 pytest 실행이 잠재 폭탄. CP223 baseline + CP230 screenshot이 그 위에 박혀 있어 오염 1회면 안전망 전체 신뢰도 손상.
+
+**구현 위치**: `backend/tests/conftest.py` (운영 코드 0 변경 원칙 유지).
+
+**설계**:
+- `@pytest.fixture(scope="session", autouse=True)` `_guard_v1_parquet_integrity`.
+- **세션 시작**: `backend/data/v1/*.parquet` 각 파일의 SHA256 박제.
+- **세션 종료 (yield 후)**: SHA256 재비교.
+- **변경 감지 시**: `git checkout -- <파일>` 즉시 복원 + `sys.__stderr__`로 경고 출력(pytest stdout 캡처 우회). 어떤 테스트가 어떤 경로로 만져도 자동 복원.
+- **복원 실패 시**: 차단 트리거 — `git status backend/data/v1/`가 dirty로 남아 즉시 발견.
+
+**검증 (가드 적용 후 실측)**:
+- `pytest backend/tests --continue-on-collection-errors -q`: **87 passed / 11 failed / 1 error** (CP223 baseline 동일, 회귀 0).
+- 가드 경고 출력: **0 건** (이번 실행에서 오염 없음).
+- `git status --porcelain backend/data/v1/`: **빈 출력** (clean).
+- 가드는 박혀 있어 다음 어떤 pytest 실행에서 오염 발생하면 자동 복원 + 경고.
+
+**효과**:
+- 런북 §0.8 영구 보장. 어떤 테스트가 운영 v1 parquet를 만져도 즉시 원복.
+- "원인 모름" 상태에서 분리 리팩토링(CP225+) 시작 가능. 안전망 신뢰도 회복.
+- CP223 9 snapshot baseline의 입력 데이터 무결성 영구 보호.
 
 ---
 

@@ -39,7 +39,16 @@
 
 ## 후속
 
-- **CP223**: 백엔드 characterization snapshot (syrupy / snaptol 택1).
+- **CP223**: 백엔드 characterization snapshot (syrupy / snaptol 택1) — 채택: syrupy.
 - **CP224a**: requirements 버전 핀 강화.
 - **CP224b**: ruff 안전 자동수정 적용 (UP, I001, F401 위주).
-- 별도: pytest 후 v1 parquet hash 검증 conftest (운영 데이터 보호 가드, CP223 직전 권장).
+
+## 보강 — v1 parquet 영구 가드 (2026-06-03 후행)
+
+CP222 Step 5 직후 운영 v1 parquet 2개가 modified로 노출된 사건(런북 §0.8 위반 잠재) 1차 색출이 의심 모듈을 특정하지 못했다(재현 0/4 in 사후 검증). 사용자 결정으로 `backend/tests/conftest.py`에 `_guard_v1_parquet_integrity` session-scoped autouse fixture 추가:
+
+- 세션 시작 SHA256 박제 → 세션 종료 재비교 → 변경 시 `git checkout -- <파일>` 즉시 복원 + `sys.__stderr__` 경고.
+- 운영 코드 0 변경. conftest만.
+- 가드 적용 후 검증: `pytest backend/tests` 87 passed (CP223 baseline 동일), git status backend/data/v1/ clean, 오염 0건.
+
+이 가드는 "원인 모름 상태에서도 안전망 신뢰도 회복" 목적. CP223 9 snapshot baseline 입력 데이터 무결성 영구 보호.
