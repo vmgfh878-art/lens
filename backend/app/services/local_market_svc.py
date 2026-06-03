@@ -4,6 +4,7 @@ v1 local-parquet 모드용 market 데이터 서빙.
 backend/data/v1/market_*.parquet 를 lazy-load 해서 prices / indicators / stocks 응답 생성.
 Supabase 미구성 시 api_service 가 이쪽으로 폴백.
 """
+
 from __future__ import annotations
 
 import math
@@ -12,8 +13,15 @@ from threading import Lock
 from typing import Any
 
 import pandas as pd
+from app.schemas import frames as _frames
 
 _BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
+
+# CP227 — read 경계 dtype 계약 검증 (CP214 회귀 방지).
+_FILE_MODELS = {
+    "market_prices_1d.parquet": _frames.MarketPrices1d,
+    "market_indicators_1d.parquet": _frames.MarketIndicators1d,
+}
 
 _PRICES_1D: pd.DataFrame | None = None
 _PRICES_1W: pd.DataFrame | None = None
@@ -26,6 +34,9 @@ def _load(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None
     df = pd.read_parquet(path)
+    model = _FILE_MODELS.get(path.name)
+    if model is not None:
+        df = _frames.validate(model, df, name=path.name)
     if "ticker" in df.columns:
         df["ticker"] = df["ticker"].astype(str).str.upper()
     if "date" in df.columns:
@@ -143,7 +154,9 @@ def fetch_price_rows_local(ticker: str, *, start: str, end: str) -> list[dict]:
     return _records(sub[["date", "open", "high", "low", "close", "volume"]].copy())
 
 
-def fetch_indicator_rows_local(ticker: str, *, timeframe: str = "1D", limit: int = 300) -> list[dict]:
+def fetch_indicator_rows_local(
+    ticker: str, *, timeframe: str = "1D", limit: int = 300
+) -> list[dict]:
     df = get_indicators_1d()
     if df is None:
         return []

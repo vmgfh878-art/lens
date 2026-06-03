@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Lock
 
 import pandas as pd
+from app.schemas import frames as _frames
 
 logger = logging.getLogger("lens.parquet_store")
 
@@ -28,6 +29,22 @@ _FILE_MAP: dict[str, str] = {
     "band_1d": "predictions_band_1d.parquet",
     "band_1w": "predictions_band_1w.parquet",
 }
+
+# CP227 — read 경계 dtype 계약 검증 (CP214 회귀 방지).
+# 매핑에 없는 슬롯은 검증을 거치지 않는다 (신규 슬롯 추가 시 의도적 통과).
+_SLOT_MODELS = {
+    "line_1d": _frames.LineDailyFrame,
+    "band_1d": _frames.Band1dFrame,
+    "band_1w": _frames.Band1wFrame,
+}
+
+
+def _validate_slot(name: str, df: pd.DataFrame) -> pd.DataFrame:
+    model = _SLOT_MODELS.get(name)
+    if model is None:
+        return df
+    return _frames.validate(model, df, name=name)
+
 
 _FRAMES: dict[str, pd.DataFrame | None] = {}
 _LOCK = Lock()
@@ -54,6 +71,7 @@ def _load(name: str) -> pd.DataFrame | None:
         return None
     mb_disk = path.stat().st_size / 1024 / 1024
     df = pd.read_parquet(path)
+    df = _validate_slot(name, df)
     df = _compress_strings(df)
     mb_mem = df.memory_usage(deep=True).sum() / 1024 / 1024
     logger.info("loaded parquet %s (%.1f MB disk → %.1f MB memory)", name, mb_disk, mb_mem)

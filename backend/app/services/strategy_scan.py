@@ -115,6 +115,13 @@ def _load_frame() -> pd.DataFrame:
     line = _align_date_dtype(line)
     band = _align_date_dtype(band)
 
+    # CP227 — 머지 직전 dtype 계약 강제. _align_date_dtype 이후 date 는 datetime64 여야
+    # 머지 키가 호환되며, 어긋나면 silent 머지 실패 (CP214 사고) 가 다시 들어온다.
+    for _nm, _f in (("price", price), ("indicators", indicators), ("line", line), ("band", band)):
+        assert pd.api.types.is_datetime64_any_dtype(
+            _f["date"]
+        ), f"{_nm}.date not datetime before merge"
+
     frame = price.merge(
         indicators[
             [
