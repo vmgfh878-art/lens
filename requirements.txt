@@ -1,3 +1,26 @@
+# Lens dev / training (ai/) reproducibility manifest.
+# Deploy (render) uses backend/requirements.txt; this file is for
+# training, HPO, and statistical evaluation only.
+# Truth source for versions: docs/cp224a_venv_freeze.txt (.venv freeze,
+# Python 3.10.0).
+
+# torch is a CUDA build (+cu128 local label) and cannot be pinned via
+# PyPI. Install separately:
+#   https://pytorch.org/get-started/locally/
+# (5060 Ti sm_120 -> cu128, torch>=2.7 recommended).
+# Currently verified: torch==2.11.0+cu128 / torchvision==0.26.0+cu128.
+
+# Numeric core
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.15.3
+pyarrow==16.1.0
+
+# HPO / plotting (existing pins kept)
 optuna==4.8.0
 optuna-dashboard==0.20.0
 matplotlib==3.10.9
+
+# Note: scikit-learn / statsmodels / arch are NOT used in ai/ (grep
+# confirmed 0 import sites). backend/requirements.txt keeps scikit-learn
+# and statsmodels for legacy reasons -- not relevant to this dev manifest.
