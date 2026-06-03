@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import logging
 import os
+
+import structlog
 
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase
@@ -15,7 +16,7 @@ except ModuleNotFoundError:
     )
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 PRICE_COLUMN_NAMES = ["date", "open", "high", "low", "close", "volume"]
 PRICE_COLUMNS = "date, open, high, low, close, volume"

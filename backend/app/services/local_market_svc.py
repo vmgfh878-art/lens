@@ -13,7 +13,10 @@ from threading import Lock
 from typing import Any
 
 import pandas as pd
+import structlog
 from app.schemas import frames as _frames
+
+logger = structlog.get_logger("lens.local_market")
 
 _BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
 
@@ -32,6 +35,7 @@ _LOCK = Lock()
 
 def _load(path: Path) -> pd.DataFrame | None:
     if not path.exists():
+        logger.warning("local_market parquet missing", path=str(path))
         return None
     df = pd.read_parquet(path)
     model = _FILE_MODELS.get(path.name)

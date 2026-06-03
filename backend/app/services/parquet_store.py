@@ -10,14 +10,14 @@ share the same object reference.  Thread-safe via per-store Lock.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from threading import Lock
 
 import pandas as pd
+import structlog
 from app.schemas import frames as _frames
 
-logger = logging.getLogger("lens.parquet_store")
+logger = structlog.get_logger("lens.parquet_store")
 
 _BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
 
