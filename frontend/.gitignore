@@ -1,0 +1,8 @@
+# CP230 Playwright 잔여물 (실행마다 생성, 박제 대상 아님).
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Baseline screenshot은 커밋 대상 — ignore하지 말 것.
+# (tests/e2e/**/__screenshots__/*.png는 git 추적.)
