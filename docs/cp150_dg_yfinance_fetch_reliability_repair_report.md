@@ -126,7 +126,7 @@ append가 이미 2026-05-08까지 끝났기 때문에 no-new-day가 정상이다
 
 ## 8. EODHD 해지 가능 여부
 
-판정: **조건부 가능 후보로 상승**
+판정: 조건부 가능 후보로 상승
 
 이번 CP로 5티커 actual append와 1D/1W indicator refresh는 EODHD 없이 통과했다. 다만 해지 최종 판정 전에는 아래가 필요하다.
 

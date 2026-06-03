@@ -2,7 +2,7 @@
 
 ## 한 줄 결론
 
-최종 판정은 **WARN**이다. beta를 키우면 line 자체가 더 보수적으로 움직이고 false-safe가 줄어드는 신호는 확인됐다. 다만 PASS 기준인 false-safe 절대 감소 3.0pp에는 못 미쳤다. 가장 균형이 좋은 후보는 **beta_5**이고, 더 공격적으로 보면 **beta_7**도 Pareto 후보지만 fee retention이 0.80 아래로 내려간다.
+최종 판정은 WARN이다. beta를 키우면 line 자체가 더 보수적으로 움직이고 false-safe가 줄어드는 신호는 확인됐다. 다만 PASS 기준인 false-safe 절대 감소 3.0pp에는 못 미쳤다. 가장 균형이 좋은 후보는 beta_5이고, 더 공격적으로 보면 beta_7도 Pareto 후보지만 fee retention이 0.80 아래로 내려간다.
 
 ## 범위 준수
 
@@ -74,7 +74,7 @@ false-safe만 보면 beta_7_plus_atr_ratio가 2.33pp 감소로 가장 좋다. �
 
 7. 효과가 있다면 다음 CP는 seed stability인가, beta/ATR narrow sweep인가?
 
-seed stability로 바로 가기보다는 **beta narrow sweep**이 먼저다. beta_5와 beta_7 사이에서 trade-off가 생겼고, beta_5는 비용이 적고 beta_7은 risk 개선이 크다. 다음 후보는 beta 5/6/7, ATR 포함 여부, epochs 1~3을 좁게 비교하는 방식이 맞다.
+seed stability로 바로 가기보다는 beta narrow sweep이 먼저다. beta_5와 beta_7 사이에서 trade-off가 생겼고, beta_5는 비용이 적고 beta_7은 risk 개선이 크다. 다음 후보는 beta 5/6/7, ATR 포함 여부, epochs 1~3을 좁게 비교하는 방식이 맞다.
 
 8. 효과가 없다면 외부 데이터/밴드 중심 전략으로 가는 근거가 되는가?
 
