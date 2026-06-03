@@ -6,7 +6,6 @@ mypy==1.11.2
 pre-commit==3.8.0
 httpx==0.27.0          # FastAPI TestClient dependency (test_api.py uses fastapi.testclient).
 pandera==0.20.4        # CP223 dataframe schema snapshot candidate.
-# ML numeric snapshot libraries -- CP223 will pick one. Listed for reference only:
-#   - syrupy  (pytest plugin, serialized snapshot)
-#   - snaptol (numeric tolerance snapshot)
-# Not installed in CP222. CP223 will add the chosen one.
+# CP223 chose syrupy (PyPI snaptol unavailable). Float tolerance handled
+# by normalize_floats() helper in backend/tests/conftest.py.
+syrupy==5.3.1          # characterization snapshot (read-path API).
