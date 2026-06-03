@@ -21,8 +21,11 @@ docs/refactoring_master_plan.md
 !docs/cp216_2_significance/*.json
 # CP221~237 리팩토링 런북·지시서·보고서 (검증 대상이라 추적 필요)
 # 패턴: cp221~cp229 / cp230~cp237 (cp220 이전은 별도 정책으로 미추적 유지)
+# .md(보고서·지시서) + .txt(freeze 등 산출물).
 !docs/cp22[1-9]*.md
 !docs/cp23[0-7]*.md
+!docs/cp22[1-9]*.txt
+!docs/cp23[0-7]*.txt
 
 ai/cp*.py
 ai/tests/test_cp*.py
