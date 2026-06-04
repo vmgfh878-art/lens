@@ -9,11 +9,16 @@ repos:
         # pyproject.toml [tool.ruff.lint] select 그대로 유지.
         args: ["--fix", "--select=F401"]
       - id: ruff-format
-  # CP222 mypy baseline 1391 errors는 별도 정리 CP가 처리. hook은 잠시 비활성화.
-  # 활성 시 좁은 정리 CP의 commit이 무관 에러로 막힘 → 정책 보강 후 재활성화.
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.11.2
-  #   hooks:
-  #     - id: mypy
-  #       additional_dependencies: []
-  #       args: ["--config-file=pyproject.toml"]
+  # CP237 — mypy hook 복원 (CP224b 임시 비활성화 해제).
+  # CP222 baseline 1391 errors 가 pre-existing 이라 매 commit 을 자동으로
+  # 막으면 안 됨 → stages: [manual] 로 둠. 사용자 commit 시 자동 실행 X.
+  # 수동 / CI 실행 경로:
+  #   pre-commit run --hook-stage manual mypy -a
+  # CI (.github/workflows/ci.yml) 는 mypy backend ai 를 별도 step 으로 측정.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        stages: [manual]
+        additional_dependencies: []
+        args: ["--config-file=pyproject.toml"]
