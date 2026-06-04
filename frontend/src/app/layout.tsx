@@ -7,6 +7,7 @@ import "./styles/shell.css";
 import "./styles/stock.css";
 import "./styles/backtest.css";
 import "./styles/training.css";
+import "./styles/components.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
