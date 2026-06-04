@@ -5,7 +5,7 @@
   "asof_end": "2026-06-03",
   "row_count": 780309,
   "source": "v1_local_parquet",
-  "built_at": "2026-06-04T14:44:48.326927+00:00",
+  "built_at": "2026-06-04T23:59:09.217961+00:00",
   "cp": "CP212",
   "line_policy": "current_predictions_line_1d_serving_rows",
   "band_policy": "current_predictions_band_1d_serving_rows"
