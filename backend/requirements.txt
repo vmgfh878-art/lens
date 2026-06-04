@@ -16,3 +16,7 @@ wandb==0.19.11
 structlog==25.5.0
 asgi-correlation-id==5.0.0
 pydantic-settings==2.14.1
+
+# --- CP236b: Supabase 직접연결 async 준비. 결제 후 주석 해제 + 설치 ---
+# sqlalchemy[asyncio]==2.0.32
+# asyncpg==0.29.0
