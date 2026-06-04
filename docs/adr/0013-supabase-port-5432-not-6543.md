@@ -32,3 +32,12 @@ pooled 6543 (transaction mode) + asyncpg / asyncpg-style prepared statement 캐�
 ## 실행 안 함
 
 실연결 / asyncpg 도입 / SQLAlchemy 2.0 async 전환은 본 CP 범위 밖. CP236b/CP-RF-11에서 별도 처리. 본 ADR는 결제 후 활성 시점에 "왜 5432인가"를 코드/문서에서 즉시 찾을 수 있도록 박제하는 것이 목적.
+
+## N+1 & from_attributes (CP236c)
+
+직접연결 + ORM 도입 시 함께 적용될 데이터 로딩 규약은 `docs/db_repository_guide.md`에 박제. 요약:
+
+- 루프 안 쿼리 (N+1) 금지. REST는 `in_("col", values)` 배치, ORM은 `selectinload` / `joinedload`.
+- `selectinload` (1:N many) vs `joinedload` (to-one/소수) 선택 기준 명시.
+- Pydantic `from_attributes=True` 모델은 응답에 들어가는 관계를 반드시 eager load (`MissingGreenlet` 회피).
+- `backend/app/schemas/common.py` 현재 `from_attributes=False` (plain dict input) — 함정 영역 밖. 켜는 모델 신설 시 가이드 적용.
