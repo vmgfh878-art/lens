@@ -14,7 +14,7 @@ import "./styles/report-view.css";
 import "./styles/significance.css";
 import "./styles/reproducibility.css";
 import "./styles/experiment.css";
-import "./globals.css";
+import "./responsive.css";
 
 export const metadata: Metadata = {
   title: "Lens",
