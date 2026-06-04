@@ -1,0 +1,19 @@
+/* CP220 — model-role-card (사용 데이터 article 분리 후 모델 역할 풀폭) */
+.model-role-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.model-role-card h3 {
+  margin: 0 0 8px;
+  color: var(--fg1);
+  font-size: 15px;
+}
+.model-role-card p {
+  margin: 0;
+  color: var(--fg2);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
