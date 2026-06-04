@@ -13,6 +13,7 @@ import "./styles/report-archive.css";
 import "./styles/report-view.css";
 import "./styles/significance.css";
 import "./styles/reproducibility.css";
+import "./styles/experiment.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

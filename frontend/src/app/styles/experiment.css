@@ -1,0 +1,203 @@
+/* CP218 — 라인/밴드 정적 실험 타임라인 */
+.experiment-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.experiment-timeline--empty {
+  padding: 12px 0;
+}
+
+.experiment-timeline__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+
+.experiment-timeline__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.experiment-timeline__rail::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: -14px;
+  left: 50%;
+  width: 2px;
+  background: var(--border);
+  transform: translateX(-50%);
+}
+
+.experiment-timeline__item--last .experiment-timeline__rail::before {
+  display: none;
+}
+
+.experiment-timeline__dot {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.experiment-timeline__dot--baseline { background: #6b7280; }
+.experiment-timeline__dot--exploration { background: #7c3aed; }
+.experiment-timeline__dot--failure { background: #dc2626; }
+.experiment-timeline__dot--frozen { background: #374151; }
+.experiment-timeline__dot--shipped { background: #16a34a; }
+.experiment-timeline__dot--planning { background: #0891b2; }
+.experiment-timeline__dot--analysis { background: #d97706; }
+
+.experiment-timeline__card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: #fff;
+  overflow: hidden;
+}
+
+.experiment-timeline__item--failure .experiment-timeline__card {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: #fffafa;
+}
+.experiment-timeline__item--shipped .experiment-timeline__card {
+  border-color: rgba(22, 163, 74, 0.4);
+  background: #f4fbf6;
+}
+.experiment-timeline__item--frozen .experiment-timeline__card {
+  border-color: rgba(55, 65, 81, 0.4);
+}
+
+.experiment-timeline__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--fg-faint);
+  cursor: pointer;
+  list-style: none;
+}
+.experiment-timeline__summary::-webkit-details-marker { display: none; }
+
+.experiment-timeline__card[open] > .experiment-timeline__summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.experiment-timeline__chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--fg-faint);
+  border-bottom: 2px solid var(--fg-faint);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.experiment-timeline__card[open] > .experiment-timeline__summary > .experiment-timeline__chevron {
+  transform: rotate(45deg);
+}
+
+.experiment-timeline__cp {
+  color: var(--fg1);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.experiment-timeline__sub {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  flex: 0 0 auto;
+}
+
+.experiment-timeline__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: rgba(107, 114, 128, 0.12);
+  color: #374151;
+  flex: 0 0 auto;
+}
+
+.experiment-timeline__badge--baseline { background: rgba(107, 114, 128, 0.14); color: #374151; }
+.experiment-timeline__badge--exploration { background: rgba(124, 58, 237, 0.12); color: #6d28d9; }
+.experiment-timeline__badge--failure { background: rgba(220, 38, 38, 0.12); color: #b91c1c; }
+.experiment-timeline__badge--frozen { background: rgba(55, 65, 81, 0.18); color: #1f2937; }
+.experiment-timeline__badge--shipped { background: rgba(22, 163, 74, 0.16); color: #15803d; }
+.experiment-timeline__badge--planning { background: rgba(8, 145, 178, 0.14); color: #0e7490; }
+.experiment-timeline__badge--analysis { background: rgba(217, 119, 6, 0.14); color: #b45309; }
+
+.experiment-timeline__timeframe {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(15, 23, 42, 0.06);
+  color: #1f2937;
+  font-family: var(--mono, ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", monospace);
+  flex: 0 0 auto;
+}
+.experiment-timeline__timeframe--1D { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+.experiment-timeline__timeframe--1W { background: rgba(168, 85, 247, 0.12); color: #7e22ce; }
+.experiment-timeline__timeframe--both { background: rgba(75, 85, 99, 0.15); color: #1f2937; }
+
+.experiment-timeline__heading {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg1);
+  line-height: 1.35;
+}
+
+.experiment-timeline__body-wrap {
+  padding: 10px 14px 12px;
+}
+
+.experiment-timeline__body {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--fg1);
+  line-height: 1.5;
+}
+
+.experiment-timeline__body > div {
+  display: contents;
+}
+
+.experiment-timeline__body dt {
+  color: var(--fg-faint);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.experiment-timeline__body dd {
+  margin: 0 0 6px 0;
+  color: var(--fg1);
+  word-break: keep-all;
+}
+
