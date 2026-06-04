@@ -11,6 +11,7 @@ import "./styles/components.css";
 import "./styles/report-model-role-card.css";
 import "./styles/report-archive.css";
 import "./styles/report-view.css";
+import "./styles/significance.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
