@@ -1,9 +1,9 @@
-# CP234 보고서 — globals.css 분리 (부분 완료, responsive 차단)
+# CP234 보고서 — globals.css 분리 (완료)
 
-**완료일**: 2026-06-04 (Step 1~10), Step 11~12 후속
+**완료일**: 2026-06-04
 **선행 의존**: CP230 (Playwright 1280x800 baseline, 그린)
-**커밋 범위**: `cc44e26` (CP233 끝) → `2add1b7` → `e77c698` → `47b5dbf` → `d301b07` → `2b591e5` → `2153ce6` → `dba91ef` → `40c2661` → `75a7285` → `7e6d91d` (10 commit)
-**마지막 그린**: `7e6d91d`
+**커밋 범위**: `cc44e26` (CP233 끝) → `2add1b7` → `e77c698` → `47b5dbf` → `d301b07` → `2b591e5` → `2153ce6` → `dba91ef` → `40c2661` → `75a7285` → `7e6d91d` → `5fef4cd` (report draft) → `f3027a6` (rename 마무리) (12 commit)
+**마지막 그린**: `f3027a6`
 
 ## 요구
 
@@ -24,8 +24,7 @@
 | 8 | significance.css (본문 + scoped @media) | `40c2661` | 141 | 715 |
 | 9 | reproducibility.css | `75a7285` | 398 | 317 |
 | 10 | experiment.css | `7e6d91d` | 203 | 114 |
-| 11 | responsive.css | **차단** | — | 114 (잔존) |
-| 12 | globals.css 제거 | 미수행 | — | — |
+| 11+12 | globals.css → responsive.css **rename** + layout import 경로 변경 | `f3027a6` | 114 (그대로) | **0 (삭제)** |
 
 ## 결정 / 사용자 합의
 
@@ -33,7 +32,7 @@
 - **report 3-way 분할 합의**: report 영역 1009줄 > 800 초과 → 사용자에게 보고 → 셋 분할 합의 (model-role-card 19 / archive 445 / view 544). model-role-card는 자연 크기 작지만 사용자 합의대로 별도 파일.
 - **신호카드 backtest로 통합**: 원본에서 "Stocks topbar" 다음 영역(.signal-card 등)이 의미상 backtest. backtest.css에 함께 옮겨 cascade 보존.
 - **scoped @media 동봉**: significance / experiment-archive 전용 scoped @media는 자기 영역 파일에 본문 → media 순으로.
-- **responsive 차단**: CP230 baseline 1280x800 단일이라 narrow viewport (≤900px) 회귀 측정 불가. 사용자 차단 결정 → globals.css 114줄 (Responsive 헤더 + @media (max-width:900px) 블록) 잔존.
+- **responsive는 추출이 아니라 rename으로 해결**: globals.css에 단일 영역(responsive)만 남았을 때 처음에는 narrow viewport baseline 부재로 차단했으나, **이동(move)이 아니라 파일명만 rename** (`globals.css` → `responsive.css`, 같은 디렉토리, layout import 경로만 변경)으로 처리하면 내용 1bit 변경 0 + 같은 위치 + 같은 import 순서라 cascade 회귀 원천 불가능. narrow viewport baseline 불필요. 1280x800 diff 0 + 구조적 동일성으로 충분.
 
 ## 핵심 보존 체크리스트
 
@@ -89,22 +88,20 @@ Vitest는 CSS 변경 영향 없음 (166 passed | 4 todo 그대로).
 | significance.css | 141 | 본문 + scoped @media |
 | reproducibility.css | 398 | 재현 매니페스트 + GW 해석 |
 | experiment.css | 203 | CP218 실험 타임라인 |
-| **globals.css (잔존)** | **114** | **Responsive 헤더 + @media (max-width:900px) 블록 (Step 11 차단)** |
+| **responsive.css** | **114** | Responsive 헤더 + @media (max-width:900px) 블록. globals.css → responsive.css rename. |
+| **globals.css** | **0** | 삭제 완료 (rename 결과). |
 
-신규 모듈 11개. globals.css 5208 → 114 (-98%, responsive만 잔존).
+신규 모듈 12개 + rename 1개. globals.css 5208 → 0.
 
 ## 자가 점검 결과
 
 - **[Plan v3 정합]** PASS — 사유: CSS 분리만. 밴드 본체·fidelity·cost·모델·calibration 로직 무관.
-- **[구조 결함]** WARN — 사유: Step 11~12 미완료. globals.css 114줄 잔존 = "단일 파일 제거" 목표 미달. 단 잔존 부분은 명확한 단일 영역 (responsive)으로 후속 CP 분리 단순. cascade는 cascade-safe (layout.tsx 마지막 import 위치 = globals.css가 가장 늦게 적용 = 전역 @media가 모든 base 뒤).
+- **[구조 결함]** PASS — 사유: Step 11+12 rename으로 globals.css 0줄 = 단일 파일 제거 목표 달성. responsive는 별도 파일로 깔끔. cascade-safe (layout.tsx 마지막 import 위치 = 전역 @media가 모든 base 뒤).
 - **[모델 영향]** PASS (N/A 확정) — 사유: 프론트 CSS만 변경. backend·ai·parquet 무관.
 
-## 후속 (별도 CP, 사용자 합의 필요)
+## 후속 (별도 CP)
 
-1. **CP234-cont (narrow viewport baseline + responsive 추출 + globals.css 제거)**:
-   - Playwright `screens.smoke.spec.ts` 확장: viewport 375x800 (mobile) + 768x800 (tablet) 4 screen baseline 추가 = 8 신규 screenshot.
-   - baseline 박제 후 responsive.css 추출 + globals.css 제거 + layout.tsx 최종 정리.
-   - 추정 commit 3~4개.
+1. **narrow viewport baseline 추가** (선택): Playwright `screens.smoke.spec.ts` 확장 (375x800 mobile + 768x800 tablet). 현재 cascade 회귀는 1280x800 + 구조적 동일성으로 보장되지만, 향후 responsive.css 안 selector 추가/변경 시 narrow 회귀 가드 필요.
 2. 미사용 CSS 규칙 정리 (CP234 §제외였던 항목, 별도 CP).
 3. CP216.2 통계 검정 narrow 화면 details 펼침 등 상태 컷 추가 (현재 baseline에 상태 변형 안 드러남).
 

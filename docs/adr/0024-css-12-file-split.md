@@ -1,6 +1,6 @@
-# ADR-0024: globals.css 5208줄을 12파일로 분리 (responsive 미완)
+# ADR-0024: globals.css 5208줄을 12파일로 분리 (완료)
 
-Status: Partially accepted (10 of 12 regions extracted; responsive blocked)
+Status: Accepted
 Date: 2026-06-04
 CP: CP234
 
@@ -38,10 +38,10 @@ base → shell → stock → backtest → training → components
 
 `globals.css`에 `@import "./styles/base.css"; ...` 12줄 두는 안. CSS `@import`는 런타임 순차 페치 (Next 빌드에서 인라인되긴 하지만 권장 안 함). layout.tsx 다중 import가 표준.
 
-## 미완 사유 — responsive
+## responsive 마무리 — rename으로 해결
 
-전역 `@media (max-width:900px)` 블록 (114줄, globals.css에 잔존)이 stock/training/report/backtest/experiment/components 클래스를 한꺼번에 override. 회귀를 잡으려면 narrow viewport screenshot baseline 필수. **CP230 baseline은 viewport 1280x800 단일이라 ≤900px 컷 부재**. 사용자 명시 차단 트리거 ("narrow viewport baseline 없으면 차단 보고") 발동 → Step 11 + Step 12 미수행. 후속 CP에서 narrow viewport baseline (375x800, 768x800) 추가 후 responsive.css 추출 + globals.css 제거 + layout.tsx 최종 정리.
+전역 `@media (max-width:900px)` 블록 (114줄)은 globals.css가 단일 영역만 남았을 때 처음에는 narrow viewport baseline 부재로 "추출" 안전성을 못 보장하는 듯 보였다. 그러나 결국 cascade가 깨질 가능성은 **이동(move)이 동반된 변경**일 때만 생긴다. 사용자 통찰: globals.css에 남은 114줄을 **다른 파일로 옮기는 게 아니라 파일명만 rename** (`globals.css` → `responsive.css`)하고 layout.tsx의 import 경로만 바꾸면 — 내용 1 bit 변경 0 + 같은 디렉토리 + import 순서상 동일 위치 — **cascade 회귀는 원천 불가능**. 따라서 narrow viewport baseline은 필요 없다. 1280x800 Playwright diff 0 + 구조적 동일성으로 충분.
 
 ## screenshot-gated Strangler
 
-10 Step 모두 매 단계에서 `npx tsc --noEmit` 0 + Playwright 4 screenshot (chromium, 1280x800, locale ko-KR) diff 0 그린 → 1280x800 viewport 회귀 0. narrow viewport 회귀는 측정 불가 (후속 CP).
+10 Step (Step 1~10) + Step 11+12 (rename) 모두 매 단계에서 `npx tsc --noEmit` 0 + Playwright 4 screenshot (chromium, 1280x800, locale ko-KR) diff 0 그린. globals.css 5208 → 0. 최종 13개 파일 (tokens.css + styles/12 + responsive.css).
