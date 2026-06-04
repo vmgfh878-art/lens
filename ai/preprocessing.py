@@ -24,10 +24,23 @@ if str(PROJECT_ROOT) not in sys.path:
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-from backend.app.services.feature_svc import FEATURE_COLUMNS as SOURCE_FEATURE_COLUMNS, PRICE_DERIVED_FEATURE_COLUMNS, REQUIRED_FEATURE_COLUMNS, build_price_features, normalize_timeframe, resample_price_frame  # noqa: E402
+from backend.app.services.feature_svc import (
+    FEATURE_COLUMNS as SOURCE_FEATURE_COLUMNS,
+    PRICE_DERIVED_FEATURE_COLUMNS,
+    REQUIRED_FEATURE_COLUMNS,
+    build_price_features,
+    normalize_timeframe,
+    resample_price_frame,
+)  # noqa: E402
 from backend.collector.repositories.base import fetch_frame  # noqa: E402
-from backend.collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame  # noqa: E402
-from backend.collector.sources.market_data_providers import normalize_provider_name, provider_adjustment_policy  # noqa: E402
+from backend.collector.repositories.local_snapshots import (
+    local_snapshots_required,
+    read_snapshot_frame,
+)  # noqa: E402
+from backend.collector.sources.market_data_providers import (
+    normalize_provider_name,
+    provider_adjustment_policy,
+)  # noqa: E402
 from ai.targets import build_target_array, normalize_target_type  # noqa: E402
 from ai.splits import (  # noqa: E402
     CalendarSplitDatePlan,
@@ -179,9 +192,9 @@ class SequenceDataset(Dataset):
         future_start = end_idx + 1
         future_end = future_start + self.horizon
 
-        features = torch.from_numpy(
-            ticker_array["features"][start_idx : end_idx + 1]
-        ).to(dtype=torch.float32)
+        features = torch.from_numpy(ticker_array["features"][start_idx : end_idx + 1]).to(
+            dtype=torch.float32
+        )
         if self.mean is not None and self.std is not None:
             features = (features - self.mean.view(1, -1)) / self.std.view(1, -1)
 
@@ -203,9 +216,9 @@ class SequenceDataset(Dataset):
                 target_type=self.band_target_type,
             )
         ).to(dtype=torch.float32)
-        raw_future_returns = torch.from_numpy(
-            np.asarray(future_returns_np, dtype="float32")
-        ).to(dtype=torch.float32)
+        raw_future_returns = torch.from_numpy(np.asarray(future_returns_np, dtype="float32")).to(
+            dtype=torch.float32
+        )
 
         if self.include_future_covariate:
             future_covariates = torch.from_numpy(
@@ -361,6 +374,17 @@ def _postgres_dsn() -> str | None:
         return None
     port = os.environ.get("SUPABASE_DB_PORT") or os.environ.get("DB_PORT", "5432")
     sslmode = os.environ.get("DB_SSLMODE", "require")
+    # CP236a — pooled 6543 (transaction mode) + asyncpg/psycopg2 = prepared-statement 함정.
+    # 직접연결 5432 권장 (ADR-0013). 6543 유지 시 NullPool + statement_cache_size=0 필요.
+    if str(port) == "6543":
+        import warnings
+
+        warnings.warn(
+            "SUPABASE_DB_PORT=6543 (transaction pooled). 직접연결 5432 권장. "
+            "6543 유지 시 NullPool + statement_cache_size=0 필요 (CP236a / ADR-0013).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}?sslmode={sslmode}"
 
 
@@ -369,6 +393,8 @@ def _postgres_engine():
     if dsn is None:
         raise RuntimeError("Postgres 연결 정보가 없습니다.")
     if dsn not in _ENGINE_CACHE:
+        # CP236a: 6543(pooled) 전환 시 create_engine(dsn, poolclass=NullPool,
+        # connect_args=recommended_connect_args(port)). 현재 5432 direct 기본 풀 유지.
         _ENGINE_CACHE[dsn] = create_engine(dsn)
     return _ENGINE_CACHE[dsn]
 
@@ -422,7 +448,9 @@ def _normalized_tickers(
     return ticker_df["ticker"].astype(str).str.upper().tolist()
 
 
-def build_calendar_feature_frame(dates: pd.Series | pd.Index | list[str] | list[pd.Timestamp]) -> pd.DataFrame:
+def build_calendar_feature_frame(
+    dates: pd.Series | pd.Index | list[str] | list[pd.Timestamp],
+) -> pd.DataFrame:
     """날짜만으로 계산 가능한 결정론적 캘린더 피처를 만든다."""
     date_index = pd.to_datetime(pd.Index(dates))
     weekday = date_index.weekday.to_numpy()
@@ -431,7 +459,9 @@ def build_calendar_feature_frame(dates: pd.Series | pd.Index | list[str] | list[
     month_angle = 2.0 * math.pi * month / 12.0
 
     month_end = pd.DatetimeIndex([timestamp + pd.offsets.BMonthEnd(0) for timestamp in date_index])
-    quarter_end = pd.DatetimeIndex([timestamp + pd.offsets.BQuarterEnd(0) for timestamp in date_index])
+    quarter_end = pd.DatetimeIndex(
+        [timestamp + pd.offsets.BQuarterEnd(0) for timestamp in date_index]
+    )
 
     def _business_days_until(targets: pd.DatetimeIndex) -> np.ndarray:
         values = []
@@ -452,7 +482,11 @@ def build_calendar_feature_frame(dates: pd.Series | pd.Index | list[str] | list[
             "month_cos": np.cos(month_angle).astype("float32"),
             "is_month_end": (month_end_offset <= 4).astype("float32"),
             "is_quarter_end": (quarter_end_offset <= 4).astype("float32"),
-            "is_opex_friday": ((weekday == 4) & (date_index.day.to_numpy() >= 15) & (date_index.day.to_numpy() <= 21)).astype("float32"),
+            "is_opex_friday": (
+                (weekday == 4)
+                & (date_index.day.to_numpy() >= 15)
+                & (date_index.day.to_numpy() <= 21)
+            ).astype("float32"),
         },
         index=date_index,
     )
@@ -484,7 +518,9 @@ def _fetch_training_frames_via_postgres(
         indicator_meta_columns = [
             column for column in ("source", "provider") if column in indicator_columns
         ]
-        indicator_meta_select = f", {', '.join(indicator_meta_columns)}" if indicator_meta_columns else ""
+        indicator_meta_select = (
+            f", {', '.join(indicator_meta_columns)}" if indicator_meta_columns else ""
+        )
         normalized_tickers = _normalized_tickers(
             conn,
             timeframe=timeframe,
@@ -515,7 +551,9 @@ def _fetch_training_frames_via_postgres(
                 ORDER BY ticker, date
             """.format(ticker_filter=ticker_filter, price_source_filter=price_source_filter)
 
-            feature_frames.append(pd.read_sql_query(indicator_query, conn, params={"timeframe": timeframe}))
+            feature_frames.append(
+                pd.read_sql_query(indicator_query, conn, params={"timeframe": timeframe})
+            )
             price_frames.append(pd.read_sql_query(price_query, conn))
 
     feature_df = pd.concat(feature_frames, ignore_index=True) if feature_frames else pd.DataFrame()
@@ -536,7 +574,9 @@ def _fetch_feature_index_frame_via_postgres(
         indicator_columns = _indicator_columns_via_postgres(conn)
         provider = resolved_market_data_provider(market_data_provider)
         price_source_filter = _price_source_filter_clause(price_columns, provider)
-        indicator_source_filter = _source_filter_clause(indicator_columns, provider, column="i.source")
+        indicator_source_filter = _source_filter_clause(
+            indicator_columns, provider, column="i.source"
+        )
         normalized_tickers = _normalized_tickers(
             conn,
             timeframe=timeframe,
@@ -635,12 +675,16 @@ def audit_feature_price_label_alignment(
     indicators["date"] = pd.to_datetime(indicators["date"], errors="coerce")
     indicators = indicators[indicators["timeframe"] == normalized_timeframe].dropna(subset=["date"])
     indicators = _filter_indicator_frame_by_provider(indicators, provider)
-    price_labels = _price_label_frame_from_price_data(_filter_price_frame_by_provider(price_df, provider), normalized_timeframe)
+    price_labels = _price_label_frame_from_price_data(
+        _filter_price_frame_by_provider(price_df, provider), normalized_timeframe
+    )
     joined = indicators.merge(price_labels, on=["ticker", "date"], how="inner")
     return {
         "timeframe": normalized_timeframe,
         "provider": provider,
-        "join_basis": "resampled_price_label_date" if normalized_timeframe != "1D" else "daily_price_date",
+        "join_basis": "resampled_price_label_date"
+        if normalized_timeframe != "1D"
+        else "daily_price_date",
         "indicator_label_count": int(len(indicators)),
         "price_label_count": int(len(price_labels)),
         "joined_label_count": int(len(joined)),
@@ -662,7 +706,9 @@ def _source_aware_feature_index_from_frames(
     indicators["ticker"] = indicators["ticker"].astype(str).str.upper()
     indicators["timeframe"] = indicators["timeframe"].astype(str).str.upper()
     indicators["date"] = pd.to_datetime(indicators["date"], errors="coerce")
-    indicators = indicators[indicators["timeframe"] == normalize_ai_timeframe(timeframe)].dropna(subset=["date"])
+    indicators = indicators[indicators["timeframe"] == normalize_ai_timeframe(timeframe)].dropna(
+        subset=["date"]
+    )
     indicators = _filter_indicator_frame_by_provider(indicators, provider)
 
     prices = _filter_price_frame_by_provider(price_df, provider)
@@ -715,20 +761,28 @@ def _local_limited_tickers(limit_tickers: int | None) -> list[str] | None:
     if limit_tickers is None:
         return None
     try:
-        known = _local_snapshot_frame("stock_info", columns="ticker", order_by="ticker", limit=limit_tickers)
+        known = _local_snapshot_frame(
+            "stock_info", columns="ticker", order_by="ticker", limit=limit_tickers
+        )
     except FileNotFoundError:
         known = None
     if known is not None and not known.empty and "ticker" in known.columns:
         return known["ticker"].astype(str).str.upper().tolist()
     try:
-        price_tickers = _local_snapshot_frame("price_data", columns="ticker", order_by="ticker", limit=None)
+        price_tickers = _local_snapshot_frame(
+            "price_data", columns="ticker", order_by="ticker", limit=None
+        )
     except FileNotFoundError:
         price_tickers = None
     if price_tickers is not None and not price_tickers.empty and "ticker" in price_tickers.columns:
-        values = sorted({str(ticker).upper() for ticker in price_tickers["ticker"].tolist() if str(ticker)})
+        values = sorted(
+            {str(ticker).upper() for ticker in price_tickers["ticker"].tolist() if str(ticker)}
+        )
         return values[:limit_tickers]
     if local_snapshots_required():
-        raise RuntimeError("로컬 snapshot 모드에서는 limit_tickers 해석을 위해 stock_info 또는 price_data parquet가 필요합니다.")
+        raise RuntimeError(
+            "로컬 snapshot 모드에서는 limit_tickers 해석을 위해 stock_info 또는 price_data parquet가 필요합니다."
+        )
     return None
 
 
@@ -794,7 +848,9 @@ def _fetch_training_frames_via_local(
         indicator_filters.append(("in", "ticker", normalized_tickers))
         price_filters.append(("in", "ticker", normalized_tickers))
 
-    indicator_columns = ",".join(["ticker", "timeframe", "date", *SOURCE_FEATURE_COLUMNS, "source", "provider"])
+    indicator_columns = ",".join(
+        ["ticker", "timeframe", "date", *SOURCE_FEATURE_COLUMNS, "source", "provider"]
+    )
     feature_df = _local_snapshot_frame(
         "indicators",
         columns=indicator_columns,
@@ -813,7 +869,9 @@ def _fetch_training_frames_via_local(
     )
     if feature_df is None or price_df is None:
         return None
-    return _filter_indicator_frame_by_provider(feature_df, provider), _filter_price_frame_by_provider(price_df, provider)
+    return _filter_indicator_frame_by_provider(
+        feature_df, provider
+    ), _filter_price_frame_by_provider(price_df, provider)
 
 
 def fetch_feature_index_frame(
@@ -862,7 +920,9 @@ def fetch_feature_index_frame(
         index_frame = local_index_frame
     else:
         if local_snapshots_required():
-            raise RuntimeError("로컬 snapshot 모드에서는 feature index 생성을 위해 price_data와 indicators parquet가 필요합니다.")
+            raise RuntimeError(
+                "로컬 snapshot 모드에서는 feature index 생성을 위해 price_data와 indicators parquet가 필요합니다."
+            )
         try:
             index_frame = _fetch_feature_index_frame_via_postgres(
                 timeframe=normalized_timeframe,
@@ -878,7 +938,9 @@ def fetch_feature_index_frame(
                 filters.append(("in", "ticker", normalized_tickers))
                 price_filters.append(("in", "ticker", normalized_tickers))
             elif limit_tickers is not None:
-                known = fetch_frame("stock_info", columns="ticker", order_by="ticker", limit=limit_tickers)
+                known = fetch_frame(
+                    "stock_info", columns="ticker", order_by="ticker", limit=limit_tickers
+                )
                 normalized_tickers = known["ticker"].astype(str).str.upper().tolist()
                 filters.append(("in", "ticker", normalized_tickers))
                 price_filters.append(("in", "ticker", normalized_tickers))
@@ -914,7 +976,9 @@ def fetch_feature_index_frame(
             timeframe=normalized_timeframe,
             source_data_hash=data_hash,
             feature_columns=["ticker", "timeframe", "date"],
-            ticker_count=int(index_frame["ticker"].nunique()) if not index_frame.empty and "ticker" in index_frame.columns else 0,
+            ticker_count=int(index_frame["ticker"].nunique())
+            if not index_frame.empty and "ticker" in index_frame.columns
+            else 0,
             date_min=date_min,
             date_max=date_max,
             provider=provider,
@@ -923,7 +987,9 @@ def fetch_feature_index_frame(
     return index_frame.copy()
 
 
-def _repair_price_feature_contract(feature_df: pd.DataFrame, price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+def _repair_price_feature_contract(
+    feature_df: pd.DataFrame, price_df: pd.DataFrame, timeframe: str
+) -> pd.DataFrame:
     if feature_df.empty or price_df.empty:
         return feature_df
     repaired_price_features = build_price_features(price_df=price_df, timeframe=timeframe)
@@ -935,8 +1001,14 @@ def _repair_price_feature_contract(feature_df: pd.DataFrame, price_df: pd.DataFr
     repaired["date"] = pd.to_datetime(repaired["date"])
     repaired_price_features = repaired_price_features.copy()
     repaired_price_features["date"] = pd.to_datetime(repaired_price_features["date"])
-    repaired = repaired.drop(columns=[column for column in PRICE_DERIVED_FEATURE_COLUMNS if column in repaired.columns])
-    repaired = repaired.merge(repaired_price_features[join_columns + PRICE_DERIVED_FEATURE_COLUMNS], on=join_columns, how="left")
+    repaired = repaired.drop(
+        columns=[column for column in PRICE_DERIVED_FEATURE_COLUMNS if column in repaired.columns]
+    )
+    repaired = repaired.merge(
+        repaired_price_features[join_columns + PRICE_DERIVED_FEATURE_COLUMNS],
+        on=join_columns,
+        how="left",
+    )
     repaired = repaired.dropna(subset=PRICE_DERIVED_FEATURE_COLUMNS).reset_index(drop=True)
     return repaired
 
@@ -957,7 +1029,9 @@ def fetch_price_frame_via_rest(
     if local_price_df is not None:
         return _filter_price_frame_by_provider(local_price_df, provider)
     if local_snapshots_required():
-        raise RuntimeError("로컬 snapshot 모드에서는 price_data Supabase REST 조회를 실행하지 않습니다.")
+        raise RuntimeError(
+            "로컬 snapshot 모드에서는 price_data Supabase REST 조회를 실행하지 않습니다."
+        )
     try:
         price_df = fetch_frame(
             "price_data",
@@ -1025,7 +1099,9 @@ def fetch_training_frames(
         local_loaded = True
     else:
         if local_snapshots_required():
-            raise RuntimeError("로컬 snapshot 모드에서는 feature 생성을 위해 price_data와 indicators parquet가 필요합니다.")
+            raise RuntimeError(
+                "로컬 snapshot 모드에서는 feature 생성을 위해 price_data와 indicators parquet가 필요합니다."
+            )
         try:
             feature_df, price_df = _fetch_training_frames_via_postgres(
                 timeframe=normalized_timeframe,
@@ -1045,7 +1121,9 @@ def fetch_training_frames(
             ticker_filters.append(("in", "ticker", normalized_tickers))
             price_filters.append(("in", "ticker", normalized_tickers))
         elif limit_tickers is not None:
-            known = fetch_frame("stock_info", columns="ticker", order_by="ticker", limit=limit_tickers)
+            known = fetch_frame(
+                "stock_info", columns="ticker", order_by="ticker", limit=limit_tickers
+            )
             selected = known["ticker"].astype(str).str.upper().tolist()
             ticker_filters.append(("in", "ticker", selected))
             price_filters.append(("in", "ticker", selected))
@@ -1080,7 +1158,9 @@ def fetch_training_frames(
             timeframe=normalized_timeframe,
             source_data_hash=data_hash,
             feature_columns=list(MODEL_FEATURE_COLUMNS),
-            ticker_count=int(feature_df["ticker"].nunique()) if not feature_df.empty and "ticker" in feature_df.columns else 0,
+            ticker_count=int(feature_df["ticker"].nunique())
+            if not feature_df.empty and "ticker" in feature_df.columns
+            else 0,
             date_min=date_min,
             date_max=date_max,
             provider=provider,
@@ -1113,7 +1193,9 @@ def resolved_market_data_source(market_data_provider: str | None = None) -> str:
     return resolved_market_data_provider(market_data_provider)
 
 
-def _resolved_fingerprint_tickers(tickers: list[str] | None, limit_tickers: int | None) -> list[str] | None:
+def _resolved_fingerprint_tickers(
+    tickers: list[str] | None, limit_tickers: int | None
+) -> list[str] | None:
     if tickers:
         return sorted({ticker.upper() for ticker in tickers})
     if limit_tickers is None:
@@ -1132,7 +1214,9 @@ def _resolved_fingerprint_tickers(tickers: list[str] | None, limit_tickers: int 
 
 def _ticker_universe_fingerprint(tickers: list[str] | None) -> str:
     payload = ["__all__"] if tickers is None else sorted({ticker.upper() for ticker in tickers})
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
 
 
 def _table_columns_via_postgres(conn, table_name: str) -> set[str]:
@@ -1182,7 +1266,13 @@ def _price_meta_query(
     if tickers:
         filters.append(_sql_filter_clause("ticker", tickers))
 
-    updated_expr = "MAX(updated_at)" if "updated_at" in columns else "MAX(created_at)" if "created_at" in columns else "NULL"
+    updated_expr = (
+        "MAX(updated_at)"
+        if "updated_at" in columns
+        else "MAX(created_at)"
+        if "created_at" in columns
+        else "NULL"
+    )
     query = """
         SELECT
             MIN(date) AS min_date,
@@ -1241,7 +1331,9 @@ def _price_meta_from_frame(frame: pd.DataFrame, provider: str) -> dict[str, Any]
         "max_updated_at": (
             str(frame["updated_at"].max())
             if "updated_at" in frame.columns
-            else str(frame["created_at"].max()) if "created_at" in frame.columns else None
+            else str(frame["created_at"].max())
+            if "created_at" in frame.columns
+            else None
         ),
         "data_checksum": hashlib.sha256(
             json.dumps(checksum_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -1252,7 +1344,9 @@ def _price_meta_from_frame(frame: pd.DataFrame, provider: str) -> dict[str, Any]
     }
 
 
-def _price_meta_via_local(provider: str, tickers: list[str] | None, timeframe: str | None = None) -> dict[str, Any] | None:
+def _price_meta_via_local(
+    provider: str, tickers: list[str] | None, timeframe: str | None = None
+) -> dict[str, Any] | None:
     filters: list[tuple[str, str, object]] = []
     if tickers:
         filters.append(("in", "ticker", tickers))
@@ -1307,8 +1401,7 @@ def _indicator_meta_query(
     if tickers:
         filters.append(_sql_filter_clause("ticker", tickers))
     checksum_terms = [
-        f"COALESCE({column}::text, '')"
-        for column in _indicator_checksum_columns(columns)
+        f"COALESCE({column}::text, '')" for column in _indicator_checksum_columns(columns)
     ]
     checksum_expr = ", ".join(["ticker", "date::text", *checksum_terms])
     query = """
@@ -1357,7 +1450,11 @@ def _indicator_meta_from_frame(frame: pd.DataFrame, provider: str) -> dict[str, 
     sort_columns = [column for column in ("ticker", "date") if column in working.columns]
     if sort_columns:
         working = working.sort_values(sort_columns)
-    checksum_columns = [column for column in _indicator_checksum_columns(set(working.columns)) if column in working.columns]
+    checksum_columns = [
+        column
+        for column in _indicator_checksum_columns(set(working.columns))
+        if column in working.columns
+    ]
     row_payloads: list[str] = []
     for _, row in working.iterrows():
         payload = {
@@ -1387,11 +1484,15 @@ def _indicator_meta_from_frame(frame: pd.DataFrame, provider: str) -> dict[str, 
     }
 
 
-def _indicator_meta_via_local(provider: str, timeframe: str, tickers: list[str] | None) -> dict[str, Any] | None:
+def _indicator_meta_via_local(
+    provider: str, timeframe: str, tickers: list[str] | None
+) -> dict[str, Any] | None:
     filters: list[tuple[str, str, object]] = [("eq", "timeframe", timeframe)]
     if tickers:
         filters.append(("in", "ticker", tickers))
-    columns = ",".join(["ticker", "date", "timeframe", "source", "provider", *INDICATOR_CHECKSUM_COLUMNS])
+    columns = ",".join(
+        ["ticker", "date", "timeframe", "source", "provider", *INDICATOR_CHECKSUM_COLUMNS]
+    )
     frame = _local_snapshot_frame(
         "indicators",
         columns=columns,
@@ -1405,11 +1506,15 @@ def _indicator_meta_via_local(provider: str, timeframe: str, tickers: list[str] 
     return _indicator_meta_from_frame(frame, provider)
 
 
-def _indicator_meta_via_rest(provider: str, timeframe: str, tickers: list[str] | None) -> dict[str, Any]:
+def _indicator_meta_via_rest(
+    provider: str, timeframe: str, tickers: list[str] | None
+) -> dict[str, Any]:
     filters: list[tuple[str, str, object]] = [("eq", "timeframe", timeframe)]
     if tickers:
         filters.append(("in", "ticker", tickers))
-    columns = ",".join(["ticker", "date", "timeframe", "source", "provider", *INDICATOR_CHECKSUM_COLUMNS])
+    columns = ",".join(
+        ["ticker", "date", "timeframe", "source", "provider", *INDICATOR_CHECKSUM_COLUMNS]
+    )
     try:
         frame = fetch_frame(
             "indicators",
@@ -1459,19 +1564,51 @@ def _apply_fingerprint_meta_payload(
     source_column_present: bool | None = None,
     updated_at_column_present: bool | None = None,
 ) -> None:
-    fingerprint_payload["date_range"]["price_min_date"] = None if pd.isna(_meta_value(price_meta, "min_date")) else str(_meta_value(price_meta, "min_date"))
-    fingerprint_payload["date_range"]["price_max_date"] = None if pd.isna(_meta_value(price_meta, "max_date")) else str(_meta_value(price_meta, "max_date"))
-    fingerprint_payload["date_range"]["indicator_min_date"] = None if pd.isna(_meta_value(indicator_meta, "min_date")) else str(_meta_value(indicator_meta, "min_date"))
-    fingerprint_payload["date_range"]["indicator_max_date"] = None if pd.isna(_meta_value(indicator_meta, "max_date")) else str(_meta_value(indicator_meta, "max_date"))
+    fingerprint_payload["date_range"]["price_min_date"] = (
+        None
+        if pd.isna(_meta_value(price_meta, "min_date"))
+        else str(_meta_value(price_meta, "min_date"))
+    )
+    fingerprint_payload["date_range"]["price_max_date"] = (
+        None
+        if pd.isna(_meta_value(price_meta, "max_date"))
+        else str(_meta_value(price_meta, "max_date"))
+    )
+    fingerprint_payload["date_range"]["indicator_min_date"] = (
+        None
+        if pd.isna(_meta_value(indicator_meta, "min_date"))
+        else str(_meta_value(indicator_meta, "min_date"))
+    )
+    fingerprint_payload["date_range"]["indicator_max_date"] = (
+        None
+        if pd.isna(_meta_value(indicator_meta, "max_date"))
+        else str(_meta_value(indicator_meta, "max_date"))
+    )
     fingerprint_payload["price_row_count"] = _meta_int(price_meta, "row_count")
     fingerprint_payload["price_ticker_count"] = _meta_int(price_meta, "ticker_count")
-    fingerprint_payload["price_max_updated_at"] = None if pd.isna(_meta_value(price_meta, "max_updated_at")) else str(_meta_value(price_meta, "max_updated_at"))
-    fingerprint_payload["price_data_checksum"] = None if pd.isna(_meta_value(price_meta, "data_checksum")) else str(_meta_value(price_meta, "data_checksum"))
+    fingerprint_payload["price_max_updated_at"] = (
+        None
+        if pd.isna(_meta_value(price_meta, "max_updated_at"))
+        else str(_meta_value(price_meta, "max_updated_at"))
+    )
+    fingerprint_payload["price_data_checksum"] = (
+        None
+        if pd.isna(_meta_value(price_meta, "data_checksum"))
+        else str(_meta_value(price_meta, "data_checksum"))
+    )
     fingerprint_payload["indicator_count"] = _meta_int(indicator_meta, "row_count")
     fingerprint_payload["indicator_ticker_count"] = _meta_int(indicator_meta, "ticker_count")
-    fingerprint_payload["indicator_value_checksum"] = None if pd.isna(_meta_value(indicator_meta, "value_checksum")) else str(_meta_value(indicator_meta, "value_checksum"))
-    fingerprint_payload["source_column_present"] = _meta_value(price_meta, "source_column_present", source_column_present)
-    fingerprint_payload["updated_at_column_present"] = _meta_value(price_meta, "updated_at_column_present", updated_at_column_present)
+    fingerprint_payload["indicator_value_checksum"] = (
+        None
+        if pd.isna(_meta_value(indicator_meta, "value_checksum"))
+        else str(_meta_value(indicator_meta, "value_checksum"))
+    )
+    fingerprint_payload["source_column_present"] = _meta_value(
+        price_meta, "source_column_present", source_column_present
+    )
+    fingerprint_payload["updated_at_column_present"] = _meta_value(
+        price_meta, "updated_at_column_present", updated_at_column_present
+    )
 
 
 def resolve_data_fingerprint(
@@ -1491,7 +1628,12 @@ def resolve_data_fingerprint(
         "ticker_universe_fingerprint": _ticker_universe_fingerprint(fingerprint_tickers),
         "ticker_universe_count": None if fingerprint_tickers is None else len(fingerprint_tickers),
         "ticker_universe_scope": "all" if fingerprint_tickers is None else "explicit_or_limited",
-        "date_range": {"price_min_date": None, "price_max_date": None, "indicator_min_date": None, "indicator_max_date": None},
+        "date_range": {
+            "price_min_date": None,
+            "price_max_date": None,
+            "indicator_min_date": None,
+            "indicator_max_date": None,
+        },
         "price_row_count": None,
         "price_ticker_count": None,
         "price_max_updated_at": None,
@@ -1504,7 +1646,9 @@ def resolve_data_fingerprint(
     }
 
     local_price_meta = _price_meta_via_local(provider, fingerprint_tickers, normalized_timeframe)
-    local_indicator_meta = _indicator_meta_via_local(provider, normalized_timeframe, fingerprint_tickers)
+    local_indicator_meta = _indicator_meta_via_local(
+        provider, normalized_timeframe, fingerprint_tickers
+    )
     if local_price_meta is not None and local_indicator_meta is not None:
         _apply_fingerprint_meta_payload(
             fingerprint_payload,
@@ -1515,7 +1659,9 @@ def resolve_data_fingerprint(
             json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()[:8]
     if local_snapshots_required():
-        raise RuntimeError("로컬 snapshot 모드에서는 source_data_hash 계산을 위해 price_data와 indicators parquet가 필요합니다.")
+        raise RuntimeError(
+            "로컬 snapshot 모드에서는 source_data_hash 계산을 위해 price_data와 indicators parquet가 필요합니다."
+        )
 
     try:
         engine = _postgres_engine()
@@ -1552,7 +1698,9 @@ def resolve_data_fingerprint(
             updated_at_column_present="updated_at" in price_columns,
         )
     except Exception:
-        indicator_meta = _indicator_meta_via_rest(provider, normalized_timeframe, fingerprint_tickers)
+        indicator_meta = _indicator_meta_via_rest(
+            provider, normalized_timeframe, fingerprint_tickers
+        )
         price_meta = _price_meta_via_rest(provider, fingerprint_tickers)
         _apply_fingerprint_meta_payload(
             fingerprint_payload,
@@ -1672,7 +1820,9 @@ def resolve_feature_cache_path(
         "tickers": [ticker.upper() for ticker in tickers] if tickers else None,
         "limit_tickers": limit_tickers,
     }
-    digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
     return CACHE_DIR / f"features_{timeframe}_{digest}_{data_hash}.pt"
 
 
@@ -1695,7 +1845,9 @@ def resolve_feature_index_cache_path(
         "market_data_source": resolved_market_data_source(provider),
         "provider_adjustment_policy": provider_adjustment_policy(provider),
     }
-    digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
     return CACHE_DIR / f"feature_index_{timeframe}_{digest}_{data_hash}.pt"
 
 
@@ -1742,7 +1894,9 @@ def resolve_prepared_splits_cache_key(
         "limit_tickers": limit_tickers,
         "min_fold_samples": min_fold_samples,
         "absolute_min_rows": absolute_min_rows_for_timeframe(normalized_timeframe),
-        "required_history_rows": required_history_rows(normalized_timeframe, seq_len, MAX_HORIZON_BY_TIMEFRAME[normalized_timeframe]),
+        "required_history_rows": required_history_rows(
+            normalized_timeframe, seq_len, MAX_HORIZON_BY_TIMEFRAME[normalized_timeframe]
+        ),
         "include_future_covariate": include_future_covariate,
         "line_target_type": normalize_target_type(line_target_type),
         "band_target_type": normalize_target_type(band_target_type),
@@ -1755,7 +1909,9 @@ def resolve_prepared_splits_cache_key(
         "provider_adjustment_policy": provider_adjustment_policy(provider),
         "ticker_registry": registry_payload,
     }
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def _build_target_frame(price_df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
@@ -1839,7 +1995,9 @@ def build_sequence_dataset(
     anchor_close_array = np.empty((total_samples,), dtype=np.float32)
     ticker_id_array = np.empty((total_samples,), dtype=np.int64)
     future_cov_dim = FUTURE_COVARIATE_DIM if include_future_covariate else 0
-    future_covariate_array = np.empty((total_samples, resolved_horizon, future_cov_dim), dtype=np.float32)
+    future_covariate_array = np.empty(
+        (total_samples, resolved_horizon, future_cov_dim), dtype=np.float32
+    )
 
     sample_cursor = 0
     for ticker, ticker_frame, _ in ticker_frames:
@@ -1878,7 +2036,9 @@ def build_sequence_dataset(
             )
             raw_future_return_array[sample_cursor] = future_returns
             anchor_close_array[sample_cursor] = anchor_close
-            ticker_id_array[sample_cursor] = lookup_id(ticker, ticker_registry) if ticker_registry is not None else 0
+            ticker_id_array[sample_cursor] = (
+                lookup_id(ticker, ticker_registry) if ticker_registry is not None else 0
+            )
             if include_future_covariate and calendar_values is not None:
                 future_covariate_array[sample_cursor] = calendar_values[future_start:future_end]
             metadata_rows.append(
@@ -1979,7 +2139,9 @@ def build_lazy_sequence_dataset(
                 if include_future_covariate
                 else None
             ),
-            "ticker_id": lookup_id(ticker_key, ticker_registry) if ticker_registry is not None else 0,
+            "ticker_id": lookup_id(ticker_key, ticker_registry)
+            if ticker_registry is not None
+            else 0,
         }
 
         sample_index = 0
@@ -2033,7 +2195,9 @@ def build_dataset_plan(
     normalized_split_mode = normalize_split_mode(split_mode)
     filtered = feature_df.copy()
     filtered["date"] = pd.to_datetime(filtered["date"])
-    filtered = filtered[filtered["timeframe"] == normalized_timeframe].sort_values(["ticker", "date"])
+    filtered = filtered[filtered["timeframe"] == normalized_timeframe].sort_values(
+        ["ticker", "date"]
+    )
     h_max = MAX_HORIZON_BY_TIMEFRAME[normalized_timeframe]
     absolute_min_rows = absolute_min_rows_for_timeframe(normalized_timeframe)
     required_rows = required_history_rows(normalized_timeframe, seq_len, h_max)
@@ -2088,7 +2252,11 @@ def build_dataset_plan(
 def split_sequence_dataset(
     dataset: SequenceDatasetBundle | SequenceDataset,
     ratios: tuple[float, float, float] = SPLIT_RATIO,
-) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset]:
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+]:
     frame = dataset.metadata.copy()
     frame["order_idx"] = range(len(frame))
     frame = frame.sort_values(["asof_date", "ticker"]).reset_index(drop=True)
@@ -2110,15 +2278,31 @@ def split_sequence_dataset(
 def apply_calendar_split_metadata(plan: DatasetPlan, calendar_plan: CalendarSplitDatePlan) -> None:
     metadata = calendar_plan.to_metadata()
     plan.split_mode = str(metadata["split_mode"])
-    plan.split_train_start_date = metadata["split_train_start_date"] if metadata["split_train_start_date"] else None
-    plan.split_train_end_date = metadata["split_train_end_date"] if metadata["split_train_end_date"] else None
-    plan.split_validation_start_date = metadata["split_validation_start_date"] if metadata["split_validation_start_date"] else None
-    plan.split_validation_end_date = metadata["split_validation_end_date"] if metadata["split_validation_end_date"] else None
-    plan.split_test_start_date = metadata["split_test_start_date"] if metadata["split_test_start_date"] else None
-    plan.split_test_end_date = metadata["split_test_end_date"] if metadata["split_test_end_date"] else None
+    plan.split_train_start_date = (
+        metadata["split_train_start_date"] if metadata["split_train_start_date"] else None
+    )
+    plan.split_train_end_date = (
+        metadata["split_train_end_date"] if metadata["split_train_end_date"] else None
+    )
+    plan.split_validation_start_date = (
+        metadata["split_validation_start_date"] if metadata["split_validation_start_date"] else None
+    )
+    plan.split_validation_end_date = (
+        metadata["split_validation_end_date"] if metadata["split_validation_end_date"] else None
+    )
+    plan.split_test_start_date = (
+        metadata["split_test_start_date"] if metadata["split_test_start_date"] else None
+    )
+    plan.split_test_end_date = (
+        metadata["split_test_end_date"] if metadata["split_test_end_date"] else None
+    )
     plan.purge_gap_trading_days = int(metadata["purge_gap_trading_days"])
-    plan.split_train_validation_gap_trading_days = int(metadata["split_train_validation_gap_trading_days"])
-    plan.split_validation_test_gap_trading_days = int(metadata["split_validation_test_gap_trading_days"])
+    plan.split_train_validation_gap_trading_days = int(
+        metadata["split_train_validation_gap_trading_days"]
+    )
+    plan.split_validation_test_gap_trading_days = int(
+        metadata["split_validation_test_gap_trading_days"]
+    )
     plan.split_unique_dates_train = int(metadata["split_unique_dates_train"])
     plan.split_unique_dates_validation = int(metadata["split_unique_dates_validation"])
     plan.split_unique_dates_test = int(metadata["split_unique_dates_test"])
@@ -2149,9 +2333,15 @@ def _split_date_overlap_count(
     val_bundle: SequenceDatasetBundle | SequenceDataset,
     test_bundle: SequenceDatasetBundle | SequenceDataset,
 ) -> int:
-    train_dates = set(pd.to_datetime(train_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
-    val_dates = set(pd.to_datetime(val_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
-    test_dates = set(pd.to_datetime(test_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist())
+    train_dates = set(
+        pd.to_datetime(train_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist()
+    )
+    val_dates = set(
+        pd.to_datetime(val_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist()
+    )
+    test_dates = set(
+        pd.to_datetime(test_bundle.metadata["asof_date"]).dt.strftime("%Y-%m-%d").tolist()
+    )
     return len((train_dates & val_dates) | (train_dates & test_dates) | (val_dates & test_dates))
 
 
@@ -2189,7 +2379,9 @@ def apply_legacy_split_metadata(
     plan.split_unique_dates_train = _unique_date_count(train_bundle)
     plan.split_unique_dates_validation = _unique_date_count(val_bundle)
     plan.split_unique_dates_test = _unique_date_count(test_bundle)
-    plan.cross_split_date_overlap_count = _split_date_overlap_count(train_bundle, val_bundle, test_bundle)
+    plan.cross_split_date_overlap_count = _split_date_overlap_count(
+        train_bundle, val_bundle, test_bundle
+    )
 
 
 def split_sequence_dataset_calendar_aligned(
@@ -2247,7 +2439,11 @@ def split_sequence_dataset_by_plan(
     *,
     split_specs: dict[str, Any],
     diagnostics: dict[str, Any] | None = None,
-) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset]:
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+]:
     metadata = dataset.metadata.copy()
     metadata["order_idx"] = range(len(metadata))
 
@@ -2335,7 +2531,9 @@ def _dataset_plan_diagnostics(
     return payload
 
 
-def fit_feature_stats(train_data: torch.Tensor | SequenceDataset) -> tuple[torch.Tensor, torch.Tensor]:
+def fit_feature_stats(
+    train_data: torch.Tensor | SequenceDataset,
+) -> tuple[torch.Tensor, torch.Tensor]:
     if isinstance(train_data, torch.Tensor):
         mean = train_data.mean(dim=(0, 1))
         std = train_data.std(dim=(0, 1)).clamp_min(1e-6)
@@ -2371,7 +2569,9 @@ def fit_feature_stats(train_data: torch.Tensor | SequenceDataset) -> tuple[torch
     return mean, std
 
 
-def apply_feature_stats(features: torch.Tensor, mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+def apply_feature_stats(
+    features: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+) -> torch.Tensor:
     return (features - mean.view(1, 1, -1)) / std.view(1, 1, -1)
 
 
@@ -2379,10 +2579,20 @@ def normalize_sequence_splits(
     train_bundle: SequenceDatasetBundle | SequenceDataset,
     val_bundle: SequenceDatasetBundle | SequenceDataset,
     test_bundle: SequenceDatasetBundle | SequenceDataset,
-) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, torch.Tensor, torch.Tensor]:
-    mean, std = fit_feature_stats(train_bundle.features if isinstance(train_bundle, SequenceDatasetBundle) else train_bundle)
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    mean, std = fit_feature_stats(
+        train_bundle.features if isinstance(train_bundle, SequenceDatasetBundle) else train_bundle
+    )
 
-    def _apply(bundle: SequenceDatasetBundle | SequenceDataset) -> SequenceDatasetBundle | SequenceDataset:
+    def _apply(
+        bundle: SequenceDatasetBundle | SequenceDataset,
+    ) -> SequenceDatasetBundle | SequenceDataset:
         if isinstance(bundle, SequenceDataset):
             return bundle.with_normalization(mean, std)
         return SequenceDatasetBundle(
@@ -2414,7 +2624,14 @@ def prepare_dataset_splits(
     ticker_registry_path: str | None = None,
     market_data_provider: str | None = None,
     split_mode: str = SPLIT_MODE_CALENDAR_ALIGNED,
-) -> tuple[SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, SequenceDatasetBundle | SequenceDataset, torch.Tensor, torch.Tensor, DatasetPlan]:
+) -> tuple[
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    SequenceDatasetBundle | SequenceDataset,
+    torch.Tensor,
+    torch.Tensor,
+    DatasetPlan,
+]:
     """현재 DB 기준으로 학습용 시퀀스와 분할 계획을 한 번에 준비한다."""
     normalized_timeframe = normalize_ai_timeframe(timeframe)
     provider = resolved_market_data_provider(market_data_provider)
@@ -2476,7 +2693,9 @@ def prepare_dataset_splits(
     )
     feature_df = feature_df[feature_df["ticker"].isin(plan.eligible_tickers)].copy()
     price_df = price_df[price_df["ticker"].isin(plan.eligible_tickers)].copy()
-    active_ticker_registry = ticker_registry or build_registry(plan.eligible_tickers, plan.timeframe)
+    active_ticker_registry = ticker_registry or build_registry(
+        plan.eligible_tickers, plan.timeframe
+    )
     dataset = build_lazy_sequence_dataset(
         feature_df=feature_df,
         price_df=price_df,
@@ -2495,11 +2714,13 @@ def prepare_dataset_splits(
         dataset=dataset,
     )
     if normalized_split_mode == SPLIT_MODE_CALENDAR_ALIGNED:
-        train_bundle, val_bundle, test_bundle, calendar_plan = split_sequence_dataset_calendar_aligned(
-            dataset,
-            purge_gap_trading_days=plan.h_max,
-            min_fold_samples=plan.min_fold_samples,
-            diagnostics=diagnostics,
+        train_bundle, val_bundle, test_bundle, calendar_plan = (
+            split_sequence_dataset_calendar_aligned(
+                dataset,
+                purge_gap_trading_days=plan.h_max,
+                min_fold_samples=plan.min_fold_samples,
+                diagnostics=diagnostics,
+            )
         )
         apply_calendar_split_metadata(plan, calendar_plan)
     else:

@@ -19,6 +19,17 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      # 직접 Postgres 연결(결제 후 활성). 포트는 5432(direct) — 6543(pooled) 금지. ADR-0013.
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_DB_PORT      # 5432 권장. 6543 금지(PgBouncer transaction mode).
+        sync: false
+      - key: SUPABASE_DB_USER
+        sync: false
+      - key: SUPABASE_DB_PASSWORD
+        sync: false
+      - key: SUPABASE_DB_NAME
+        sync: false
 
 # Cron 비활성 — v1 학교 데모는 로컬에서 parquet 빌드 + git push 로 갱신.
 # 필요 시 아래 cron 블록 다시 활성화하고 환경변수 채워주세요.

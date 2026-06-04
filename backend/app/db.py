@@ -5,6 +5,39 @@ from app.config import get_database_config
 from .core.exceptions import ConfigError, UpstreamUnavailableError
 from backend.collector.utils.network import sanitize_proxy_env
 
+# ──────────────────────────────────────────────────────────────────────
+# Supabase 연결 전략 정본 (CP236a, ADR-0013)
+#
+# 두 경로:
+# 1) REST (supabase-py, 본 모듈) — PostgREST over HTTP. 트랜잭션/풀링 함정 없음.
+# 2) 직접 Postgres (ai/preprocessing.py 의 SQLAlchemy psycopg2) — 함정 영역.
+#
+# 함정: pooled 6543 (Supavisor/PgBouncer transaction mode) + asyncpg/asyncpg-style
+# prepared statement 캐시 → `prepared statement "__asyncpg_..." already exists`.
+# 우리 규모 권장 해결: 직접연결 5432 (PgBouncer 우회). 불가피하면
+# NullPool + statement_cache_size=0 + prepared_statement_cache_size=0.
+#
+# 실연결/실연결 테스트는 사용자 Supabase Pro 결제 후 활성. 본 모듈은 그때까지
+# REST 전용이고, 아래 직접연결 골격 함수/상수는 호출자 없음 (미실행).
+# ──────────────────────────────────────────────────────────────────────
+
+# CP236a — 직접 Postgres 연결 설정 골격 (미사용·미실행, 결제 후 활성).
+DIRECT_DB_PORT_DEFAULT = "5432"  # direct connection (PgBouncer 우회 권장)
+POOLED_TXN_DB_PORT = "6543"  # transaction mode (Supavisor/PgBouncer) — asyncpg와 충돌
+APP_POOL_SIZE_PER_INSTANCE = 5  # PgBouncer 경유 시 인스턴스당 5~10 권장의 하한
+
+
+def recommended_connect_args(port: str) -> dict:
+    """포트별 안전 connect_args. 6543이면 prepared-statement 캐시를 끈다.
+
+    호출자 없음 (CP236a 골격). 결제 후 직접연결 도입 시 사용.
+    asyncpg 키 기준. psycopg2 환경에서는 무시되며 NullPool 병행 필요.
+    """
+    if str(port) == POOLED_TXN_DB_PORT:
+        return {"statement_cache_size": 0, "prepared_statement_cache_size": 0}
+    return {}
+
+
 load_dotenv()
 
 _client: Client | None = None
