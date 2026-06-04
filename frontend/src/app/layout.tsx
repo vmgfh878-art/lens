@@ -5,6 +5,7 @@ import ClarityInit from "./ClarityInit";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/stock.css";
+import "./styles/backtest.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
