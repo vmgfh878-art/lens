@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import ClarityInit from "./ClarityInit";
+import "./styles/base.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
