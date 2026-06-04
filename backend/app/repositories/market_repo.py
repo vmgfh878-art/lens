@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
-
 import structlog
 
+from app.config import get_market_config
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase
 
@@ -65,7 +64,7 @@ def resolve_market_data_provider(
         logger.warning(
             "market data source/provider가 명시되지 않아 MARKET_DATA_PROVIDER 기본값을 사용합니다."
         )
-    return _normalize_provider_name(os.environ.get("MARKET_DATA_PROVIDER", "yfinance"))
+    return _normalize_provider_name(get_market_config().market_data_provider)
 
 
 def _apply_source_filter(query, provider: str):

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
+from app.config import get_admin_config
 from app.core.http import success_response
 from app.db import supabase_is_configured
 from app.repositories.ai_repo import _load_mock
@@ -26,7 +27,8 @@ def _is_local_request(request: Request) -> bool:
 
 
 def _require_reload_allowed(request: Request, token: str | None) -> None:
-    expected = os.environ.get("LENS_ADMIN_RELOAD_TOKEN", "").strip()
+    cfg = get_admin_config()
+    expected = cfg.reload_token
     if expected:
         if token != expected:
             raise HTTPException(
@@ -35,12 +37,7 @@ def _require_reload_allowed(request: Request, token: str | None) -> None:
             )
         return
 
-    allow_local = os.environ.get("LENS_ALLOW_LOCAL_ADMIN_RELOAD", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    if allow_local and _is_local_request(request):
+    if cfg.allow_local_reload and _is_local_request(request):
         return
 
     raise HTTPException(

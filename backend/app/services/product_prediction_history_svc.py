@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from app.config import get_market_config
 from app.core.exceptions import UpstreamUnavailableError
 
 
@@ -35,7 +35,11 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 V1_SNAPSHOT_DIR = BACKEND_DIR / "data" / "v1"
 LEGACY_SNAPSHOT_DIR = ROOT_DIR / "data" / "parquet"
-DEFAULT_SNAPSHOT_DIR = V1_SNAPSHOT_DIR if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists() else LEGACY_SNAPSHOT_DIR
+DEFAULT_SNAPSHOT_DIR = (
+    V1_SNAPSHOT_DIR
+    if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists()
+    else LEGACY_SNAPSHOT_DIR
+)
 PRODUCT_HISTORY_PARQUET_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.parquet"
 PRODUCT_HISTORY_MANIFEST_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.manifest.json"
 PRODUCT_HISTORY_RESPONSE_SOURCE = "product_rolling_replay"
@@ -46,7 +50,7 @@ def _snapshot_dir() -> Path:
     # product history는 raw parquet가 아니라 serving snapshot을 우선 사용해야 한다.
     if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists():
         return V1_SNAPSHOT_DIR
-    override = os.environ.get("LENS_LOCAL_SNAPSHOT_DIR")
+    override = get_market_config().local_snapshot_dir
     if override:
         override_path = Path(override)
         if (override_path / "product_prediction_history_1D.parquet").exists():
@@ -148,7 +152,9 @@ def _finite_or_none(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _empty_response(ticker: str, timeframe: str, manifest: dict[str, Any], *, reason: str) -> dict[str, Any]:
+def _empty_response(
+    ticker: str, timeframe: str, manifest: dict[str, Any], *, reason: str
+) -> dict[str, Any]:
     return {
         "ticker": ticker.upper(),
         "timeframe": timeframe.upper(),
@@ -161,7 +167,9 @@ def _empty_response(ticker: str, timeframe: str, manifest: dict[str, Any], *, re
     }
 
 
-def _apply_window(frame: pd.DataFrame, *, limit: int | None, lookback_days: int | None) -> pd.DataFrame:
+def _apply_window(
+    frame: pd.DataFrame, *, limit: int | None, lookback_days: int | None
+) -> pd.DataFrame:
     if frame.empty:
         return frame
     filtered = frame
@@ -186,7 +194,9 @@ def _line_history(frame: pd.DataFrame) -> list[dict[str, Any]]:
         rows.append(
             {
                 "asof_date": pd.Timestamp(row["asof_date"]).strftime("%Y-%m-%d"),
-                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d") if forecast_date else None,
+                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d")
+                if forecast_date
+                else None,
                 "display_horizon": int(row["display_horizon"]),
                 "value": value,
                 "run_id": str(row["run_id"]),
@@ -206,7 +216,9 @@ def _band_history(frame: pd.DataFrame) -> list[dict[str, Any]]:
         rows.append(
             {
                 "asof_date": pd.Timestamp(row["asof_date"]).strftime("%Y-%m-%d"),
-                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d") if forecast_date else None,
+                "forecast_date": pd.Timestamp(forecast_date).strftime("%Y-%m-%d")
+                if forecast_date
+                else None,
                 "display_horizon": int(row["display_horizon"]),
                 "lower": lower,
                 "upper": upper,

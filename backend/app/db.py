@@ -1,8 +1,7 @@
-import os
-
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from app.config import get_database_config
 from .core.exceptions import ConfigError, UpstreamUnavailableError
 from backend.collector.utils.network import sanitize_proxy_env
 
@@ -17,9 +16,10 @@ def supabase_is_configured() -> bool:
     LENS_FORCE_LOCAL=1 이면 SUPABASE_URL/KEY 가 있어도 강제로 local parquet 경로를 탄다.
     Supabase quota 소진 / Render redeploy 시 보험.
     """
-    if os.environ.get("LENS_FORCE_LOCAL", "0").strip().lower() in {"1", "true", "yes"}:
+    cfg = get_database_config()
+    if cfg.force_local:
         return False
-    return bool(os.environ.get("SUPABASE_URL")) and bool(os.environ.get("SUPABASE_KEY"))
+    return bool(cfg.supabase_url) and bool(cfg.supabase_key)
 
 
 def get_supabase() -> Client:
@@ -27,11 +27,10 @@ def get_supabase() -> Client:
     global _client
     if _client is None:
         sanitize_proxy_env()
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_KEY")
-        if not url or not key:
+        cfg = get_database_config()
+        if not cfg.supabase_url or not cfg.supabase_key:
             raise ConfigError("SUPABASE_URL 또는 SUPABASE_KEY가 설정되지 않았습니다.")
-        _client = create_client(url, key)
+        _client = create_client(cfg.supabase_url, cfg.supabase_key)
     return _client
 
 
@@ -43,8 +42,9 @@ def reset_supabase_client() -> None:
 
 def check_supabase_ready() -> dict[str, bool]:
     """환경변수와 Supabase 읽기 가능 여부를 확인한다."""
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
+    cfg = get_database_config()
+    url = cfg.supabase_url
+    key = cfg.supabase_key
     checks = {
         "supabase_url": bool(url),
         "supabase_key": bool(key),
@@ -62,4 +62,6 @@ def check_supabase_ready() -> dict[str, bool]:
     except ConfigError:
         raise
     except Exception as exc:
-        raise UpstreamUnavailableError("Supabase 준비 상태를 확인할 수 없습니다.", details=checks) from exc
+        raise UpstreamUnavailableError(
+            "Supabase 준비 상태를 확인할 수 없습니다.", details=checks
+        ) from exc

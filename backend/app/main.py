@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import structlog
@@ -8,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.config import get_cache_config, get_cors_config
 from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.core.logging import configure_logging
@@ -19,44 +19,23 @@ logger = structlog.get_logger("lens.api")
 
 
 def _parse_cors_origins() -> list[str]:
-    # 기본: 로컬 dev + Vercel production 도메인.
-    # 새 vercel alias 가 추가될 때마다 손대지 않도록 regex 도 같이 사용.
-    # Production 배포 시 BACKEND_CORS_ORIGINS 환경변수로 명시 override 가능.
-    default_origins = ",".join(
-        [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "https://lens-kimjihyeong-s-projects.vercel.app",
-            "https://lens-ten-delta.vercel.app",
-        ]
-    )
-    raw = os.environ.get("BACKEND_CORS_ORIGINS", default_origins)
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
-
-
-# Vercel 의 모든 lens-* deployment URL 을 자동 허용한다.
-# - lens-3hurhvz04-kimjihyeong-s-projects.vercel.app (preview hash + team)
-# - lens-ten-delta.vercel.app (production alias)
-# - lens-<branch>-<team>.vercel.app
-# - lens-<hash>.vercel.app
-# BACKEND_CORS_ORIGIN_REGEX 환경변수로 override 가능.
-_CORS_ORIGIN_REGEX = os.environ.get(
-    "BACKEND_CORS_ORIGIN_REGEX",
-    r"^https://lens(?:-[a-z0-9-]+)?\.vercel\.app$",
-)
+    # CP235 — 도메인별 CorsConfig가 BACKEND_CORS_ORIGINS env + 기본값을
+    # 함께 들고 있다. 본 함수는 시그니처 보존 위해 얇은 위임으로 둔다.
+    return get_cors_config().origins
 
 
 app = FastAPI(title="Lens API", version="0.1.0")
 
+_cors = get_cors_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_parse_cors_origins(),
-    allow_origin_regex=_CORS_ORIGIN_REGEX,
+    allow_origins=_cors.origins,
+    allow_origin_regex=_cors.origin_regex,
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
 )
-app.add_middleware(GZipMiddleware, minimum_size=512)
+app.add_middleware(GZipMiddleware, minimum_size=get_cache_config().gzip_minimum_size)
 app.middleware("http")(request_id_middleware)
 
 app.include_router(health.router, prefix="/api/v1")
@@ -75,7 +54,7 @@ def _load_v1_predictions_cache() -> None:
     /api/v1/predictions/* 미사용이라 사실상 로드 안 됨).
     필요 시 LENS_EAGER_V1_CACHE=1 로 강제 활성.
     """
-    if os.environ.get("LENS_EAGER_V1_CACHE", "0") != "1":
+    if not get_cache_config().eager_v1_cache:
         logger.info(
             "v1 predictions cache eager load disabled (set LENS_EAGER_V1_CACHE=1 to enable)"
         )
