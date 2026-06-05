@@ -9,7 +9,7 @@
 
 **Live Demo**: [lens-ten-delta.vercel.app](https://lens-ten-delta.vercel.app) (백엔드는 Render free tier 라 처음 접속 시 ~10초 cold start)
 
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
@@ -67,14 +67,14 @@ Lens 는 두 가지 보조지표를 제시합니다.
 
 ### 핵심 문서
 
+저장소에 포함된 문서만 링크합니다. 개별 실험 보고서(CP별 60+ 개)는 용량/정리 사유로 git 에 올리지 않으며, 제출 시 별도 패키지로 제공합니다.
+
 | 문서 | 내용 |
 |---|---|
-| [docs/current/product_development_log_2026_05.md](docs/current/product_development_log_2026_05.md) | 최근 9 일 (CP194 ~ CP204) 의 결정 / 실패 / 배운점 정리 |
-| [docs/current/research_governance_log.md](docs/current/research_governance_log.md) | 누적 의사결정 / 실패 로그 (2026-04 ~ 현재) |
-| [docs/current/phase1_project_status.md](docs/current/phase1_project_status.md) | Phase 1 스냅샷 (2026-05-11 기준) |
-| [docs/cp204_band_v2_plan.md](docs/cp204_band_v2_plan.md) | Band v2 설계: Conformal · CBM · Selective output · 13 metrics |
-| [docs/current/phase2_lens_signal_plan.md](docs/current/phase2_lens_signal_plan.md) | Phase 2 (signal track 분리) 계획 |
-| [docs/cp_archive/](docs/cp_archive/) | 전체 CP 실험 기록 (50+ 개) |
+| [docs/v1_operating_models_reproducibility.md](docs/v1_operating_models_reproducibility.md) | 운영 3모델 재현 매니페스트 — 환경(Python/torch/GPU) · fold 윈도우 · seeds · feature pack · 데이터 hash |
+| [docs/lens_v2_master_plan.md](docs/lens_v2_master_plan.md) | v2 설계 — 미래 예측성 / 설명가능성(XAI) / Band v2 Conformal·CBM / Selective output / 도커 / LLM |
+| [docs/cp216_2_significance/](docs/cp216_2_significance/) | 통계 검정 결과 — DM + Bootstrap CI(cluster·block) + GW conditional. `summary.csv` / `metrics.json` |
+| [DISCLAIMER.md](DISCLAIMER.md) | 학술·연구 목적 면책 |
 
 ---
 
