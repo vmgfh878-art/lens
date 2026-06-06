@@ -1,13 +1,21 @@
 """CP223 백엔드 read-path characterization snapshot 테스트.
 
-9개 v1 endpoint의 정상 200 응답 전체 JSON을 syrupy로 박제. CP225+ 분리
-리팩토링 시 응답이 "1바이트도(허용 tolerance 내에서) 안 바뀌었다"를
-기계적으로 증명하는 안전망.
+9개 v1 endpoint의 정상 200 응답을 CP237.5 drift-resilient 정규화 거쳐
+syrupy 로 박제. 코드 변경에 의한 schema/keys/dtypes/list len/row_schema
+변동은 잡되, daily refresh 의 새 row 추가 / scalar 값 변동에는 면역.
 
-비결정성 회피:
+CP237.5 정규화 (전략 C, `_snapshot_normalize.normalize_response`):
+- top-level: status_code + sorted keys + per-key dtype
+- list: {len, row_schema} 만 (row 값 안 박음)
+- dict: {keys, dtypes} 만 (depth 제한 1)
+- scalar: dtype 만 (value 안 박음)
+
+비결정성 회피 (CP223 그대로):
 - `X-Request-Id="test-fixed"` 헤더 (request_id.py:9의 uuid4 박제).
-- `aapl_prices`의 start/end 명시 (api_service.py:58의 date.today() 회피).
-- float은 `normalize_floats(r.json(), ndigits=9)`로 정규화 (rtol≈1e-9).
+- `aapl_prices` 의 start/end 명시 (api_service.py:58의 date.today() 회피).
+- float 은 `normalize_floats(r.json(), ndigits=9)` 로 정규화. 현 정규화 전략에선
+  값 비교가 빠져 무해하지만, request_id leak 점검과 향후 fixture 기반 row-level
+  비교 회복 시 활용 위해 유지.
 
 운영 코드 무변경. local parquet only (LENS_FORCE_LOCAL=1).
 
@@ -18,6 +26,7 @@ baseline 생성: `pytest backend/tests/test_characterization_api.py --snapshot-u
 from __future__ import annotations
 
 import pytest
+from tests._snapshot_normalize import normalize_response
 from tests.conftest import FIXED_HEADERS, normalize_floats
 
 # 9개 케이스. (id, method, path, params).
@@ -54,7 +63,7 @@ CASES = [
     ids=[c[0] for c in CASES],
 )
 def test_endpoint_snapshot(client, snapshot, case_id, path, params):
-    """9개 endpoint 응답 박제. 분리 리팩토링 동작 보존 안전망."""
+    """9개 endpoint 응답 schema 박제. CP237.5 drift-resilient 정규화 적용."""
     resp = client.get(path, params=params, headers=FIXED_HEADERS)
     assert (
         resp.status_code == 200
@@ -70,4 +79,5 @@ def test_endpoint_snapshot(client, snapshot, case_id, path, params):
                 meta["request_id"] == "test-fixed"
             ), f"[{case_id}] request_id leak: {meta['request_id']!r}"
 
-    assert payload == snapshot
+    normalized = normalize_response(resp.status_code, payload)
+    assert normalized == snapshot
