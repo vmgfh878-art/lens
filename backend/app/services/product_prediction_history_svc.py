@@ -99,7 +99,36 @@ def _load_history_frame_cached(path_str: str, mtime: float) -> pd.DataFrame:
     frame["timeframe"] = frame["timeframe"].astype(str).str.upper()
     frame["role"] = frame["role"].astype(str).str.lower()
     frame["asof_date"] = pd.to_datetime(frame["asof_date"], errors="coerce")
-    return frame.dropna(subset=["ticker", "timeframe", "role", "asof_date"])
+    frame = frame.dropna(subset=["ticker", "timeframe", "role", "asof_date"])
+    return _compress_history_dtypes(frame)
+
+
+def _compress_history_dtypes(frame: pd.DataFrame) -> pd.DataFrame:
+    """CP238 — Render free tier(512MB) OOM 방지용 dtype 다이어트.
+
+    product_history 780k행이 lru_cache 로 메모리에 상주하는데, object 문자열 +
+    float64 라 ~330MB 를 점유해 OOM(자동 재시작 → 503)의 주원인이었다.
+    category + float32 로 ~30MB (약 90% 절감) 까지 내려간다.
+
+    회귀 안전성 (get_product_prediction_history_data / _apply_window / _line_history):
+      - ticker / timeframe 은 `== str`, role 은 `.isin(set)` / `== str` 비교라
+        categorical 에서도 동일하게 동작한다.
+      - run_id 는 `.astype(str) == run_id` 로 비교하므로 categorical 무관.
+      - display_date 는 categorical scalar(str) 로 보존되어 `pd.Timestamp(...).strftime`
+        경로가 그대로다.
+      - asof_date 는 이미 datetime64 라 정렬/cutoff 비교(Timedelta)와 충돌하지 않는다.
+    """
+    if frame.empty:
+        return frame
+    for col in ("ticker", "timeframe", "role", "run_id", "display_date"):
+        if col in frame.columns:
+            frame[col] = frame[col].astype("category")
+    for col in ("line_value", "lower_value", "upper_value"):
+        if col in frame.columns:
+            frame[col] = pd.to_numeric(frame[col], downcast="float")
+    if "display_horizon" in frame.columns:
+        frame["display_horizon"] = pd.to_numeric(frame["display_horizon"], downcast="integer")
+    return frame
 
 
 def _load_history_frame(path: Path) -> pd.DataFrame:

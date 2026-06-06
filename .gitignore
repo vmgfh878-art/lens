@@ -26,6 +26,14 @@ docs/refactoring_master_plan.md
 !docs/cp23[0-7]*.md
 !docs/cp22[1-9]*.txt
 !docs/cp23[0-7]*.txt
+# CP238~242 보안 트랙 (지시서·런북·보고서·산출물 추적)
+!docs/cp23[8-9]*.md
+!docs/cp24[0-2]*.md
+!docs/cp23[8-9]*.txt
+!docs/cp24[0-2]*.txt
+!docs/cp23[8-9]*.json
+!docs/cp24[0-2]*.json
+!docs/cp238_242*.md
 
 ai/cp*.py
 ai/tests/test_cp*.py
