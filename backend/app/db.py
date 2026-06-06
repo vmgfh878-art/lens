@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from app.config import get_database_config
+from .config import get_database_config
 from .core.exceptions import ConfigError, UpstreamUnavailableError
 from backend.collector.utils.network import sanitize_proxy_env
 

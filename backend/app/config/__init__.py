@@ -1,6 +1,6 @@
 """CP235 — 도메인별 Pydantic Settings 일원화 모듈."""
 
-from app.config.settings import (
+from .settings import (
     AdminConfig,
     CacheConfig,
     CorsConfig,

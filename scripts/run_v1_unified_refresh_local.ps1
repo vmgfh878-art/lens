@@ -294,7 +294,15 @@ $ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
 # 여기까지 해야 "PC 켜지면 production 까지 최신"이 된다.
 # 임시방편: DB(Supabase) 전환 시 이 git push 는 DB write 로 대체 예정 (lens_v2_master_plan §9).
 $PushStatus = "SKIPPED_DRY_RUN"
-if ($Apply) {
+# CP238 — 단계 실패 시 production push 차단 (자동화의 핵심 구조 결함 수정).
+# 이전엔 band/line refresh 가 죽어도 Invoke-PythonStep 이 throw 하지 않아
+# market/product 만 갱신된 채 push 가 진행됐다 → 예측이 옛 날짜에 정체된 데이터가
+# 운영에 배포되는 사고(2026-06-05). 핵심 단계가 하나라도 FAIL 이면 push 를 막는다.
+if ($Apply -and $FailedSteps.Count -gt 0) {
+    $PushStatus = "BLOCKED_STEP_FAILURE"
+    $FailedNames = ($FailedSteps | ForEach-Object { $_.name }) -join ", "
+    Write-Log "CRITICAL: 단계 실패로 production push 차단 (failed: $FailedNames). 운영 데이터 불일치(예측 정체) 방지를 위해 commit/push 를 건너뛴다. 각 단계 stderr 확인 후 재실행하라. working tree 변경 폐기는 git checkout -- backend/data/v1 ."
+} elseif ($Apply) {
     Write-Log "production git push 시작"
     try {
         git add backend/data/v1/*.parquet backend/data/v1/*.json 2>&1 | Out-Null
