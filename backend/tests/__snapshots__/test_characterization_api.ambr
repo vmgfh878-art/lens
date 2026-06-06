@@ -1,404 +1,771 @@
 # serializer version: 1
 # name: test_endpoint_snapshot[aapl_band_1d]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'data': 'list',
-        'horizons': 'list',
-        'model_id': 'str',
-        'rows': 'int',
-        'slot': 'str',
-        'source_cp': 'str',
-        'ticker': 'str',
-      }),
-      'keys': list([
+    'shape': dict({
+      'dict_keys': list([
         'data',
-        'horizons',
-        'model_id',
-        'rows',
-        'slot',
-        'source_cp',
-        'ticker',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'data',
+            'horizons',
+            'model_id',
+            'rows',
+            'slot',
+            'source_cp',
+            'ticker',
+          ]),
+          'dict_schema': dict({
+            'data': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'actual_return',
+                  'actual_return_available',
+                  'asof_date',
+                  'band_lower',
+                  'band_upper',
+                  'forecast_date',
+                  'horizon_step',
+                  'model_id',
+                  'source_cp',
+                  'ticker',
+                ]),
+                'dict_schema': dict({
+                  'actual_return': 'float',
+                  'actual_return_available': 'bool',
+                  'asof_date': 'str',
+                  'band_lower': 'float',
+                  'band_upper': 'float',
+                  'forecast_date': 'str',
+                  'horizon_step': 'int',
+                  'model_id': 'str',
+                  'source_cp': 'str',
+                  'ticker': 'str',
+                }),
+              }),
+            }),
+            'horizons': dict({
+              'list_row_schema': 'int',
+            }),
+            'model_id': 'str',
+            'rows': 'int',
+            'slot': 'str',
+            'source_cp': 'str',
+            'ticker': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[aapl_band_1w]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'data': 'list',
-        'horizons': 'list',
-        'model_id': 'str',
-        'rows': 'int',
-        'slot': 'str',
-        'source_cp': 'str',
-        'ticker': 'str',
-      }),
-      'keys': list([
+    'shape': dict({
+      'dict_keys': list([
         'data',
-        'horizons',
-        'model_id',
-        'rows',
-        'slot',
-        'source_cp',
-        'ticker',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'data',
+            'horizons',
+            'model_id',
+            'rows',
+            'slot',
+            'source_cp',
+            'ticker',
+          ]),
+          'dict_schema': dict({
+            'data': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'actual_return',
+                  'asof_date',
+                  'band_lower',
+                  'band_upper',
+                  'horizon_step',
+                  'model_id',
+                  'source_cp',
+                  'ticker',
+                ]),
+                'dict_schema': dict({
+                  'actual_return': 'float',
+                  'asof_date': 'str',
+                  'band_lower': 'float',
+                  'band_upper': 'float',
+                  'horizon_step': 'int',
+                  'model_id': 'str',
+                  'source_cp': 'str',
+                  'ticker': 'str',
+                }),
+              }),
+            }),
+            'horizons': dict({
+              'list_row_schema': 'int',
+            }),
+            'model_id': 'str',
+            'rows': 'int',
+            'slot': 'str',
+            'source_cp': 'str',
+            'ticker': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[aapl_indicators]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'data': 'list',
-        'ticker': 'str',
-        'timeframe': 'str',
-      }),
-      'keys': list([
+    'shape': dict({
+      'dict_keys': list([
         'data',
-        'ticker',
-        'timeframe',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'data',
+            'ticker',
+            'timeframe',
+          ]),
+          'dict_schema': dict({
+            'data': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'atr_ratio',
+                  'bb_position',
+                  'date',
+                  'ma_20_ratio',
+                  'ma_5_ratio',
+                  'ma_60_ratio',
+                  'macd_ratio',
+                  'regime_label',
+                  'rsi',
+                  'vol_change',
+                  'volume',
+                ]),
+                'dict_schema': dict({
+                  'atr_ratio': 'null',
+                  'bb_position': 'float',
+                  'date': 'str',
+                  'ma_20_ratio': 'float',
+                  'ma_5_ratio': 'float',
+                  'ma_60_ratio': 'float',
+                  'macd_ratio': 'float',
+                  'regime_label': 'str',
+                  'rsi': 'float',
+                  'vol_change': 'float',
+                  'volume': 'null',
+                }),
+              }),
+            }),
+            'ticker': 'str',
+            'timeframe': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[aapl_line]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'data': 'list',
-        'model_id': 'str',
-        'rows': 'int',
-        'slot': 'str',
-        'source_cp': 'str',
-        'ticker': 'str',
-      }),
-      'keys': list([
+    'shape': dict({
+      'dict_keys': list([
         'data',
-        'model_id',
-        'rows',
-        'slot',
-        'source_cp',
-        'ticker',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'data',
+            'model_id',
+            'rows',
+            'slot',
+            'source_cp',
+            'ticker',
+          ]),
+          'dict_schema': dict({
+            'data': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'actual_h5_return',
+                  'asof_date',
+                  'line_rank_by_date',
+                  'line_score',
+                  'line_top_decile_flag',
+                  'model_id',
+                  'safe_line_rank_by_date',
+                  'safe_line_score',
+                  'safe_line_top_decile_flag',
+                  'source_cp',
+                  'ticker',
+                ]),
+                'dict_schema': dict({
+                  'actual_h5_return': 'float',
+                  'asof_date': 'str',
+                  'line_rank_by_date': 'float',
+                  'line_score': 'float',
+                  'line_top_decile_flag': 'bool',
+                  'model_id': 'str',
+                  'safe_line_rank_by_date': 'float',
+                  'safe_line_score': 'float',
+                  'safe_line_top_decile_flag': 'bool',
+                  'source_cp': 'str',
+                  'ticker': 'str',
+                }),
+              }),
+            }),
+            'model_id': 'str',
+            'rows': 'int',
+            'slot': 'str',
+            'source_cp': 'str',
+            'ticker': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[aapl_prices]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'data': 'list',
-        'end': 'str',
-        'start': 'str',
-        'ticker': 'str',
-        'timeframe': 'str',
-      }),
-      'keys': list([
+    'shape': dict({
+      'dict_keys': list([
         'data',
-        'end',
-        'start',
-        'ticker',
-        'timeframe',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'data',
+            'end',
+            'start',
+            'ticker',
+            'timeframe',
+          ]),
+          'dict_schema': dict({
+            'data': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'close',
+                  'date',
+                  'high',
+                  'low',
+                  'open',
+                  'volume',
+                ]),
+                'dict_schema': dict({
+                  'close': 'float',
+                  'date': 'str',
+                  'high': 'float',
+                  'low': 'float',
+                  'open': 'float',
+                  'volume': 'int',
+                }),
+              }),
+            }),
+            'end': 'str',
+            'start': 'str',
+            'ticker': 'str',
+            'timeframe': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[aapl_product_history]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'band_history': 'list',
-        'empty_reason': 'null',
-        'latest_asof_date': 'str',
-        'line_history': 'list',
-        'manifest_summary': 'dict',
-        'source': 'str',
-        'ticker': 'str',
-        'timeframe': 'str',
-      }),
-      'keys': list([
-        'band_history',
-        'empty_reason',
-        'latest_asof_date',
-        'line_history',
-        'manifest_summary',
-        'source',
-        'ticker',
-        'timeframe',
+    'shape': dict({
+      'dict_keys': list([
+        'data',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
-        'total': 'int',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'band_history',
+            'empty_reason',
+            'latest_asof_date',
+            'line_history',
+            'manifest_summary',
+            'source',
+            'ticker',
+            'timeframe',
+          ]),
+          'dict_schema': dict({
+            'band_history': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'asof_date',
+                  'display_horizon',
+                  'forecast_date',
+                  'lower',
+                  'run_id',
+                  'upper',
+                ]),
+                'dict_schema': dict({
+                  'asof_date': 'str',
+                  'display_horizon': 'int',
+                  'forecast_date': 'str',
+                  'lower': 'float',
+                  'run_id': 'str',
+                  'upper': 'float',
+                }),
+              }),
+            }),
+            'empty_reason': 'null',
+            'latest_asof_date': 'str',
+            'line_history': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'asof_date',
+                  'display_horizon',
+                  'forecast_date',
+                  'run_id',
+                  'value',
+                ]),
+                'dict_schema': dict({
+                  'asof_date': 'str',
+                  'display_horizon': 'int',
+                  'forecast_date': 'str',
+                  'run_id': 'str',
+                  'value': 'float',
+                }),
+              }),
+            }),
+            'manifest_summary': dict({
+              'dict_keys': list([
+                'band_run_id',
+                'date_range',
+                'line_run_id',
+                'row_count',
+              ]),
+              'dict_schema': dict({
+                'band_run_id': 'str',
+                'date_range': dict({
+                  'dict_keys': list([
+                    'end',
+                    'start',
+                  ]),
+                  'dict_schema': dict({
+                    'end': 'str',
+                    'start': 'str',
+                  }),
+                }),
+                'line_run_id': 'str',
+                'row_count': 'int',
+              }),
+            }),
+            'source': 'str',
+            'ticker': 'str',
+            'timeframe': 'str',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+            'total',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+            'total': 'int',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-        'total',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[backtest_aapl]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'averageHoldingDays': 'float',
-        'avoidedLargeLossDays': 'int',
-        'buyHoldMaxDrawdownPct': 'float',
-        'buyHoldReturnPct': 'float',
-        'buyHoldReturnRatio': 'float',
-        'buyHoldSharpe': 'float',
-        'buyHoldSortino': 'float',
-        'cashWaitRatio': 'float',
-        'excessReturnPct': 'float',
-        'feeAdjustedReturnPct': 'float',
-        'feeAdjustedSharpe': 'float',
-        'largeLossAvoidanceRate': 'float',
-        'largeLossDays': 'int',
-        'largeLossThresholdPct': 'float',
-        'marketParticipationRate': 'float',
-        'maxDrawdownImprovementPct': 'float',
-        'maxDrawdownPct': 'float',
-        'points': 'list',
-        'signals': 'list',
-        'strategyReturnPct': 'float',
-        'strategySortino': 'float',
-        'tradeCount': 'int',
-        'tradeEvents': 'list',
-        'worstTradeLossPct': 'null',
-      }),
-      'keys': list([
-        'averageHoldingDays',
-        'avoidedLargeLossDays',
-        'buyHoldMaxDrawdownPct',
-        'buyHoldReturnPct',
-        'buyHoldReturnRatio',
-        'buyHoldSharpe',
-        'buyHoldSortino',
-        'cashWaitRatio',
-        'excessReturnPct',
-        'feeAdjustedReturnPct',
-        'feeAdjustedSharpe',
-        'largeLossAvoidanceRate',
-        'largeLossDays',
-        'largeLossThresholdPct',
-        'marketParticipationRate',
-        'maxDrawdownImprovementPct',
-        'maxDrawdownPct',
-        'points',
-        'signals',
-        'strategyReturnPct',
-        'strategySortino',
-        'tradeCount',
-        'tradeEvents',
-        'worstTradeLossPct',
+    'shape': dict({
+      'dict_keys': list([
+        'data',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'averageHoldingDays',
+            'avoidedLargeLossDays',
+            'buyHoldMaxDrawdownPct',
+            'buyHoldReturnPct',
+            'buyHoldReturnRatio',
+            'buyHoldSharpe',
+            'buyHoldSortino',
+            'cashWaitRatio',
+            'excessReturnPct',
+            'feeAdjustedReturnPct',
+            'feeAdjustedSharpe',
+            'largeLossAvoidanceRate',
+            'largeLossDays',
+            'largeLossThresholdPct',
+            'marketParticipationRate',
+            'maxDrawdownImprovementPct',
+            'maxDrawdownPct',
+            'points',
+            'signals',
+            'strategyReturnPct',
+            'strategySortino',
+            'tradeCount',
+            'tradeEvents',
+            'worstTradeLossPct',
+          ]),
+          'dict_schema': dict({
+            'averageHoldingDays': 'float',
+            'avoidedLargeLossDays': 'int',
+            'buyHoldMaxDrawdownPct': 'float',
+            'buyHoldReturnPct': 'float',
+            'buyHoldReturnRatio': 'float',
+            'buyHoldSharpe': 'float',
+            'buyHoldSortino': 'float',
+            'cashWaitRatio': 'float',
+            'excessReturnPct': 'float',
+            'feeAdjustedReturnPct': 'float',
+            'feeAdjustedSharpe': 'float',
+            'largeLossAvoidanceRate': 'float',
+            'largeLossDays': 'int',
+            'largeLossThresholdPct': 'float',
+            'marketParticipationRate': 'float',
+            'maxDrawdownImprovementPct': 'float',
+            'maxDrawdownPct': 'float',
+            'points': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'buyHoldEquity',
+                  'date',
+                  'position',
+                  'price',
+                  'strategyEquity',
+                ]),
+                'dict_schema': dict({
+                  'buyHoldEquity': 'float',
+                  'date': 'str',
+                  'position': 'int',
+                  'price': 'float',
+                  'strategyEquity': 'float',
+                }),
+              }),
+            }),
+            'signals': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'atrRatio',
+                  'bandWidthExpansion',
+                  'bandWidthPercentile',
+                  'bandWidthReturn',
+                  'conservativeReturn',
+                  'date',
+                  'lowerBandReturn',
+                  'ma20Ratio',
+                  'ma60Ratio',
+                  'macdRatio',
+                  'position',
+                  'reason',
+                  'rsi',
+                  'targetPosition',
+                ]),
+                'dict_schema': dict({
+                  'atrRatio': 'float',
+                  'bandWidthExpansion': 'null',
+                  'bandWidthPercentile': 'null',
+                  'bandWidthReturn': 'null',
+                  'conservativeReturn': 'null',
+                  'date': 'str',
+                  'lowerBandReturn': 'null',
+                  'ma20Ratio': 'float',
+                  'ma60Ratio': 'float',
+                  'macdRatio': 'float',
+                  'position': 'int',
+                  'reason': 'str',
+                  'rsi': 'float',
+                  'targetPosition': 'int',
+                }),
+              }),
+            }),
+            'strategyReturnPct': 'float',
+            'strategySortino': 'float',
+            'tradeCount': 'int',
+            'tradeEvents': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'date',
+                  'kind',
+                  'price',
+                  'reason',
+                ]),
+                'dict_schema': dict({
+                  'date': 'str',
+                  'kind': 'str',
+                  'price': 'float',
+                  'reason': 'str',
+                }),
+              }),
+            }),
+            'worstTradeLossPct': 'null',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[scan_indicator]
   dict({
-    'dict:data': dict({
-      'dtypes': dict({
-        'aggregateMetrics': 'dict',
-        'asofDate': 'str',
-        'cards': 'list',
-        'contract': 'str',
-        'latestValidTickerCount': 'int',
-        'portfolioMetrics': 'dict',
-        'scopeTickerCount': 'int',
-        'strategyId': 'str',
-        'strategyLabel': 'str',
-        'timeframe': 'str',
-        'usableSignalCount': 'int',
-      }),
-      'keys': list([
-        'aggregateMetrics',
-        'asofDate',
-        'cards',
-        'contract',
-        'latestValidTickerCount',
-        'portfolioMetrics',
-        'scopeTickerCount',
-        'strategyId',
-        'strategyLabel',
-        'timeframe',
-        'usableSignalCount',
+    'shape': dict({
+      'dict_keys': list([
+        'data',
+        'meta',
       ]),
-    }),
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
-        'total': 'int',
+      'dict_schema': dict({
+        'data': dict({
+          'dict_keys': list([
+            'aggregateMetrics',
+            'asofDate',
+            'cards',
+            'contract',
+            'latestValidTickerCount',
+            'portfolioMetrics',
+            'scopeTickerCount',
+            'strategyId',
+            'strategyLabel',
+            'timeframe',
+            'usableSignalCount',
+          ]),
+          'dict_schema': dict({
+            'aggregateMetrics': dict({
+              'dict_keys': list([
+                'avgSelectedCount',
+                'avgTradeCount',
+                'buyHoldMaxDrawdownPct',
+                'buyHoldReturnPct',
+                'buyHoldSharpe',
+                'buyHoldSortino',
+                'excessReturnPct',
+                'feeAdjustedSharpe',
+                'largeLossAvoidanceRate',
+                'marketParticipationRate',
+                'maxDrawdownImprovementPct',
+                'maxDrawdownPct',
+                'passTickerRatio',
+                'strategyReturnPct',
+                'strategySortino',
+              ]),
+              'dict_schema': dict({
+                'avgSelectedCount': 'null',
+                'avgTradeCount': 'float',
+                'buyHoldMaxDrawdownPct': 'float',
+                'buyHoldReturnPct': 'float',
+                'buyHoldSharpe': 'float',
+                'buyHoldSortino': 'float',
+                'excessReturnPct': 'float',
+                'feeAdjustedSharpe': 'float',
+                'largeLossAvoidanceRate': 'float',
+                'marketParticipationRate': 'float',
+                'maxDrawdownImprovementPct': 'float',
+                'maxDrawdownPct': 'float',
+                'passTickerRatio': 'float',
+                'strategyReturnPct': 'float',
+                'strategySortino': 'float',
+              }),
+            }),
+            'asofDate': 'str',
+            'cards': dict({
+              'list_row_schema': dict({
+                'dict_keys': list([
+                  'asofDate',
+                  'atrRatio',
+                  'bandWidthExpansion',
+                  'bandWidthPercentile',
+                  'bandWidthReturn',
+                  'conservativeReturn',
+                  'group',
+                  'hasUsableSignal',
+                  'lowerBandReturn',
+                  'ma20Ratio',
+                  'ma60Ratio',
+                  'macdRatio',
+                  'reason',
+                  'rsi',
+                  'sector',
+                  'signalLabel',
+                  'strategyScore',
+                  'ticker',
+                ]),
+                'dict_schema': dict({
+                  'asofDate': 'str',
+                  'atrRatio': 'float',
+                  'bandWidthExpansion': 'null',
+                  'bandWidthPercentile': 'null',
+                  'bandWidthReturn': 'null',
+                  'conservativeReturn': 'null',
+                  'group': 'str',
+                  'hasUsableSignal': 'bool',
+                  'lowerBandReturn': 'null',
+                  'ma20Ratio': 'float',
+                  'ma60Ratio': 'float',
+                  'macdRatio': 'float',
+                  'reason': 'str',
+                  'rsi': 'float',
+                  'sector': 'null',
+                  'signalLabel': 'str',
+                  'strategyScore': 'float',
+                  'ticker': 'str',
+                }),
+              }),
+            }),
+            'contract': 'str',
+            'latestValidTickerCount': 'int',
+            'portfolioMetrics': dict({
+              'dict_keys': list([
+                'avgSelectedCount',
+                'avgTradeCount',
+                'buyHoldMaxDrawdownPct',
+                'buyHoldReturnPct',
+                'buyHoldSharpe',
+                'buyHoldSortino',
+                'excessReturnPct',
+                'feeAdjustedSharpe',
+                'largeLossAvoidanceRate',
+                'marketParticipationRate',
+                'maxDrawdownImprovementPct',
+                'maxDrawdownPct',
+                'passTickerRatio',
+                'strategyReturnPct',
+                'strategySortino',
+              ]),
+              'dict_schema': dict({
+                'avgSelectedCount': 'null',
+                'avgTradeCount': 'float',
+                'buyHoldMaxDrawdownPct': 'float',
+                'buyHoldReturnPct': 'float',
+                'buyHoldSharpe': 'float',
+                'buyHoldSortino': 'float',
+                'excessReturnPct': 'float',
+                'feeAdjustedSharpe': 'float',
+                'largeLossAvoidanceRate': 'float',
+                'marketParticipationRate': 'float',
+                'maxDrawdownImprovementPct': 'float',
+                'maxDrawdownPct': 'float',
+                'passTickerRatio': 'float',
+                'strategyReturnPct': 'float',
+                'strategySortino': 'float',
+              }),
+            }),
+            'scopeTickerCount': 'int',
+            'strategyId': 'str',
+            'strategyLabel': 'str',
+            'timeframe': 'str',
+            'usableSignalCount': 'int',
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+            'total',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+            'total': 'int',
+          }),
+        }),
       }),
-      'keys': list([
-        'request_id',
-        'total',
-      ]),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'dict',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---
 # name: test_endpoint_snapshot[stocks_list]
   dict({
-    'dict:meta': dict({
-      'dtypes': dict({
-        'request_id': 'str',
-        'total': 'int',
-      }),
-      'keys': list([
-        'request_id',
-        'total',
+    'shape': dict({
+      'dict_keys': list([
+        'data',
+        'meta',
       ]),
-    }),
-    'list:data': dict({
-      'len': 50,
-      'row_schema': dict({
-        'industry': 'str',
-        'market_cap': 'float',
-        'sector': 'str',
-        'ticker': 'str',
+      'dict_schema': dict({
+        'data': dict({
+          'list_row_schema': dict({
+            'dict_keys': list([
+              'industry',
+              'market_cap',
+              'sector',
+              'ticker',
+            ]),
+            'dict_schema': dict({
+              'industry': 'str',
+              'market_cap': 'float',
+              'sector': 'str',
+              'ticker': 'str',
+            }),
+          }),
+        }),
+        'meta': dict({
+          'dict_keys': list([
+            'request_id',
+            'total',
+          ]),
+          'dict_schema': dict({
+            'request_id': 'str',
+            'total': 'int',
+          }),
+        }),
       }),
     }),
-    'payload_type': 'dict',
     'status_code': 200,
-    'top_level_dtypes': dict({
-      'data': 'list',
-      'meta': 'dict',
-    }),
-    'top_level_keys': list([
-      'data',
-      'meta',
-    ]),
   })
 # ---

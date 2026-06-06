@@ -1,34 +1,43 @@
-"""CP237.5 — Drift-resilient snapshot 정규화.
+"""CP237.5 — Drift-resilient snapshot 정규화 (재귀).
 
-전략 C (Step 1 실측 분석 후 확정):
-- top-level: status_code / sorted keys / per-key dtype
-- list: {len, row_schema} 만 (row 값 자체는 안 박음)
-- dict: {keys, dtypes} 만 (depth 제한 1)
-- scalar: dtype 만 (value 안 박음)
+전략 C (Step 1+6 실측 분석 후 확정):
+- 값 자체 (scalar / list row / dict value) 는 비교에서 제외.
+- 구조 (dict keys + per-key recursive shape + list 의 first-row recursive shape)
+  만 비교.
+- `len` 도 안 박음 — cumulative list (backtest_aapl.points 등) 의 daily +1행
+  증가에 면역.
 
-배경: 지시서 §2의 last_n=5 + scalar value 박는 전략은 daily refresh의 rolling
-window 가 매일 row를 swap 시키는 endpoint (aapl_prices/indicators/line/
-band_1d/band_1w/product_history/backtest_aapl/scan_indicator) 에 fragile.
-실제 응답 schema 실측 후 row-level value / scalar value 비교 자체를 빼는
-방향으로 결정. row-level value 회귀 검출력은 별도 fixture 테스트로 보강.
+배경: 지시서 §2의 last_n=5 + scalar value + 1-level dict 전략은 daily refresh 에
+fragile. 실측 후 (Step 1): 응답이 `{data: dict{data: list[row...]}}` 중첩이라
+1-level shallow dict 는 inner list 의 row schema 를 못 본다. 재귀로 전체 깊이의
+구조 박는 형태로 재작성.
 
-목적: daily refresh 의 새 row 추가 + scalar 값 변동에도 snapshot 안 깨짐.
-보안/리팩토링 트랙 코드 변경에 의한 응답 schema/keys/dtypes/list 길이/
-row schema 변동은 그대로 검출.
+목적: daily refresh (새 row 추가 / scalar 값 변동 / cumulative list 증가) 에 면역.
+보안/리팩토링 트랙 코드 변경에 의한 응답 keys/dtypes/row_schema 변동은 그대로 검출.
+
+검출 가능 회귀:
+- top-level dict 의 key 추가/제거 / value dtype 변경
+- nested dict 의 key 추가/제거 / value dtype 변경
+- list 의 row dtype 변경 (scalar list)
+- list[dict] 의 첫 row 의 key 추가/제거 / value dtype 변경
+- status code 변경
+
+검출 불가 (trade-off — 별도 fixture 테스트로 보강):
+- row 의 정밀 float 값 회귀
+- list 길이 변경 (cumulative 증가 면역의 대가)
+- heterogeneous list (row 마다 dtype 다른 경우; 첫 row 기준)
+- 첫 row 의 nullable 필드가 dtype 바뀜 (오늘 str / 내일 None)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# Step 1 실측: 응답에 존재하는 daily 변동 키 + 미래 확장 대비.
-# row 값 자체를 안 박는 전략 C 에서는 이 frozenset 의 실용 가치가
-# row_schema dict 의 키 정렬 시 비교 안정성 정도 (현재는 row_schema 가
-# 모든 키 포함 → 이 frozenset 은 v2 fixture 기반 row-level 비교 시 활용).
-# 기록 목적으로 유지.
+# Step 1 실측 발견 + 미래 대비 변동 키 기록.
+# 전략 C 에선 row 값 자체를 안 박아서 이 frozenset 의 실용 가치가 약함.
+# 향후 fixture 기반 row-level 비교 도입 시 활용 위해 기록.
 DRIFT_FIELDS: frozenset[str] = frozenset(
     {
-        # Step 1 실측 발견
         "asof_date",
         "asofDate",
         "actual_return",
@@ -38,7 +47,6 @@ DRIFT_FIELDS: frozenset[str] = frozenset(
         "date",
         "line_rank_by_date",
         "safe_line_rank_by_date",
-        # 미래 대비 (현재 응답엔 없지만 endpoint 추가 시 흔한 변동 키)
         "actual_h1_return",
         "actual_h4_return",
         "actual_h20_return",
@@ -56,7 +64,7 @@ DRIFT_FIELDS: frozenset[str] = frozenset(
 
 
 def _dtype_name(value: Any) -> str:
-    """간단한 dtype label. Pydantic 응답이 이미 정규화되어 있어 light-weight."""
+    """간단한 dtype label."""
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -74,65 +82,41 @@ def _dtype_name(value: Any) -> str:
     return type(value).__name__
 
 
-def _row_schema(rows: list[Any]) -> dict[str, Any]:
-    """list 의 row schema 추출. dict row 면 sorted {key: dtype}, scalar row 면 {_value_dtype}.
+def _shape(value: Any) -> Any:
+    """재귀 shape 추출.
 
-    빈 list 는 빈 dict. 첫 row 기준 (heterogeneous list 는 검출 못 함 — trade-off).
+    - dict → {"dict_keys": sorted_keys, "dict_schema": {k: _shape(v)}}
+    - list → {"list_row_schema": _shape(first_row_or_empty)}
+    - scalar → dtype 이름 문자열
+
+    JSON 응답은 finite tree (cycle 없음) → 무한 재귀 위험 없음.
     """
-    if not rows:
-        return {}
-    first = rows[0]
-    if isinstance(first, dict):
-        return {k: _dtype_name(first[k]) for k in sorted(first.keys())}
-    return {"_value_dtype": _dtype_name(first)}
-
-
-def _normalize_list(rows: list[Any]) -> dict[str, Any]:
-    """list → {len, row_schema}. row 값 자체는 안 박음 (drift 면역)."""
-    return {"len": len(rows), "row_schema": _row_schema(rows)}
-
-
-def _normalize_dict_shallow(d: dict[str, Any]) -> dict[str, Any]:
-    """dict 1-level: sorted keys + per-key dtype. value 안 박음."""
-    return {
-        "keys": sorted(d.keys()),
-        "dtypes": {k: _dtype_name(d[k]) for k in sorted(d.keys())},
-    }
+    if isinstance(value, dict):
+        keys = sorted(value.keys())
+        return {
+            "dict_keys": keys,
+            "dict_schema": {k: _shape(value[k]) for k in keys},
+        }
+    if isinstance(value, list):
+        # 빈 list 는 빈 dict. 첫 row 기준 (heterogeneous list trade-off).
+        return {
+            "list_row_schema": _shape(value[0]) if value else {},
+        }
+    return _dtype_name(value)
 
 
 def normalize_response(status_code: int, payload: Any) -> dict[str, Any]:
     """HTTP 응답을 drift-resilient snapshot 형태로 변환.
 
     Args:
-        status_code: HTTP status code (정수)
-        payload: response.json() 결과 (dict 또는 list)
+        status_code: HTTP status code (정수).
+        payload: response.json() 결과 (dict / list / scalar).
 
     Returns:
-        snapshot 비교용 dict. scalar value / list row value / nested dict value
-        모두 비교 대상에서 제외. schema (keys/dtypes/len/row_schema) 만 비교.
+        snapshot 비교용 dict: {status_code, shape}.
+        shape 은 응답 전체 구조의 재귀 정규화 결과.
     """
-    out: dict[str, Any] = {
+    return {
         "status_code": status_code,
+        "shape": _shape(payload),
     }
-
-    if isinstance(payload, dict):
-        out["payload_type"] = "dict"
-        out["top_level_keys"] = sorted(payload.keys())
-        out["top_level_dtypes"] = {k: _dtype_name(payload[k]) for k in sorted(payload.keys())}
-        for k in sorted(payload.keys()):
-            v = payload[k]
-            if isinstance(v, list):
-                out[f"list:{k}"] = _normalize_list(v)
-            elif isinstance(v, dict):
-                out[f"dict:{k}"] = _normalize_dict_shallow(v)
-            else:
-                # scalar: value 안 박음. dtype 만.
-                out[f"scalar:{k}"] = _dtype_name(v)
-    elif isinstance(payload, list):
-        out["payload_type"] = "list"
-        out["root"] = _normalize_list(payload)
-    else:
-        out["payload_type"] = _dtype_name(payload)
-        # 최상위가 scalar 인 응답은 거의 없지만 안전망. value 안 박음.
-
-    return out
