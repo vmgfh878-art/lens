@@ -22,3 +22,13 @@ repos:
         stages: [manual]
         additional_dependencies: []
         args: ["--config-file=pyproject.toml"]
+  # CP243 — backend 복잡도 게이트. mypy 처럼 manual stage (commit 자동 차단 X).
+  #   실행: pre-commit run --hook-stage manual xenon -a
+  - repo: local
+    hooks:
+      - id: xenon
+        name: xenon (backend complexity)
+        entry: xenon --max-absolute C --max-modules B --max-average A backend/app
+        language: system
+        pass_filenames: false
+        stages: [manual]

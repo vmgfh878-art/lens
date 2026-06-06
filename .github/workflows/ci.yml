@@ -27,11 +27,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          # CP222 dev 도구. requirements-dev.txt 가 있으면 그쪽으로.
-          if [ -f backend/requirements-dev.txt ]; then \
-            pip install -r backend/requirements-dev.txt; \
+          # CP222 dev 도구. requirements-dev.txt 는 루트에 있다(ADR-0014).
+          # 과거 backend/ 경로 참조는 항상 fallback 을 타던 버그 → 루트로 정정
+          # (radon/xenon 복잡도 게이트 의존성 포함).
+          if [ -f requirements-dev.txt ]; then \
+            pip install -r requirements-dev.txt; \
           else \
-            pip install ruff mypy pytest syrupy; \
+            pip install ruff mypy pytest syrupy radon xenon; \
           fi
 
       - name: Ruff lint
@@ -46,6 +48,15 @@ jobs:
         # 별도 cleanup CP 후. CP224b 이후 정책 정합.
         continue-on-error: true
         run: mypy backend ai || true
+
+      - name: Code complexity gate (radon + xenon, backend)
+        # CP243 — backend 복잡도 회귀 자동 차단. backend/app: MI 전부 A,
+        # CC 평균 A(3.4), 최악 C(17). D+ 함수나 모듈 평균 C 로 떨어지면 실패.
+        # ai/ 는 evaluation(109지표) 등 baseline 부채라 게이트 제외(점진 분리 대상).
+        # 측정은 radon, 차단은 xenon.
+        run: |
+          radon mi backend/app -s
+          xenon --max-absolute C --max-modules B --max-average A backend/app
 
       - name: Pytest (backend only — ai/tests skipped, GPU(torch cu128) absent on CI)
         # 사용자 명시: GPU 의존 ai/tests 는 CI(CPU)에서 skip 마킹. requirements.txt

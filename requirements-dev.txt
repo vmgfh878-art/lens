@@ -9,3 +9,6 @@ pandera==0.20.4        # CP223 dataframe schema snapshot candidate.
 # CP223 chose syrupy (PyPI snaptol unavailable). Float tolerance handled
 # by normalize_floats() helper in backend/tests/conftest.py.
 syrupy==5.3.1          # characterization snapshot (read-path API).
+# CP243 — 코드 복잡도 게이트 (maintainability index + cyclomatic complexity).
+radon==6.0.1           # MI/CC 측정.
+xenon==0.9.3           # radon 기반 복잡도 CI 게이트.
