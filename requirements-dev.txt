@@ -12,3 +12,5 @@ syrupy==5.3.1          # characterization snapshot (read-path API).
 # CP243 — 코드 복잡도 게이트 (maintainability index + cyclomatic complexity).
 radon==6.0.1           # MI/CC 측정.
 xenon==0.9.3           # radon 기반 복잡도 CI 게이트.
+# CP238 — 의존성 CVE audit (OWASP A06).
+pip-audit==2.7.3       # PyPA 공식 audit, PyPI advisory DB 직접 조회.
