@@ -9,6 +9,9 @@
 
 **Live Demo**: [lens-ten-delta.vercel.app](https://lens-ten-delta.vercel.app) (백엔드는 Render free tier 라 처음 접속 시 ~10초 cold start)
 
+📊 **프로젝트 종합 보고서**: [docs/lens_overview_report.html](docs/lens_overview_report.html) — 시스템 아키텍처 · 딥러닝 실험 · 통계검정 · v2 로드맵을 그림과 함께 한 페이지로
+<br>([GitHub Pages](https://vmgfh878-art.github.io/lens/lens_overview_report.html) 활성화 시 바로 열람, 또는 파일 다운로드 후 브라우저로)
+
 ![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)

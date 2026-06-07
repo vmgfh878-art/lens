@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens 종합 보고서 — 계획에서 현재까지</title>
+<style>
+:root{
+  --bg:#f7f8fa; --panel:#ffffff; --ink:#16202c; --ink2:#43505f; --muted:#7a8694;
+  --line:#e3e8ee; --primary:#0e5563; --primary2:#11788c; --accent:#d97a0a;
+  --good:#0f7a52; --bad:#c0492f; --warn:#b06a12; --eq:#5a6b7a;
+  --chip:#eef3f5; --code:#0b1620; --codeink:#d7e3ea;
+  --shadow:0 1px 2px rgba(20,40,60,.05),0 8px 24px rgba(20,40,60,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Pretendard","Segoe UI Variable","Malgun Gothic",system-ui,-apple-system,sans-serif;
+  line-height:1.72;font-size:16px;-webkit-font-smoothing:antialiased}
+.layout{display:grid;grid-template-columns:280px minmax(0,1fr);max-width:1340px;margin:0 auto}
+/* ---------- TOC ---------- */
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+  padding:60px 18px 48px;border-right:1px solid var(--line);background:#fbfcfd;transition:transform .22s ease,opacity .22s ease}
+nav.toc .brand{font-weight:800;font-size:20px;letter-spacing:-.02em;color:var(--primary);margin-bottom:2px}
+nav.toc .brandsub{font-size:11.5px;color:var(--muted);margin-bottom:20px}
+nav.toc a{display:block;padding:5px 10px;margin:1px 0;border-radius:7px;color:var(--ink2);
+  text-decoration:none;font-size:13px;border-left:2px solid transparent;transition:.15s}
+nav.toc a .n{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:7px;font-size:12px}
+nav.toc a:hover{background:var(--chip);color:var(--ink)}
+nav.toc a.active{background:#e8f1f3;color:var(--primary);border-left-color:var(--primary);font-weight:600}
+/* ---------- main ---------- */
+main{padding:0 clamp(20px,4vw,64px) 120px;min-width:0}
+section{padding:54px 0 8px;border-top:1px solid transparent}
+section:not(.hero){scroll-margin-top:20px}
+.kicker{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--primary2)}
+h1{font-size:clamp(30px,4vw,46px);line-height:1.12;letter-spacing:-.025em;margin:.3em 0}
+h2{font-size:clamp(23px,2.6vw,30px);letter-spacing:-.02em;margin:.2em 0 .5em;line-height:1.2}
+h2 .sn{color:var(--primary2);font-variant-numeric:tabular-nums;margin-right:.4em;font-weight:800}
+h3{font-size:18.5px;margin:1.7em 0 .5em;letter-spacing:-.01em;color:var(--ink)}
+h4{font-size:15px;margin:1.3em 0 .3em;color:var(--primary);text-transform:none}
+p{margin:.7em 0;color:var(--ink2)}
+strong{color:var(--ink);font-weight:680}
+a.ref{color:var(--primary2);text-decoration:none;border-bottom:1px dotted var(--primary2)}
+code,kbd{font-family:"JetBrains Mono","SF Mono",Consolas,monospace;font-size:.86em;
+  background:var(--chip);padding:1.5px 6px;border-radius:5px;color:#0a3540;white-space:nowrap}
+.lead{font-size:18px;color:var(--ink2)}
+.muted{color:var(--muted)}
+.divider{height:1px;background:var(--line);margin:40px 0}
+/* hero */
+.hero{background:linear-gradient(155deg,#0c4350 0%,#0e5563 45%,#12303a 100%);
+  color:#eaf3f5;margin:0 calc(-1*clamp(20px,4vw,64px));padding:74px clamp(20px,4vw,64px) 66px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-120px;top:-120px;width:460px;height:460px;
+  background:radial-gradient(circle,rgba(255,255,255,.08),transparent 65%);border-radius:50%}
+.hero .kicker{color:#7fd4e0}
+.hero h1{color:#fff;margin:.15em 0 .25em;max-width:18ch}
+.hero p{color:#bcd6dc;max-width:60ch;font-size:18px}
+.hero .meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px;font-size:13.5px;color:#9fc4cc}
+.hero .meta b{color:#eaf3f5;font-weight:600}
+.hero .tag{display:inline-block;margin-top:22px;background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.18);padding:7px 15px;border-radius:999px;font-size:13px;color:#dfeef1}
+/* cards/grid */
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow)}
+.card h4{margin-top:0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow)}
+.stat .num{font-size:30px;font-weight:800;letter-spacing:-.03em;color:var(--primary);font-variant-numeric:tabular-nums;line-height:1}
+.stat .lbl{font-size:12.5px;color:var(--muted);margin-top:7px}
+.callout{border-left:4px solid var(--primary);background:#f0f6f7;border-radius:0 12px 12px 0;padding:16px 20px;margin:20px 0}
+.callout.warn{border-color:var(--warn);background:#fbf4ea}
+.callout.good{border-color:var(--good);background:#eef7f2}
+.callout.bad{border-color:var(--bad);background:#fbefec}
+.callout .ct{font-weight:700;font-size:13px;letter-spacing:.02em;margin-bottom:4px;text-transform:uppercase}
+.callout.warn .ct{color:var(--warn)} .callout.good .ct{color:var(--good)} .callout.bad .ct{color:var(--bad)} .callout .ct{color:var(--primary)}
+/* table */
+table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{padding:10px 13px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#eef3f5;font-weight:680;color:var(--ink);font-size:12.5px;letter-spacing:.01em}
+td{color:var(--ink2)}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill.good{background:#e0f0e8;color:var(--good)} .pill.bad{background:#f7e3dd;color:var(--bad)}
+.pill.eq{background:#e6eaee;color:var(--eq)} .pill.warn{background:#f6ecda;color:var(--warn)}
+/* timeline */
+.tl{position:relative;margin:24px 0 8px;padding-left:30px}
+.tl::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:linear-gradient(var(--primary),var(--primary2),var(--accent))}
+.tl .node{position:relative;margin-bottom:20px}
+.tl .node::before{content:"";position:absolute;left:-29px;top:4px;width:14px;height:14px;border-radius:50%;
+  background:#fff;border:3px solid var(--primary);box-shadow:0 0 0 3px #e8f1f3}
+.tl .node.fail::before{border-color:var(--bad);box-shadow:0 0 0 3px #f7e3dd}
+.tl .node.ship::before{border-color:var(--good);box-shadow:0 0 0 3px #e0f0e8}
+.tl .when{font-size:12px;font-weight:700;color:var(--primary2);font-variant-numeric:tabular-nums}
+.tl .ti{font-weight:680;color:var(--ink);font-size:15px}
+.tl .node p{margin:.25em 0}
+/* flow diagram */
+.flow{display:flex;flex-direction:column;gap:0;margin:22px 0}
+.flow .step{display:grid;grid-template-columns:148px 1fr;gap:14px;align-items:stretch}
+.flow .lbl{background:var(--primary);color:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13.5px;padding:12px;text-align:center}
+.flow .lbl.alt{background:var(--primary2)} .flow .lbl.ai{background:#1a4a8a} .flow .lbl.fe{background:#5a3a8a}
+.flow .desc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13.5px;color:var(--ink2)}
+.flow .desc code{font-size:.84em}
+.flow .arr{grid-column:1/-1;text-align:center;color:var(--muted);font-size:18px;line-height:1;padding:3px 0}
+/* bar (cohen d) */
+.bars{margin:16px 0}
+.bar{display:grid;grid-template-columns:200px 1fr 90px;gap:12px;align-items:center;margin:7px 0;font-size:13px}
+.bar .track{position:relative;height:22px;background:#eef3f5;border-radius:6px;overflow:hidden}
+.bar .fill{position:absolute;top:0;bottom:0;border-radius:6px}
+.bar .v{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+.arch{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}
+.arch .col{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.arch .col h4{margin:0;padding:12px 16px;color:#fff;font-size:14px}
+.arch .col.be h4{background:var(--primary)} .arch .col.ai h4{background:#1a4a8a} .arch .col.fe h4{background:#5a3a8a}
+.arch .col ul{margin:0;padding:12px 16px 14px 30px;font-size:13px;color:var(--ink2)}
+.arch .col li{margin:5px 0}
+ul.clean{list-style:none;padding-left:0}
+ul.clean li{padding-left:24px;position:relative;margin:7px 0}
+ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary2);font-weight:700}
+.foot{margin-top:80px;padding-top:28px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:30px}
+.toc-toggle{position:fixed;top:14px;left:14px;z-index:200;width:40px;height:40px;border-radius:9px;
+  border:1px solid var(--line);background:var(--panel);color:var(--primary);font-size:17px;cursor:pointer;
+  box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;line-height:1}
+.toc-toggle:hover{background:var(--chip)}
+.layout.nav-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.layout.nav-collapsed nav.toc{transform:translateX(-110%);opacity:0;pointer-events:none}
+@media(max-width:920px){
+  .layout{grid-template-columns:1fr} nav.toc{display:none} .toc-toggle{display:none}
+  .g2,.g3,.g4,.arch,.two{grid-template-columns:1fr} .g4{grid-template-columns:1fr 1fr}
+  .flow .step{grid-template-columns:110px 1fr} .bar{grid-template-columns:130px 1fr 64px}
+}
+</style>
+</head>
+<body>
+<button class="toc-toggle" aria-label="목차 접기/펼치기" title="목차 접기/펼치기">✕</button>
+<div class="layout">
+<nav class="toc">
+  <div class="brand">Lens</div>
+  <div class="brandsub">종합 보고서 · 계획에서 현재까지</div>
+  <a href="#s1"><span class="n">01</span>한눈 요약</a>
+  <a href="#s2"><span class="n">02</span>프로젝트 정체성</a>
+  <a href="#s3"><span class="n">03</span>계획서 vs 현재</a>
+  <a href="#s4"><span class="n">04</span>시스템 아키텍처</a>
+  <a href="#s5"><span class="n">05</span>데이터 인프라 진화</a>
+  <a href="#s6"><span class="n">06</span>예측선(라인) 계보</a>
+  <a href="#s7"><span class="n">07</span>예측 밴드 계보</a>
+  <a href="#s8"><span class="n">08</span>평가지표 철학</a>
+  <a href="#s9"><span class="n">09</span>통계적 유의성 검정</a>
+  <a href="#s10"><span class="n">10</span>프론트엔드 3화면</a>
+  <a href="#s11"><span class="n">11</span>코드 안정성 리팩토링</a>
+  <a href="#s12"><span class="n">12</span>보안 트랙</a>
+  <a href="#s13"><span class="n">13</span>운영 자동화·재현성</a>
+  <a href="#s14"><span class="n">14</span>남은 과제</a>
+  <a href="#s15"><span class="n">15</span>결론·다음 계획 토대</a>
+  <a href="#s16"><span class="n">16</span>v2 로드맵</a>
+</nav>
+<main>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="kicker">세종대 데이터사이언스 · 딥러닝실습 기말 프로젝트</div>
+  <h1>Lens — 계획에서 현재까지의 전체 기록</h1>
+  <p>“AI가 주식을 100% 맞힐 수 있을까? 불가능하다. 그래서 예측 도구가 아니라 <b>보조지표</b>로 쓴다.” 이 한 문장에서 출발해 250개가 넘는 체크포인트를 거쳐 도착한, 운영 3모델과 그 한계까지의 정직한 종합 기록.</p>
+  <div class="meta">
+    <span><b>22011859</b> 김지형</span>
+    <span>계획서 작성 <b>2026.04</b> → 현재 <b>2026.06</b></span>
+    <span>대상 <b>S&amp;P 500</b> (약 500 종목)</span>
+    <span>제출 예정 <b>2026.06.21</b></span>
+  </div>
+  <div class="tag">이 문서의 목적 — 흩어진 작업을 한눈에 보고, 다음 계획의 토대를 세운다</div>
+</section>
+
+<!-- ===== 01 EXECUTIVE ===== -->
+<section id="s1">
+  <div class="kicker">Executive Summary</div>
+  <h2><span class="sn">01</span>한눈 요약</h2>
+  <p class="lead">Lens는 미국 S&amp;P 500 종목의 가격 차트 위에 딥러닝 <b>예측선</b>·<b>예측 밴드</b>와 <b>규칙 기반 시그널</b>을 겹쳐 보여주는 AI 보조지표 도구다. 핵심 산출물은 운영에 실제로 붙은 세 모델이며, 프로젝트의 가장 큰 결론은 “딥러닝이 단순 통계 베이스라인을 이기기는 어렵다”를 자기 데이터로 정직하게 재확인한 것이다.</p>
+
+  <div class="grid g4" style="margin:24px 0">
+    <div class="stat"><div class="num">3</div><div class="lbl">운영 모델<br>라인 · 1D 밴드 · 1W 밴드</div></div>
+    <div class="stat"><div class="num">250+</div><div class="lbl">체크포인트(CP)<br>2026.04 → 06</div></div>
+    <div class="stat"><div class="num">11</div><div class="lbl">통계검정 비교쌍<br>DM·Bootstrap·GW</div></div>
+    <div class="stat"><div class="num">45</div><div class="lbl">리팩토링 커밋<br>회귀 diff 0</div></div>
+  </div>
+
+  <h3>운영 3모델 한 줄 요약</h3>
+  <table>
+    <thead><tr><th>모델</th><th>구조</th><th>핵심 설정</th><th>통계검정 위치</th></tr></thead>
+    <tbody>
+      <tr><td><b>예측선</b><br><span class="muted">CP210</span></td><td>PatchTST<br>5-seed 앙상블</td><td>비대칭 Huber 손실 β=4, F4 feature pack, h5(5거래일), 수익률 score</td><td><span class="pill eq">통계 동등</span> 과거평균·이전모델과 IC 차이 없음(Bonferroni p=1.00)</td></tr>
+      <tr><td><b>1D 밴드</b><br><span class="muted">CP153</span></td><td>TiDE<br>분위수</td><td>q15/q85(목표 70%), lower_focused 보정, true walk-forward</td><td><span class="pill bad">통계 열위</span> 과거분위수·walk-forward GARCH 못 이김</td></tr>
+      <tr><td><b>1W 밴드</b><br><span class="muted">CP178</span></td><td>TiDE<br>WFLOCK</td><td>q10/q90(목표 80%), walk-forward lower 보정</td><td><span class="pill good">통계 우위</span> walk-forward GARCH 대비 d=−0.98 + 3 regime p&lt;0.001</td></tr>
+    </tbody>
+  </table>
+
+  <h3>계획서(2026.04) 이후 바뀐 네 가지</h3>
+  <div class="grid g2">
+    <div class="card"><h4>① 데이터 — EODHD → 로컬 parquet</h4><p class="muted" style="margin:0">유료 EODHD/FMP/FRED 단일 DB 구상에서, yfinance 500 종목 + <b>로컬 parquet 원천 + 얇은 표시용 DB</b> 구조로 전환. 비용 절감이 아니라 감사 가능한 데이터 마이그레이션으로 수행.</p></div>
+    <div class="card"><h4>② 평가 — MAPE → IC·coverage·통계검정</h4><p class="muted" style="margin:0">“MAPE&lt;5%, 방향정확도&gt;55%, 포함율&gt;90%”라는 단순 목표를 폐기하고, IC·coverage_abs_error·band_width_ic·severe recall + 정식 통계검정으로 교체.</p></div>
+    <div class="card"><h4>③ DB — Supabase 즉시 → 보류</h4><p class="muted" style="margin:0">Supabase PostgreSQL 즉시 사용 계획에서, v1은 로컬 parquet 서빙으로 운영하고 Supabase는 재연결 <b>골격만</b> 준비(결제 후 활성). 무료 티어 메모리 제약을 정면 대응.</p></div>
+    <div class="card"><h4>④ 결론 — 성과 과장 대신 정직한 한계</h4><p class="muted" style="margin:0">“AI가 잘 맞힌다” 대신 “통계 베이스라인을 이기기 어렵다”를 통계검정으로 증명. 유일하게 이긴 1W 밴드의 <b>국면 조건부 우위</b>를 선택적 출력의 근거로 전환.</p></div>
+  </div>
+
+  <div class="callout good"><div class="ct">이 프로젝트의 진짜 성과</div>“얼마나 잘 맞혔나”가 아니라 <b>“방법론을 얼마나 정직하게 검증했나”</b>다. GARCH 베이스라인의 정보 누수를 walk-forward로 바로잡고, 거대 표본의 p-값 함정을 효과 크기·신뢰구간으로 막고, 못 이긴 지점을 보고서에 그대로 남긴 것이 핵심 가치다.</div>
+</section>
+
+<!-- ===== 02 IDENTITY ===== -->
+<section id="s2">
+  <div class="kicker">Identity &amp; Philosophy</div>
+  <h2><span class="sn">02</span>프로젝트 정체성 — AI는 예측 도구가 아니라 보조지표</h2>
+  <p class="lead">Lens의 모든 설계 결정은 하나의 철학에서 나온다. AI는 “정답을 알려주는 예언자”가 아니라, RSI·MACD처럼 <b>사용자가 함께 보고 판단하는 또 하나의 지표</b>다. 의사결정의 주체는 언제나 사람이다.</p>
+
+  <div class="grid g3" style="margin:24px 0">
+    <div class="card"><h4>예측선 (보수적 기준선)</h4><p style="margin:0">앞으로 5거래일 수익률을 점으로 예측하되, <b>위로 틀리는 것(낙관)을 아래로 틀리는 것보다 더 크게 벌하는</b> 비대칭 손실로 학습. “맞히는 선”이 아니라 “덜 위험하게 틀리는 선”.</p></div>
+    <div class="card"><h4>예측 밴드 (위험 구간)</h4><p style="margin:0">미래 수익률의 분위수 구간(q15~q85 등)을 직접 예측. “어디까지 떨어질 수 있고 어디까지 오를 수 있는가”라는 <b>calibrated risk interval</b>. Plan v3에서 밴드가 본체로 확정.</p></div>
+    <div class="card"><h4>규칙 기반 시그널 (전략)</h4><p style="margin:0">AI 출력을 기존 보조지표와 조합한 매매 규칙. 예: <code>밴드 하단 &gt; −5%</code> AND <code>60일선 위</code> AND <code>RSI&lt;82</code> → 추세 추종. 백테스트로 검증.</p></div>
+  </div>
+
+  <figure style="margin:28px 0">
+    <img src="img/demo_stocks.png" alt="Lens 종목 분석 화면 — AAPL 차트 위 예측선·밴드 오버레이" style="width:100%;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)">
+    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:8px">그림 3. 실제 화면 — AAPL 캔들 위에 <b>보수적 기준선</b>(점선)과 <b>AI 밴드</b>(상·하단)가 겹쳐 보인다. 우측 모델 패널에 신선도(2026-06-05 fresh)와 오버레이 토글. 세 출력이 한 화면에서 함께 읽힌다.</figcaption>
+  </figure>
+
+  <h3>비대칭 손실 — 보수 철학의 수학적 본체</h3>
+  <p>예측선 정체성의 핵심은 <code>ai/loss.py</code>의 비대칭 Huber 손실이다. 오차를 <code>error = 예측 − 실제</code>로 정의하고, 과대예측(<code>error&gt;0</code>)에는 가중치 β, 과소예측에는 α를 곱한다.</p>
+  <div class="callout">
+    <div class="ct">손실 식</div>
+    <code style="white-space:normal;background:none;padding:0;font-size:15px">L = α · Huber(error | error ≤ 0) &nbsp;+&nbsp; β · Huber(error | error &gt; 0), &nbsp; (α=1, β=2 → 운영 단계 β=4)</code>
+    <p style="margin:.6em 0 0">같은 절대오차에서 <b>과대예측에 정확히 β배의 벌점</b>이 간다. 운영 모델 CP210은 낙관을 더 강하게 억제하려 β를 4까지 올렸다. <span class="muted">(재현 매니페스트엔 “MSE”로 표기돼 있으나 실제 코드는 δ=1 Huber 기반이다.)</span></p>
+  </div>
+
+  <div class="callout warn"><div class="ct">계획서 원문과의 연결</div>계획서 9페이지의 “Asymmetric Loss (β&gt;α), 상방 예측 오차에 더 큰 페널티 → 과도하게 낙관적인 예측 억제”는 그대로 구현됐다. 다만 계획서엔 단일 손실이었던 것이, 실제로는 라인 전용·밴드 전용(Pinball)·regime·분포형까지 여러 변종으로 분화했다.</p></div>
+</section>
+
+<!-- ===== 03 PLAN vs NOW ===== -->
+<section id="s3">
+  <div class="kicker">Plan vs Reality</div>
+  <h2><span class="sn">03</span>계획서 vs 현재 — 무엇이, 왜 바뀌었나</h2>
+  <p class="lead">2026년 4월 계획서(13장 PPT)는 6주 일정의 깔끔한 청사진이었다. 실제 6주는 그 청사진의 거의 모든 가정을 시험대에 올렸고, 대부분은 “더 정직한 쪽”으로 수정됐다. 아래 표가 그 전모다.</p>
+
+  <table>
+    <thead><tr><th style="width:13%">항목</th><th style="width:30%">계획서 (2026.04)</th><th style="width:32%">현재 (2026.06)</th><th>바뀐 이유</th></tr></thead>
+    <tbody>
+      <tr><td><b>데이터 소스</b></td><td>EODHD + FMP + FRED, Supabase 단일 DB 적재</td><td>yfinance 500 종목 → 로컬 parquet 원천 + 얇은 표시용 DB</td><td>개인 운영 비용 + 무료 티어 제약. provider provenance·adjusted OHLC 계약을 검증한 마이그레이션</td></tr>
+      <tr><td><b>데이터베이스</b></td><td>Supabase PostgreSQL 즉시 사용</td><td>로컬 parquet 서빙, Supabase 재연결 골격만(결제 후)</td><td>Supabase 무료 한도(500MB) + egress 비용. 학교 데모엔 로컬 parquet가 충분</td></tr>
+      <tr><td><b>모델</b></td><td>PatchTST·CNN-LSTM·TiDE 3종 비교</td><td>예측선=PatchTST, 밴드=<b>TiDE</b>(1D/1W). CNN-LSTM은 비교용</td><td>밴드 백본이 CNN-LSTM에서 TiDE로 전환(CP153 model zoo에서 coverage 정확도 1위)</td></tr>
+      <tr><td><b>평가지표</b></td><td>MAPE&lt;5%, 방향정확도&gt;55%, 밴드포함율&gt;90%, 응답&lt;3초</td><td>IC·severe recall·coverage_abs_error·band_width_ic + DM/Bootstrap/GW 통계검정</td><td>단순 지표는 “밴드를 무한정 넓히면 포함율 달성” 같은 허점. 위험 신호 품질을 재정의</td></tr>
+      <tr><td><b>밴드 포함율</b></td><td>&gt; 90%</td><td>1D 70%(q15~85), 1W 80%(q10~90)</td><td>5거래일에 90% CI는 너무 넓어 실용성 저하. 좁히되 정직하게 기록</td></tr>
+      <tr><td><b>일정</b></td><td>4/21~6/01, 6주 (DB→수집→모델→API→프론트→통합)</td><td>6/06+ 진행 중, 250+ CP의 반복 실험</td><td>모델이 통계 베이스라인을 못 이기는 현실을 마주하며 실험·검증이 크게 확장</td></tr>
+      <tr><td><b>응답속도</b></td><td>&lt; 3초 목표</td><td>실측 라인 9ms / 1D 밴드 27ms / 1W 10ms</td><td>로컬 parquet 인메모리 캐시 서빙으로 목표를 두 자릿수 ms로 초과 달성</td></tr>
+      <tr><td><b>결론 프레이밍</b></td><td>“AI 보조지표로 의사결정 지원”</td><td>좌동 + “ML은 통계 베이스라인을 이기기 어렵다”를 통계로 증명</td><td>Welch-Goyal·Makridakis 통설과 일치. 정직성을 핵심 가치로</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout"><div class="ct">변하지 않은 것</div>“AI = 보조지표, 의사결정은 사용자”라는 정체성, 비대칭 손실로 낙관을 억제하는 보수 철학, 예측선·밴드·규칙시그널 3출력 구조, S&amp;P 500 universe — 계획서의 골격은 그대로다. 바뀐 것은 <b>그 골격을 채우는 방법의 정직성</b>이다.</div>
+
+  <div class="callout warn"><div class="ct">계획에 없다가 추가된 트랙</div>① 정식 통계적 유의성 검정(DM·Bootstrap·GW), ② 현업 수준 코드 안정성 리팩토링(CP221~237), ③ 보안 점검 트랙(CP238~242, 설계), ④ 재현 매니페스트(GPU·venv·seed·fold·hash), ⑤ 일일 자동 refresh 파이프라인. 계획서엔 “향후 Docker 표준화” 한 줄로만 있던 영역이 실제로는 큰 비중이 됐다.</div>
+</section>
+
+<!-- ===== 04 ARCHITECTURE ===== -->
+<section id="s4">
+  <div class="kicker">System Architecture</div>
+  <h2><span class="sn">04</span>시스템 아키텍처 — 세 계층과 parquet 경계</h2>
+  <p class="lead">핵심 설계 원칙은 <b>“무거운 연산은 전부 오프라인에서 끝내고, 운영 백엔드는 미리 만든 parquet 스냅샷만 읽는다”</b>는 read-only 분리다. 덕분에 Render 무료 티어(512MB)에서 GPU·학습 의존성 없이 동작한다.</p>
+
+  <figure style="margin:26px 0">
+  <svg viewBox="0 0 1120 432" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="Lens 시스템 아키텍처 다이어그램">
+    <defs><marker id="arr" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#c0492f"/></marker></defs>
+    <rect x="0" y="0" width="1120" height="30" rx="8" fill="#eef3f5"/>
+    <text x="14" y="20" font-size="12.5" font-weight="800" fill="#0e5563">배포 흐름</text>
+    <text x="560" y="20" text-anchor="middle" font-size="12" fill="#43505f">로컬 PC (GPU 학습 · 일일 refresh) ──→ git push ──→ Render(백엔드) · Vercel(프론트)</text>
+    <!-- col1 오프라인 -->
+    <rect x="2" y="44" width="262" height="372" rx="12" fill="#eaf0fa" stroke="#1a4a8a" stroke-width="2"/>
+    <text x="133" y="68" text-anchor="middle" font-size="13.5" font-weight="800" fill="#1a4a8a">① 오프라인 · 로컬 GPU</text>
+    <text x="133" y="84" text-anchor="middle" font-size="10.5" fill="#5a6b7a">ai/ + backend/collector</text>
+    <g>
+      <rect x="20" y="98" width="226" height="46" rx="7" fill="#fff" stroke="#c5d4ea"/><text x="32" y="117" font-size="11.5" font-weight="700" fill="#16202c">데이터 수집</text><text x="32" y="133" font-size="10" fill="#5a6b7a">EODHD/yfinance · 재무·거시</text>
+      <rect x="20" y="152" width="226" height="46" rx="7" fill="#fff" stroke="#c5d4ea"/><text x="32" y="171" font-size="11.5" font-weight="700" fill="#16202c">피처 (feature_svc)</text><text x="32" y="187" font-size="10" fill="#5a6b7a">RSI·MACD·ATR·regime</text>
+      <rect x="20" y="206" width="226" height="52" rx="7" fill="#fff" stroke="#c5d4ea"/><text x="32" y="225" font-size="11.5" font-weight="700" fill="#16202c">학습 3모델</text><text x="32" y="241" font-size="10" fill="#5a6b7a">PatchTST · TiDE · CNN-LSTM</text>
+      <rect x="20" y="266" width="226" height="46" rx="7" fill="#fff" stroke="#c5d4ea"/><text x="32" y="285" font-size="11.5" font-weight="700" fill="#16202c">추론·보정</text><text x="32" y="301" font-size="10" fill="#5a6b7a">inference + band_calibration</text>
+      <rect x="20" y="320" width="226" height="46" rx="7" fill="#fff" stroke="#c5d4ea"/><text x="32" y="339" font-size="11.5" font-weight="700" fill="#16202c">익스포트 (scripts)</text><text x="32" y="355" font-size="10" fill="#5a6b7a">→ parquet 스냅샷</text>
+    </g>
+    <!-- col2 parquet -->
+    <rect x="300" y="44" width="200" height="372" rx="12" fill="#fbf0e0" stroke="#d97a0a" stroke-width="2.5"/>
+    <text x="400" y="68" text-anchor="middle" font-size="13.5" font-weight="800" fill="#b06a12">② parquet 경계</text>
+    <text x="400" y="84" text-anchor="middle" font-size="10" fill="#9a7a30">backend/data/v1 (read-only)</text>
+    <g>
+      <rect x="318" y="106" width="164" height="52" rx="7" fill="#fff" stroke="#e6c896"/><text x="330" y="126" font-size="11" font-weight="700" fill="#16202c">예측</text><text x="330" y="143" font-size="9.5" fill="#5a6b7a">line · band_1d · band_1w</text>
+      <rect x="318" y="168" width="164" height="48" rx="7" fill="#fff" stroke="#e6c896"/><text x="330" y="187" font-size="11" font-weight="700" fill="#16202c">시장</text><text x="330" y="203" font-size="9.5" fill="#5a6b7a">prices · indicators</text>
+      <rect x="318" y="226" width="164" height="48" rx="7" fill="#fff" stroke="#e6c896"/><text x="330" y="245" font-size="11" font-weight="700" fill="#16202c">예측 이력</text><text x="330" y="261" font-size="9.5" fill="#5a6b7a">product_history</text>
+    </g>
+    <text x="400" y="322" text-anchor="middle" font-size="10" fill="#9a7a30" font-style="italic">매일 refresh →</text>
+    <text x="400" y="338" text-anchor="middle" font-size="10" fill="#9a7a30" font-style="italic">git push 로 배포</text>
+    <!-- col3 백엔드 -->
+    <rect x="536" y="44" width="262" height="372" rx="12" fill="#e6f0f1" stroke="#0e5563" stroke-width="2"/>
+    <text x="667" y="68" text-anchor="middle" font-size="13.5" font-weight="800" fill="#0e5563">③ 백엔드 · Render</text>
+    <text x="667" y="84" text-anchor="middle" font-size="10.5" fill="#4a6670">FastAPI (512MB free)</text>
+    <g>
+      <rect x="554" y="98" width="226" height="60" rx="7" fill="#fff" stroke="#bcd6da"/><text x="566" y="116" font-size="11.5" font-weight="700" fill="#16202c">routers/v1</text><text x="566" y="132" font-size="10" fill="#5a6b7a">stocks·predictions·ai</text><text x="566" y="147" font-size="10" fill="#5a6b7a">strategies·admin·health</text>
+      <rect x="554" y="166" width="226" height="60" rx="7" fill="#fff" stroke="#bcd6da"/><text x="566" y="184" font-size="11.5" font-weight="700" fill="#16202c">services</text><text x="566" y="200" font-size="10" fill="#5a6b7a">parquet_store(공유캐시)</text><text x="566" y="215" font-size="10" fill="#5a6b7a">feature·strategy·history</text>
+      <rect x="554" y="234" width="226" height="44" rx="7" fill="#fff" stroke="#bcd6da"/><text x="566" y="252" font-size="11.5" font-weight="700" fill="#16202c">config·core</text><text x="566" y="268" font-size="10" fill="#5a6b7a">Settings·structlog</text>
+      <rect x="554" y="286" width="226" height="44" rx="7" fill="#fff" stroke="#bcd6da"/><text x="566" y="304" font-size="11.5" font-weight="700" fill="#16202c">pandera 계약</text><text x="566" y="320" font-size="10" fill="#5a6b7a">read 경계 dtype 검증</text>
+    </g>
+    <text x="667" y="358" text-anchor="middle" font-size="10" fill="#4a6670" font-style="italic">JSON 응답 9~27ms</text>
+    <!-- col4 프론트 -->
+    <rect x="834" y="44" width="284" height="372" rx="12" fill="#f0eaf7" stroke="#5a3a8a" stroke-width="2"/>
+    <text x="976" y="68" text-anchor="middle" font-size="13.5" font-weight="800" fill="#5a3a8a">④ 프론트 · Vercel</text>
+    <text x="976" y="84" text-anchor="middle" font-size="10.5" fill="#6a5a8a">Next.js 14 + TypeScript</text>
+    <g>
+      <rect x="852" y="98" width="248" height="46" rx="7" fill="#fff" stroke="#d6c8e6"/><text x="864" y="117" font-size="11.5" font-weight="700" fill="#16202c">StockView</text><text x="864" y="133" font-size="10" fill="#5a6b7a">차트 + 예측선·밴드 오버레이</text>
+      <rect x="852" y="152" width="248" height="46" rx="7" fill="#fff" stroke="#d6c8e6"/><text x="864" y="171" font-size="11.5" font-weight="700" fill="#16202c">BacktestView</text><text x="864" y="187" font-size="10" fill="#5a6b7a">규칙 전략 시뮬레이션</text>
+      <rect x="852" y="206" width="248" height="46" rx="7" fill="#fff" stroke="#d6c8e6"/><text x="864" y="225" font-size="11.5" font-weight="700" fill="#16202c">TrainingView</text><text x="864" y="241" font-size="10" fill="#5a6b7a">AI 모델·통계검정·재현</text>
+      <rect x="852" y="260" width="248" height="46" rx="7" fill="#fff" stroke="#d6c8e6"/><text x="864" y="279" font-size="11.5" font-weight="700" fill="#16202c">lib / api</text><text x="864" y="295" font-size="10" fill="#5a6b7a">backtest·training·chart 분리</text>
+      <rect x="852" y="314" width="248" height="46" rx="7" fill="#fff" stroke="#d6c8e6"/><text x="864" y="333" font-size="11.5" font-weight="700" fill="#16202c">lightweight-charts</text><text x="864" y="349" font-size="10" fill="#5a6b7a">캔들 + 오버레이 렌더</text>
+    </g>
+    <line x1="266" y1="222" x2="298" y2="222" stroke="#c0492f" stroke-width="2.5" marker-end="url(#arr)"/>
+    <line x1="502" y1="222" x2="534" y2="222" stroke="#c0492f" stroke-width="2.5" marker-end="url(#arr)"/>
+    <line x1="800" y1="222" x2="832" y2="222" stroke="#c0492f" stroke-width="2.5" marker-end="url(#arr)"/>
+  </svg>
+  <figcaption style="text-align:center;font-size:12.5px;color:#7a8694;margin-top:8px">그림 1. 시스템 아키텍처 — 오프라인 학습이 parquet 스냅샷을 만들고, 백엔드는 그것만 읽어 서빙한다 (read-only 분리)</figcaption>
+  </figure>
+
+  <h3>데이터 흐름</h3>
+  <div class="flow">
+    <div class="step"><div class="lbl alt">① 수집</div><div class="desc"><code>backend/collector</code> — EODHD/yfinance OHLCV + 재무·거시·섹터. sources → jobs → pipelines(daily_sync) → repositories</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl alt">② 피처</div><div class="desc"><code>feature_calculator</code> — RSI·MACD·볼린저·ATR·MA비율 + regime·context. <b>학습과 서빙이 같은 feature_svc를 재사용</b>해 train-serving skew 차단</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl ai">③ 학습</div><div class="desc"><code>ai/train</code> — PatchTST·TiDE·CNN-LSTM 멀티헤드 → <code>checkpoints/*.pt</code>. 비대칭/Pinball 손실, 캘린더 분할, 평가</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl ai">④ 추론·보정</div><div class="desc"><code>ai/inference</code> + <code>band_calibration</code> → 예측 산출 (분위수 밴드 후처리 보정 포함)</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl">⑤ 익스포트</div><div class="desc"><code>backend/scripts</code> — line_export·band_refresh·history_rebuild → <code>backend/data/v1/*.parquet</code> (서빙 스냅샷)</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl">⑥ 서빙</div><div class="desc"><code>backend/app</code> (FastAPI) — parquet_store / local_market_svc 가 parquet을 메모리 캐시 후 JSON 응답</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl fe">⑦ 프론트</div><div class="desc"><code>frontend/src</code> — axios 클라이언트 → lightweight-charts 캔들 위 예측선·밴드 오버레이</div></div>
+  </div>
+
+  <h3>세 계층의 구성</h3>
+  <div class="arch">
+    <div class="col be"><h4>백엔드 backend/</h4>
+      <ul>
+        <li><b>app/routers/v1</b> — health·stocks·predictions·ai·strategies·admin (얇은 HTTP 경계)</li>
+        <li><b>app/services</b> — parquet_store(공유 캐시)·local_market_svc·product_history_svc·feature_svc(4모듈)·strategy_backtest_svc(3모듈)</li>
+        <li><b>app/config</b> — Pydantic Settings 5도메인</li>
+        <li><b>collector/</b> — sources→jobs→pipelines→repositories</li>
+        <li><b>scripts/</b> — AI 산출물→parquet 익스포트 브리지</li>
+        <li><b>data/v1/</b> — 운영 parquet 스냅샷</li>
+      </ul>
+    </div>
+    <div class="col ai"><h4>AI ai/</h4>
+      <ul>
+        <li><b>models/</b> — patchtst·tide·cnn_lstm (공통 멀티헤드 출력 계약)</li>
+        <li><b>preprocessing</b> — 백엔드 feature_svc 재사용 → SequenceDataset</li>
+        <li><b>train·loss·splits·targets</b> — 학습 루프·Pinball·누수없는 분할</li>
+        <li><b>inference·band_calibration</b> — 추론·분위수 보정</li>
+        <li><b>eval/significance</b> — DM·GW·Bootstrap·GARCH walk-forward</li>
+        <li><b>torch_bootstrap</b> — Windows/GPU 환경 고정</li>
+      </ul>
+    </div>
+    <div class="col fe"><h4>프론트 frontend/src/</h4>
+      <ul>
+        <li><b>components</b> — StockView·BacktestView·TrainingView·ReportView + AppShell</li>
+        <li><b>api</b> — baseClient(axios) + endpoints + types (facade)</li>
+        <li><b>lib</b> — backtest·training·stock·chart 도메인 분리</li>
+        <li><b>app/styles</b> — 13개 CSS 뷰별 모듈화</li>
+        <li>predictionOverlay·staleness·formatters</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout"><div class="ct">아키텍처의 특징</div>세 계층은 <b>parquet 스냅샷이라는 단일 경계</b>로 느슨하게 결합된다. 학습/서빙 피처를 <code>feature_svc</code> 하나로 공유해 skew를 차단하고, parquet read 경계마다 pandera dtype 계약과 메모리 압축(category·float32)을 적용해 무료 티어 OOM과 dtype 회귀를 동시에 막는다.</div>
+</section>
+
+<!-- ===== 05 DATA ===== -->
+<section id="s5">
+  <div class="kicker">Data Infrastructure</div>
+  <h2><span class="sn">05</span>데이터 인프라 진화 — EODHD에서 로컬 parquet까지</h2>
+  <p class="lead">이 영역의 서사는 “무료 데이터로 갈아탔다”가 아니라 “모델 입력의 원천을 <b>감사 가능하게</b> 옮겼다”이다. 데이터 계약을 모델 성능보다 먼저 고정한다는 원칙이 관통한다.</p>
+
+  <h3>1단계 — 데이터 길이 위기와 feature 계약 (CP2.5 → CP2.6)</h3>
+  <p>AAPL처럼 10년치가 확실한 종목의 학습 가능 행이 1D 753행(목표 ≥2200)에 불과했다. 수정 금지 조사 CP로 원인을 3가설 중 숫자로 확정한 결과, 병목은 가격이 아니라 <b>컨텍스트 테이블 결측이 feature를 통째로 dropna시킨 것</b>이었다(신용 스프레드는 2023-04부터, market breadth는 2016-04부터 시작). 컨텍스트 결측을 dropna 사유에서 빼고 <code>has_macro/has_breadth</code> 플래그 + 0 대체로 바꾸자 AAPL 1D가 753 → <b>2784행</b>으로 회복. “데이터 계약” 개념이 처음 등장한 지점.</p>
+
+  <h3>2단계 — indicator 백필과 adjusted OHLC 계약 (CP44 → CP64)</h3>
+  <p><code>atr_ratio</code>가 계산식은 있는데 출력 컬럼에서 빠져 DB에 0건이었다. 공식 경로로만 재계산해 non-null을 0 → <b>164만 행(전 row 100%)</b>으로 채웠다. 더 중요한 건 raw OHLC와 adjusted 기준 계산물이 섞인 과거 row를 prune하고 <b>adjusted OHLC v3 계약</b>(<code>adjusted_close/close</code> factor로 OHLC 통일)을 확립한 것 — 이 계약이 이후 provider 전환의 핵심 잣대가 됐다.</p>
+
+  <h3>3단계 — provider 전환: EODHD → yfinance (CP86 → CP96)</h3>
+  <p>가격 수집에 provider 추상화 계층을 넣고 yfinance를 primary, EODHD를 fallback으로 뒀다(<b>코드 삭제 아님</b>). yfinance를 가능케 한 핵심은 Lens feature 계약이 DB raw를 직접 먹지 않고 adjusted OHLC를 재구성하기 때문 — provider의 raw close가 달라도 adjusted 재구성이 정상이면 모델 계약은 유지된다.</p>
+  <div class="callout good"><div class="ct">3겹 provenance 방어선</div>① price_data에 <code>source/provider/policy</code> 컬럼 추가, ② data fingerprint(hash)에 provider/policy 반영 → provider 다르면 같은 종목·날짜라도 hash가 달라짐, ③ feature cache 옆 manifest로 mismatch 시 재사용 거부. “provider를 바꿔도 어느 데이터로 학습했는지 추적 가능”을 보장.</div>
+
+  <h3>4단계 — Supabase 창고 → 로컬 parquet 원천 (CP98 → CP117)</h3>
+  <p>Supabase 무료 한도와 egress 비용 압박으로, 저장 구조를 “Supabase 단일 창고”에서 <b>“로컬 parquet 원천 + 얇은 표시용 DB”</b>로 옮겼다. <code>LENS_DATA_BACKEND=local</code> + bulk read guard로 Supabase 대량 read를 차단하고, 제품 예측은 latest-only thin upload만 허용. EODHD-off 최종 리허설(CP116) PASS로 <b>EODHD 해지 가능 판정</b>.</p>
+
+  <h3>5단계 — 500 종목 확장을 위한 EODHD 복귀 (CP132 → CP146)</h3>
+  <p>반전: 100종목 로컬 루프가 완성됐지만 두 한계가 드러났다. ① full_features 컨텍스트가 0-fill되어 “시장 지표 활용”이라 말할 수 없었고(WARN), ② 500종목 풀 데이터셋을 받으려니 yfinance가 rate limit(429)에 걸렸다. 그래서 EODHD를 병렬 부트스트랩으로 다시 소환하되 <b>provider별 dataset을 끝까지 분리</b>(split 정책이 경계일에서 섞이는 것 방지). EODHD 500 부트스트랩 1,387,834행, 실패 0으로 풀 학습 데이터셋을 확보했다.</p>
+
+  <table>
+    <thead><tr><th>구간</th><th>CP</th><th>핵심 사건</th><th class="num">결과</th></tr></thead>
+    <tbody>
+      <tr><td>데이터 복구</td><td>2.5→2.6</td><td>컨텍스트 결측이 feature를 dropna시킨 병목 규명</td><td class="num">753→2784행</td></tr>
+      <tr><td>indicator 백필</td><td>44→64</td><td>atr_ratio 백필 + stale row prune + adjusted OHLC v3</td><td class="num">0→164만 행</td></tr>
+      <tr><td>provider 전환</td><td>86→96</td><td>yfinance primary, EODHD fallback, source-aware split</td><td class="num">3겹 방어선</td></tr>
+      <tr><td>저장 전환</td><td>98→117</td><td>Supabase 창고 → 로컬 parquet 원천 + 얇은 DB</td><td class="num">EODHD 해지 가능</td></tr>
+      <tr><td>500 확장</td><td>132→146</td><td>0-fill 발견, EODHD 병렬 부트스트랩, 풀 학습</td><td class="num">503종목 데이터셋</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 06 LINE ===== -->
+<section id="s6">
+  <div class="kicker">Line Model Lineage</div>
+  <h2><span class="sn">06</span>예측선(라인) 계보 — PatchTST의 진화</h2>
+  <p class="lead">예측선은 처음부터 “맞히는 선”이 아니라 “덜 위험하게 틀리는 보수적인 선”을 목표로 출발했다. CP13의 PatchTST solo 선언에서 CP210의 F4 β=4 앙상블까지, 그 사이에 굵직한 실패 분기들이 박혀 있다.</p>
+
+  <figure style="margin:26px 0">
+  <svg viewBox="0 0 1120 348" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="딥러닝 실험·평가 파이프라인">
+    <defs><marker id="arr2" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0e5563"/></marker></defs>
+    <rect x="194" y="34" width="736" height="26" rx="8" fill="#fbf4ea" stroke="#e6c896" stroke-dasharray="4 3"/>
+    <text x="562" y="51" text-anchor="middle" font-size="11" fill="#b06a12" font-style="italic">↻ 250+ CP 반복 — 피처·학습·평가를 돌며 수렴 (CP13 → CP216)</text>
+    <!-- 1 데이터 -->
+    <rect x="2" y="78" width="160" height="128" rx="11" fill="#eef3f5" stroke="#7a8694" stroke-width="1.5"/>
+    <text x="82" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#43505f">데이터</text>
+    <text x="82" y="128" text-anchor="middle" font-size="10" fill="#5a6b7a">S&amp;P 500 OHLCV</text>
+    <text x="82" y="144" text-anchor="middle" font-size="10" fill="#5a6b7a">+ 거시·재무</text>
+    <text x="82" y="182" text-anchor="middle" font-size="9.5" fill="#9aa6b2">2015~ (기간 한계)</text>
+    <!-- 2 피처 -->
+    <rect x="194" y="78" width="160" height="128" rx="11" fill="#eaf0fa" stroke="#1a4a8a" stroke-width="1.5"/>
+    <text x="274" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#1a4a8a">피처</text>
+    <text x="274" y="128" text-anchor="middle" font-size="10" fill="#5a6b7a">F0~F8 pack</text>
+    <text x="274" y="144" text-anchor="middle" font-size="10" fill="#5a6b7a">v3_adjusted_ohlc</text>
+    <text x="274" y="160" text-anchor="middle" font-size="10" fill="#5a6b7a">RSI·ATR·regime</text>
+    <!-- 3 학습 -->
+    <rect x="386" y="78" width="160" height="128" rx="11" fill="#e0e8f5" stroke="#1a4a8a" stroke-width="1.5"/>
+    <text x="466" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#1a4a8a">학습 / sweep</text>
+    <text x="466" y="128" text-anchor="middle" font-size="10" fill="#5a6b7a">PatchTST · TiDE</text>
+    <text x="466" y="144" text-anchor="middle" font-size="10" fill="#5a6b7a">CNN-LSTM</text>
+    <text x="466" y="182" text-anchor="middle" font-size="9.5" fill="#9aa6b2">5-seed · walk-forward</text>
+    <!-- 4 평가 -->
+    <rect x="578" y="78" width="160" height="128" rx="11" fill="#e6f0f1" stroke="#0e5563" stroke-width="1.5"/>
+    <text x="658" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#0e5563">평가</text>
+    <text x="658" y="128" text-anchor="middle" font-size="9.5" fill="#5a6b7a">IC · severe recall</text>
+    <text x="658" y="144" text-anchor="middle" font-size="9.5" fill="#5a6b7a">coverage_abs_err</text>
+    <text x="658" y="160" text-anchor="middle" font-size="9.5" fill="#5a6b7a">band_width_ic</text>
+    <!-- 5 통계검정 -->
+    <rect x="770" y="78" width="160" height="128" rx="11" fill="#fbf0e0" stroke="#d97a0a" stroke-width="1.5"/>
+    <text x="850" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#b06a12">통계검정</text>
+    <text x="850" y="128" text-anchor="middle" font-size="9.5" fill="#5a6b7a">DM · Bootstrap</text>
+    <text x="850" y="144" text-anchor="middle" font-size="9.5" fill="#5a6b7a">GW · Cohen's d</text>
+    <text x="850" y="160" text-anchor="middle" font-size="9.5" fill="#5a6b7a">Bonferroni</text>
+    <!-- 6 운영 -->
+    <rect x="962" y="78" width="156" height="128" rx="11" fill="#e0f0e8" stroke="#0f7a52" stroke-width="2.2"/>
+    <text x="1040" y="104" text-anchor="middle" font-size="12.5" font-weight="800" fill="#0f7a52">운영 3모델</text>
+    <text x="1040" y="128" text-anchor="middle" font-size="9.5" fill="#5a6b7a">라인 CP210</text>
+    <text x="1040" y="144" text-anchor="middle" font-size="9.5" fill="#5a6b7a">1D밴드 CP153</text>
+    <text x="1040" y="160" text-anchor="middle" font-size="9.5" fill="#5a6b7a">1W밴드 CP178</text>
+    <!-- 화살표 -->
+    <line x1="162" y1="142" x2="192" y2="142" stroke="#0e5563" stroke-width="2" marker-end="url(#arr2)"/>
+    <line x1="354" y1="142" x2="384" y2="142" stroke="#0e5563" stroke-width="2" marker-end="url(#arr2)"/>
+    <line x1="546" y1="142" x2="576" y2="142" stroke="#0e5563" stroke-width="2" marker-end="url(#arr2)"/>
+    <line x1="738" y1="142" x2="768" y2="142" stroke="#0e5563" stroke-width="2" marker-end="url(#arr2)"/>
+    <line x1="930" y1="142" x2="960" y2="142" stroke="#0e5563" stroke-width="2" marker-end="url(#arr2)"/>
+    <!-- 아래: 실패 분기 + 베이스라인 -->
+    <line x1="466" y1="206" x2="466" y2="236" stroke="#c0492f" stroke-width="1.5" stroke-dasharray="3 2"/>
+    <rect x="386" y="238" width="160" height="92" rx="10" fill="#fbefec" stroke="#c0492f" stroke-width="1.2"/>
+    <text x="466" y="258" text-anchor="middle" font-size="10.5" font-weight="700" fill="#c0492f">주요 실패 분기</text>
+    <text x="466" y="278" text-anchor="middle" font-size="9.5" fill="#8a3a2a">universe 확장 붕괴</text>
+    <text x="466" y="294" text-anchor="middle" font-size="9.5" fill="#8a3a2a">calibration gap</text>
+    <text x="466" y="310" text-anchor="middle" font-size="9.5" fill="#8a3a2a">replay ≠ true WF</text>
+    <line x1="850" y1="206" x2="850" y2="236" stroke="#5a6b7a" stroke-width="1.5" stroke-dasharray="3 2"/>
+    <rect x="770" y="238" width="160" height="92" rx="10" fill="#f0f3f5" stroke="#5a6b7a" stroke-width="1.2"/>
+    <text x="850" y="258" text-anchor="middle" font-size="10.5" font-weight="700" fill="#43505f">비교 베이스라인</text>
+    <text x="850" y="278" text-anchor="middle" font-size="9.5" fill="#5a6b7a">historical_quantile</text>
+    <text x="850" y="294" text-anchor="middle" font-size="9.5" fill="#5a6b7a">GARCH walk-forward</text>
+    <text x="850" y="310" text-anchor="middle" font-size="9.5" fill="#5a6b7a">bollinger</text>
+  </svg>
+  <figcaption style="text-align:center;font-size:12.5px;color:#7a8694;margin-top:8px">그림 2. 딥러닝 실험·평가 파이프라인 (라인·밴드 공통) — 250+ CP의 반복이 이 흐름을 돌며 운영 3모델로 수렴했다</figcaption>
+  </figure>
+
+  <div class="tl">
+    <div class="node"><div class="when">CP13</div><div class="ti">PatchTST solo 선언</div><p>모델을 늘리는 게 아니라 <b>줄이는</b> 단계. TiDE·CNN-LSTM을 동결하고 PatchTST 하나만 논문 기준으로 재정렬. “성능보다 먼저 지표가 실험 축을 따라 일관되게 움직이는지”를 본다는 원칙 수립.</p></div>
+    <div class="node fail"><div class="when">CP25→28</div><div class="ti">Universe 확장의 붕괴</div><p>50종목에서 멀쩡하던 밴드 calibration이 100·200종목으로 가며 coverage 0.89→0.46으로 붕괴. 진단: <code>val_total</code> 기준 best와 coverage 기준 best가 다르다 → coverage-aware checkpoint 도입.</p></div>
+    <div class="node fail"><div class="when">CP32→33</div><div class="ti">Clean feature 재검증 + RevIN ablation</div><p>이전 판단이 전부 오염 피처(v2) 기준이었음을 인정하고 재검증 → 기존 후보 전부 탈락(validation IC는 양수인데 test fee는 음수). RevIN을 꺼봐도 해법이 아니었다. “밴드 보정으로 라인을 살리는” 경로의 막다른 길.</p></div>
+    <div class="node"><div class="when">CP49</div><div class="ti">Horizon 분기 — h5/h20을 섞지 않는다</div><p>보수 라인 전용 지표(false_safe_rate, severe_downside_recall) 도입. h5 longer_context(p32/s16)가 일반 라인 최선. 교훈: <b>하나의 지표(IC)로 후보를 살리면 안 된다, 보수성과 알파는 trade-off</b>.</p></div>
+    <div class="node"><div class="when">CP68→70</div><div class="ti">표시 보정과 학습 보수성의 분리</div><p>학습으로 안 되니 post-hoc offset으로 라인을 내림. 핵심 용어 계약: <code>trained_conservative_line</code>(학습 보수성)과 <code>display_calibrated_line</code>(표시 보정)을 엄격히 구분.</p></div>
+    <div class="node"><div class="when">CP148</div><div class="ti">risk-aware feature pack의 발견</div><p>단순 hp 튜닝(dropout/lr)이 false-safe 개선에 실패 → feature 인지 문제로 재정의. stress_delta(C: atr·vix·credit·ma200)가 IC 보존, 개별 종목 취약성(D)이 하방 안정. <b>3-seed 재평가에서 D는 단일 seed 착시로 무너지고 C가 primary</b>.</p></div>
+    <div class="node ship"><div class="when">CP208Z→210</div><div class="ti">F4 feature pack과 최종 운영 모델</div><p><b>F4_stress_delta_plus_yield_curve</b>(C + 금리곡선) lock. β=4로 낙관 억제 강화, 5-seed(7/13/23/42/71) 앙상블. 단 walk-forward IC range 0.0457 &gt; 0.040으로 ship 판정은 <code>NO_SHIP</code> — 그럼에도 운영 채택하며 “WF 안정성 moderate”로 정직하게 기록.</p></div>
+  </div>
+
+  <div class="callout warn"><div class="ct">라인의 정직한 한계</div>CP216 통계검정 결과 <b>라인은 통계 베이스라인과 사실상 동등</b>하다(앙상블의 추가 가치가 통계적으로 확인되지 않음). 라인은 가격 절대값이 아니라 수익률 score 모델이라 계획서의 MAPE는 아예 산정하지 않았고, IC 0.0325는 양수지만 약하다. 처음 설계대로 <b>“부족한 걸 알고 시작한 보수선”</b>으로 v1에 남았다.</div>
+</section>
+
+<!-- ===== 07 BAND ===== -->
+<section id="s7">
+  <div class="kicker">Band Model Lineage</div>
+  <h2><span class="sn">07</span>예측 밴드 계보 — TiDE 분위수 밴드</h2>
+  <p class="lead">Plan v3에서 밴드가 본체로 확정됐다. 계보의 줄기는 <b>Bollinger 기준선 → PatchTST 분위수 → TiDE 전환 → conformal 보정 → true walk-forward → 1D/1W 운영 lock</b>이다. 밴드 백본이 CNN-LSTM에서 TiDE로 갈아탄 것이 가장 큰 전환점이다.</p>
+
+  <div class="two">
+    <div>
+      <h3>핵심 전환점</h3>
+      <ul class="clean">
+        <li><b>과보수의 함정 (CP22)</b> — 분위수 밴드는 방치하면 coverage 1.0의 무의미한 폭이 된다. q 압축 + λ로 좁혀야. 이때 “밴드를 좁히면 <b>upper breach가 lower보다 빨리 터진다</b>”는 구조적 비대칭 관찰 → 후일 lower_focused의 근거.</li>
+        <li><b>후처리 보정의 한계 (CP38)</b> — scalar/conformal 보정은 폭 문제는 고치나 <b>분포 중심 이동은 못 고친다</b>. validation coverage 0.82가 test 0.59로 무너진 TiDE를 단순 보정으로 못 살림.</li>
+        <li><b>fair baseline의 냉정함 (CP55)</b> — 통계 baseline이 강해 “AI가 직접 lower/upper 예측”의 우위가 작다. feature 정리·백본 재탐색으로 선회.</li>
+        <li><b>백본 전환 (CP153 stage2)</b> — 8개 백본 경쟁에서 <code>tide_s104_q15</code>가 coverage 오차 0.020으로 1위, CNN-LSTM은 2위로. <b>CNN-LSTM→TiDE 전환</b>.</li>
+        <li><b>replay ≠ true walk-forward (CP153 5→5T)</b> — 같은 체크포인트 재대입(replay)은 미래 누수. fold마다 fresh 학습 + validation-only 보정만이 진짜 OOS.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>왜 lower_focused 인가</h3>
+      <p>Stage 3에서 네 갈래 보정(raw / scalar_width / <b>lower_focused</b> / separate_scale)을 비교했다. <code>raw·symmetric</code>은 coverage를 맞추려 양쪽을 같이 넓혀 upper까지 부풀려 interval score가 나빠진다. <code>lower_focused</code>는 <b>upper를 고정한 채 lower만 보정</b>해, upper_breach를 0.176에 묶고 lower_breach만 0.166→0.028로 조이며 coverage 오차 최저점(0.0104)을 만든다.</p>
+      <div class="callout"><div class="ct">제품적 정당성</div>주식 위험 구간에서 사용자가 가장 다치는 시나리오는 가격이 <b>하단을 뚫고 더 떨어지는 것</b>이다. lower breach를 우선 통제하는 비대칭 보정이 옳고, CP22부터 관찰된 “upper breach가 더 크다”와도 일관된다.</div>
+    </div>
+  </div>
+
+  <h3>최종 운영 산출물 (lock 상태)</h3>
+  <table>
+    <thead><tr><th>항목</th><th>1D 밴드 (CP153)</th><th>1W 밴드 (CP178-WFLOCK)</th></tr></thead>
+    <tbody>
+      <tr><td>백본 / 분위수</td><td>TiDE · q15/q85 (목표 70%)</td><td>TiDE · q10/q90 (목표 80%)</td></tr>
+      <tr><td>보정</td><td>lower_focused (validation-only)</td><td>walk-forward lower calibration</td></tr>
+      <tr><td>coverage_abs_error</td><td class="num"><b>0.0099</b> (save-run) / 0.0254 (5T 평균)</td><td class="num"><b>0.039</b></td></tr>
+      <tr><td>band_width_ic</td><td class="num">0.376</td><td class="num">0.34</td></tr>
+      <tr><td>lower / upper breach</td><td class="num">0.159 / 0.151</td><td class="num">0.118 / 0.117</td></tr>
+      <tr><td>검증</td><td>Stage 5T true WF (3 fold × 3 seed)</td><td>Stage 5 true WF + WFLOCK</td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:13.5px">※ 1W는 strict 1W 기준으론 탈락이지만 1D와 동일한 대칭 기준을 적용하면 product candidate가 된다 — “1W가 1D보다 어렵다는 이유로 더 엄격한 잣대를 들이댔을 뿐”이라는 게 채택 논리. 실제로 1W의 lower breach(0.118)는 1D(0.143)보다 오히려 낮다.</p>
+</section>
+
+<!-- ===== 08 METRICS ===== -->
+<section id="s8">
+  <div class="kicker">Evaluation Philosophy</div>
+  <h2><span class="sn">08</span>평가지표 철학 — MAPE를 버린 이유</h2>
+  <p class="lead">계획서의 합격 기준(MAPE&lt;5%, 방향정확도&gt;55%, 포함율&gt;90%)은 “AI가 가격을 잘 맞히는가”를 묻는다. 그런데 Lens가 실제로 파는 것은 “맞히기”가 아니라 <b>“위험을 일관되게 신호하기”</b>다. 이 간극이 지표 재설계의 출발점이다.</p>
+
+  <h3>왜 단순 지표가 무너졌나</h3>
+  <div class="grid g3">
+    <div class="card"><h4>MAPE → 폐기</h4><p style="margin:0">예측선은 가격 절대값이 아니라 수익률 score라 MAPE가 의미 없다. 실제 코드엔 mape 자체가 없고 smape만 보조로 남았다.</p></div>
+    <div class="card"><h4>방향정확도 → 보조</h4><p style="margin:0">코드에 남았지만 본 판정은 <b>IC(순위 상관)</b>와 long-short spread로 넘어갔다. 방향만 맞히는 것으로는 위험을 못 잡는다.</p></div>
+    <div class="card"><h4>포함율 90% → coverage_abs_error</h4><p style="margin:0">밴드를 무한정 넓히면 포함율은 그냥 달성된다. 그래서 <b>“목표 coverage 대비 오차”</b>와 “폭이 실제 위험과 동조하는가(band_width_ic)”로 교체.</p></div>
+  </div>
+
+  <h3>지표 재설계 4부작 (CP51 → CP54)</h3>
+  <p>지표를 line/band/composite 3계층으로 분리하고 신규 지표를 대거 추가했다: coverage_abs_error, lower/upper_breach_rate, median/p90 band_width, asymmetric interval score(하방 penalty 2.0 &gt; 상방 1.0), <b>band_width_ic</b>(폭 vs 실제 변동성 순위상관), downside_width_ic, ic_t_stat·spread_t_stat(통계 안정성), <b>severe_downside_recall</b>(<code>P(score&lt;0 | 실제 ≤ train q10)</code>).</p>
+  <div class="callout bad"><div class="ct">결정적 진실의 순간 — CP54</div>CP52 표준 지표판을 <b>단순 통계 베이스라인에도 적용</b>해 AI가 실제로 이겼는지 검증한 결과: CNN-LSTM 밴드의 coverage_abs_error 0.107 vs Bollinger <b>0.0000</b>, interval_score 0.149 vs historical_quantile 0.131, band_width_ic 0.246 vs 0.378. <b>“AI 밴드가 단순 통계 밴드보다 아직 밀린다”가 데이터로 확정됐다.</b> 이것이 통계 베이스라인 우위론의 정점.</div>
+
+  <h3>역할 분리 원칙</h3>
+  <p>CP37에서 line_gate / band_gate를 분리했다. <b>밴드 모델은 순위 예측력(IC)으로 평가하지 않고, 라인 모델은 coverage로 평가하지 않는다.</b> <code>ai/evaluation.py</code>는 총 109개 지표를 정의하지만 운영 판정에는 핵심 12개만 쓴다 — 계획서의 MAPE·방향정확도는 그 12개에 없다.</p>
+</section>
+
+<!-- ===== 09 SIGNIFICANCE ===== -->
+<section id="s9">
+  <div class="kicker">Statistical Significance · 학술적 클라이맥스</div>
+  <h2><span class="sn">09</span>통계적 유의성 검정 — 정직한 결론</h2>
+  <p class="lead">운영 3모델을 베이스라인과 정식 통계검정으로 비교했다. 핵심 결론을 먼저: <b>ML이 단순 통계 베이스라인을 이기는 일은 어렵고, Lens도 그 통설에서 자유롭지 않았다. 다만 1W 밴드 한 곳에서만 명확한 우위를 확보했고, 그 우위가 시장 국면에 조건부로 체계적</b>이라는 점이 선택적 출력의 근거가 됐다.</p>
+
+  <figure style="margin:24px 0">
+  <div class="grid g3">
+    <div class="card" style="border-top:4px solid #5a6b7a"><span class="pill eq">통계 동등</span><h4 style="margin:.55em 0 .3em">예측선 · CP210</h4><p style="margin:0;font-size:13.5px">과거 평균·이전 모델과 IC 차이 <b>없음</b> (Bonferroni p=1.00). 앙상블의 추가 가치가 통계적으로 확인되지 않았다.</p></div>
+    <div class="card" style="border-top:4px solid #c0492f"><span class="pill bad">통계 열위</span><h4 style="margin:.55em 0 .3em">1D 밴드 · CP153</h4><p style="margin:0;font-size:13.5px">단순 분위수(d=0.93)·walk-forward GARCH(d=0.45)를 <b>못 이김</b>. 볼린저에만 우위.</p></div>
+    <div class="card" style="border-top:4px solid #0f7a52"><span class="pill good">통계 우위</span><h4 style="margin:.55em 0 .3em">1W 밴드 · CP178</h4><p style="margin:0;font-size:13.5px">walk-forward GARCH 대비 <b>d=−0.98</b> + GW 3 regime p&lt;0.001. 유일한 명확한 우위.</p></div>
+  </div>
+  <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:10px">그림 5. 통계검정 한눈 평결 — ML은 통계 베이스라인과 대체로 동등·열위, <b>1W 밴드만</b> 우위</figcaption>
+  </figure>
+
+  <h3>검정 도구 4종 + 보정</h3>
+  <div class="grid g4">
+    <div class="card"><h4>Diebold-Mariano</h4><p style="margin:0;font-size:13.5px">두 손실 시계열 차이의 예측력 동등성 검정. HAC(Newey-West) 분산으로 자기상관 보정.</p></div>
+    <div class="card"><h4>Bootstrap CI</h4><p style="margin:0;font-size:13.5px">cluster(종목 복원추출)+block(시간 √T) 두 방식 ×1000회. 둘 다 0을 안 걸치면 강한 결론.</p></div>
+    <div class="card"><h4>Giacomini-White</h4><p style="margin:0;font-size:13.5px">국면(VIX&gt;30, drawdown)에 손실 차이가 조건부로 의존하는지 Wald 검정.</p></div>
+    <div class="card"><h4>효과크기 + 보정</h4><p style="margin:0;font-size:13.5px">거대 표본 p-hacking 함정 방어 — Cohen's d + CI + Bonferroni를 항상 병기.</p></div>
+  </div>
+
+  <div class="callout"><div class="ct">공정성 보강 — 이 프로젝트가 “학계 무기”가 되는 지점 (CP216.2)</div>1차 검정의 GARCH는 전체 시계열 1회 fit(in-sample)이었다. 운영 밴드는 fold마다 fresh fit인데 GARCH만 유리한 조건이면 <b>베이스라인이 부당하게 강하다</b>. 그래서 각 fold train 구간으로만 fit하는 <b>walk-forward GARCH</b>를 새로 만들어 비교에 추가했다. 이 한 수가 결과의 신뢰도를 가른다.</div>
+
+  <h3>결과 ① 예측선 CP210 (IC, 높을수록 좋음)</h3>
+  <div class="bars">
+    <div class="bar"><span>과거 평균</span><div class="track"><div class="fill" style="left:50%;width:3%;background:#5a6b7a"></div></div><span class="v" style="color:#5a6b7a">+0.12 동등</span></div>
+    <div class="bar"><span>이전 모델 (β=5)</span><div class="track"><div class="fill" style="right:50%;width:2%;background:#5a6b7a"></div></div><span class="v" style="color:#5a6b7a">−0.07 동등</span></div>
+  </div>
+  <p class="muted" style="font-size:12px;text-align:center;margin:.2em 0 1em">← 우위 &nbsp;|&nbsp; 중앙 = 동등 &nbsp;|&nbsp; 열위 → &nbsp;&nbsp;(Cohen's d · 둘 다 0 근처 = 동등)</p>
+  <table>
+    <thead><tr><th>베이스라인</th><th class="num">mean diff</th><th class="num">Cohen's d</th><th class="num">Bonferroni p</th><th>결론</th></tr></thead>
+    <tbody>
+      <tr><td>과거 평균 (historical_mean)</td><td class="num">+0.0081</td><td class="num">+0.12</td><td class="num">1.00</td><td><span class="pill eq">통계 동등</span></td></tr>
+      <tr><td>이전 모델 동결 (cp175 β=5)</td><td class="num">−0.0027</td><td class="num">−0.07</td><td class="num">1.00</td><td><span class="pill eq">통계 동등</span></td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:13.5px">5-seed 앙상블의 IC가 과거 평균이나 이전 frozen 모델과 통계적으로 다르지 않다(p=1.00). 점추정 순위가 아니라 통계 판정이 결론.</p>
+
+  <h3>결과 ② 1D 밴드 CP153 (pinball, 낮을수록 좋음)</h3>
+  <div class="bars">
+    <div class="bar"><span>볼린저</span><div class="track"><div class="fill" style="left:50%;width:47%;background:#0f7a52"></div></div><span class="v" style="color:#0f7a52">−1.97 우위</span></div>
+    <div class="bar"><span>과거 분위수</span><div class="track"><div class="fill" style="right:50%;width:22%;background:#c0492f"></div></div><span class="v" style="color:#c0492f">+0.93 열위</span></div>
+    <div class="bar"><span>정적 GARCH</span><div class="track"><div class="fill" style="right:50%;width:6%;background:#5a6b7a"></div></div><span class="v" style="color:#5a6b7a">+0.24 동등</span></div>
+    <div class="bar"><span>walk-forward GARCH</span><div class="track"><div class="fill" style="right:50%;width:11%;background:#c0492f"></div></div><span class="v" style="color:#c0492f">+0.45 열위</span></div>
+  </div>
+  <p class="muted" style="font-size:12px;text-align:center;margin:.2em 0 1em">← 우위 &nbsp;|&nbsp; 중앙 = 동등 &nbsp;|&nbsp; 열위 → &nbsp;&nbsp;(Cohen's d · pinball, 낮을수록 좋음)</p>
+  <table>
+    <thead><tr><th>베이스라인</th><th class="num">Cohen's d</th><th class="num">Bonferroni p</th><th>결론</th></tr></thead>
+    <tbody>
+      <tr><td>볼린저</td><td class="num">−1.97</td><td class="num">&lt;0.001</td><td><span class="pill good">통계 우위</span></td></tr>
+      <tr><td>과거 분위수 (historical_quantile)</td><td class="num">+0.93</td><td class="num">&lt;0.001</td><td><span class="pill bad">통계 열위</span></td></tr>
+      <tr><td>정적 GARCH</td><td class="num">+0.24</td><td class="num">0.500</td><td><span class="pill eq">통계 동등</span></td></tr>
+      <tr><td>walk-forward GARCH</td><td class="num">+0.45</td><td class="num">&lt;0.001</td><td><span class="pill bad">통계 열위</span></td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:13.5px">공정성 보강 후에도 1D 밴드는 단순 분위수·walk-forward GARCH를 <b>못 이긴다</b>. 1차에서 d=1.28이던 게 0.93으로 줄었지만 여전히 열위 → “약점은 baseline 부풀림이 아니라 진짜”.</p>
+
+  <h3>결과 ③ 1W 밴드 CP178 (pinball, 낮을수록 좋음) — 유일한 명확한 우위</h3>
+  <div class="bars">
+    <div class="bar"><span>볼린저</span><div class="track"><div class="fill" style="left:50%;width:16.5%;background:var(--good)"></div></div><span class="v" style="color:var(--good)">−0.66 우위</span></div>
+    <div class="bar"><span>과거 분위수</span><div class="track"><div class="fill" style="right:50%;width:29%;background:var(--bad)"></div></div><span class="v" style="color:var(--bad)">+1.17 열위</span></div>
+    <div class="bar"><span>정적 GARCH</span><div class="track"><div class="fill" style="right:50%;width:15%;background:var(--bad)"></div></div><span class="v" style="color:var(--bad)">+0.61 열위</span></div>
+    <div class="bar"><span>walk-forward GARCH</span><div class="track"><div class="fill" style="left:50%;width:24.5%;background:var(--good)"></div></div><span class="v" style="color:var(--good)">−0.98 우위</span></div>
+  </div>
+  <p class="muted" style="font-size:13.5px;text-align:center">← 우위(좋음) &nbsp;|&nbsp; 중앙 = 동등 &nbsp;|&nbsp; 열위(나쁨) → &nbsp;&nbsp; (Cohen's d, 모두 Bonferroni 보정)</p>
+  <p>1W 밴드는 단순 분위수·정적 GARCH엔 지지만, <b>공정하게 보강한 walk-forward GARCH 대비 d=−0.98(large)로 통계적 우위</b>다. 운영 3모델 중 딥러닝이 강한 통계 베이스라인을 명확히 이긴 유일한 지점.</p>
+
+  <h3>결과 ④ Giacomini-White 국면 조건부 (1W vs walk-forward GARCH)</h3>
+  <table>
+    <thead><tr><th>Regime</th><th class="num">β</th><th class="num">Bonferroni Wald p</th><th>해석</th></tr></thead>
+    <tbody>
+      <tr><td>VIX &gt; 30 (고변동)</td><td class="num">+0.0065</td><td class="num">&lt;0.001</td><td>손실 차이가 국면에 체계적 의존</td></tr>
+      <tr><td>drawdown ≤ −10%</td><td class="num">+0.0104</td><td class="num">&lt;0.001</td><td>하락장에서 1W 밴드에 유리</td></tr>
+      <tr><td>combined</td><td class="num">+0.0080</td><td class="num">&lt;0.001</td><td>stress 국면 선택적 출력 근거</td></tr>
+    </tbody>
+  </table>
+  <div class="callout good"><div class="ct">selective output의 정량 근거</div>세 국면 모두 손실 차이가 체계적으로 국면에 의존(p&lt;0.001)하고 β가 양수 — <b>VIX&gt;30·drawdown 같은 stress 국면에서 1W 밴드를 선택적으로 출력</b>한다는 트리거의 정량 근거가 여기서 나온다. (1D는 asof backfill 미완으로 GW가 NaN, 보류 상태.)</div>
+
+  <div class="callout"><div class="ct">학술적 결론</div>이 결과는 ML 예측 문헌의 통설과 정확히 일치한다 — <b>Welch &amp; Goyal(2008)</b>: 주식 프리미엄 예측에서 단순 평균을 이기기 어렵다. <b>Makridakis M-competition</b>: 복잡한 모델이 단순 통계 방법을 일관되게 못 이긴다. Lens는 이를 자기 데이터로 재확인했지만, 패배 선언이 아니라 <b>방법론적 정직성의 승리</b>다.</div>
+</section>
+
+<!-- ===== 10 FRONTEND ===== -->
+<section id="s10">
+  <div class="kicker">Frontend Evolution</div>
+  <h2><span class="sn">10</span>프론트엔드 — “연구 콘솔”에서 “주식 앱”으로</h2>
+  <p class="lead">초기엔 모델 선택·target type이 뒤섞인 연구자용 대시보드였다. 제품 트랙의 두 원칙 — “모델 성능과 무관하게 발표 가능한 제품 루프를 먼저 닫는다”, “첫 화면은 논문이 아니라 주식 앱처럼 보인다” — 에서 세 화면 체제가 나왔다.</p>
+
+  <figure style="margin:24px 0">
+    <div class="grid g2">
+      <div><img src="img/demo_stocks.png" alt="종목 분석" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>주식 보기</b> — 차트 + 예측선·밴드 + 보조지표 패널</div></div>
+      <div><img src="img/demo_backtests.png" alt="백테스트" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>백테스트</b> — 단일 종목 규칙 전략 시뮬레이션</div></div>
+      <div><img src="img/demo_training.png" alt="AI 모델" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>AI 모델</b> — 목표 대비 평가·통계검정·재현 매니페스트</div></div>
+      <div><img src="img/demo_report.png" alt="지표 가이드" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>지표 가이드</b> — 사용자용 지표 설명</div></div>
+    </div>
+    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:10px">그림 4. 라이브 데모 4화면 (lens-ten-delta.vercel.app · 2026-06-05 데이터 기준)</figcaption>
+  </figure>
+
+  <div class="grid g3">
+    <div class="card"><h4>StockView — 종목 분석</h4><p style="margin:0">가격 차트 + 예측선·밴드 오버레이 + 토글 가능한 보조지표 패널(RSI·MACD·볼린저·ATR + AI 밴드폭·하방위험). 빈/에러 상태를 제품 언어로 흡수. 1W 전환 시 차트가 죽던 정렬 버그(CP79)를 공통 방어로 해결.</p></div>
+    <div class="card"><h4>BacktestView — 전략 실험</h4><p style="margin:0">포트폴리오가 아니라 <b>단일 종목 룰 기반 전략</b> 실험으로 못박음. lookahead 누수 차단. 기본 전략을 과방어적 Risk Guard에서 <b>Trend Guard</b>로 자가 교체(현금 대기 과도가 신뢰 저하). 수익률보다 최대낙폭·손실회피율을 위에 배치.</p></div>
+    <div class="card"><h4>TrainingView — AI 모델</h4><p style="margin:0">디버그 덤프 → 목표 대비 평가 → 실험 비교 리포트 → 모델 설명 페이지로 단계 성숙. 4개 제품 슬롯 + 통계검정 표 + 재현 매니페스트. <b>저장된 평가가 없으면 성능을 주장하지 않는다.</b></p></div>
+  </div>
+
+  <div class="callout"><div class="ct">관통하는 원칙</div>모델·DB는 안 건드리고 표시 계층만 손본다 · fake data를 만들지 않는다 · 내부 식별자(<code>patchtst-1D-...</code>)는 제품 언어(<code>예측선 모델 v1</code>)로 치환하되 검수용 원문은 접힘 영역에 보존 · <b>못하는 것은 정직하게 표시한다</b>(예: 위험 오판율 39.3%, 목표 25% → “개선 필요”).</div>
+</section>
+
+<!-- ===== 11 REFACTOR ===== -->
+<section id="s11">
+  <div class="kicker">Engineering · Refactoring</div>
+  <h2><span class="sn">11</span>코드 안정성 리팩토링 (CP221 → 237) — 완료</h2>
+  <p class="lead">계획서엔 없던 현업 수준 정비 트랙. 철학은 명확하다 — <b>“동작 보존을 기계가 증명할 안전망을 먼저 박고, 그 위에서만 구조를 건드린다”</b>(Feathers/Fowler 정합). 절대 규칙: 백엔드 snapshot 그린 전 분리 금지, 프론트 screenshot 그린 전 분리 금지.</p>
+
+  <h3>Phase A — 안전망 우선 구축</h3>
+  <ul class="clean">
+    <li><b>CP222</b> — ruff·mypy·pytest·pre-commit 도구 도입(소스 0줄 변경). baseline 박제: pytest 361 passed(실패 21은 전부 pre-existing), ruff 2155건·mypy 1391건을 수정 없이 기록. 운영 parquet SHA256 세션 가드 신설.</li>
+    <li><b>CP223</b> — 백엔드 characterization: 9개 read-path endpoint를 syrupy 스냅샷으로 박제(1.55MB). 운영 코드 0줄. 이게 이후 모든 백엔드 분리의 “1바이트 불변” 증명 도구.</li>
+    <li><b>CP230</b> — 프론트 characterization: Playwright 4화면 screenshot baseline + Vitest 순수함수 107 passed.</li>
+  </ul>
+
+  <h3>Phase B — 거대 파일 분리 (facade 패턴, diff 0)</h3>
+  <p>모든 분리는 같은 패턴: 옛 코드 옆 새 모듈 공존 → caller 이전 → 옛 정의 제거 → <b>facade(re-export)로 인터페이스 보존</b>. 매 단계 snapshot/screenshot diff 0으로 가드.</p>
+  <table>
+    <thead><tr><th>CP</th><th>대상</th><th class="num">줄 수</th><th>회귀</th></tr></thead>
+    <tbody>
+      <tr><td>225</td><td>feature_svc.py → 4모듈 + facade</td><td class="num">619→106</td><td>snapshot diff 0</td></tr>
+      <tr><td>226</td><td>strategy_backtest_svc.py → 3모듈 + facade</td><td class="num">659→148</td><td>lru_cache 보존, diff 0</td></tr>
+      <tr><td>231</td><td>BacktestView.tsx → 4모듈</td><td class="num">1547→839</td><td>Vitest 107→152, screenshot 0</td></tr>
+      <tr><td>232</td><td>TrainingView.tsx → 8모듈</td><td class="num">1461→940</td><td>통계 섹션 글자 단위 복제, diff 0</td></tr>
+      <tr><td>233</td><td>StockView.tsx 부분 분리</td><td class="num">1041→925</td><td>Vitest 152→166, diff 0</td></tr>
+      <tr><td>234</td><td>globals.css → 13파일 분리</td><td class="num">5208→0</td><td>screenshot 4 diff 0 (12 step)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Phase C·D — 백엔드 안정성 + 청소 + DB준비 + CI</h3>
+  <ul class="clean">
+    <li><b>CP227</b> admin 민감정보(traceback) 제거 + pandera 5종 데이터 계약 · <b>CP228</b> structlog + request_id 전파 · <b>CP235</b> Pydantic Settings 5도메인 일원화 · <b>CP229</b> async 안전성 감사(소스 0줄, 정적 가드만)</li>
+    <li><b>CP224a/b</b> requirements 핀 + dead code 제거(grep 확정분만) · <b>CP236</b> Supabase 재연결 골격(실연결 보류) · <b>CP237</b> GitHub Actions CI</li>
+  </ul>
+
+  <div class="callout good"><div class="ct">차단 트리거 정직성 — “현업 수준”의 증거</div>문제를 숨기지 않고 멈춰 보고·해결한 4개 사례: snaptol PyPI 부재(→syrupy 폴백), asgi-correlation-id가 UUID만 허용해 테스트 헤더 거부(→structlog 단독), PowerShell 인코딩이 한글 박스문자 손상(→UTF8 명시), 운영 parquet 노출(→SHA 가드). <b>총 45 커밋, 회귀 diff 0, ADR 18장.</b></div>
+</section>
+
+<!-- ===== 12 SECURITY ===== -->
+<section id="s12">
+  <div class="kicker">Security Track</div>
+  <h2><span class="sn">12</span>보안 트랙 (CP238 → 242) — 설계 완료, 실행 대기</h2>
+  <p class="lead">OWASP Top 10(2021) 중 v1 적용 가능 항목의 baseline을 박는 계획. <b>현재 상태는 “명세(지시서)만 작성, 코드 미실행”</b> — 보안 코드 파일·ADR·CI job이 아직 없다. 보고서에선 완료가 아니라 “설계된 점검 항목”으로 정확히 기술한다.</p>
+  <table>
+    <thead><tr><th>CP</th><th>OWASP</th><th>점검 대상</th><th>설계된 산출</th></tr></thead>
+    <tbody>
+      <tr><td>238</td><td>A06 취약 의존성</td><td>CVE 미점검</td><td>pip-audit + npm audit + CI 2 job + Dependabot</td></tr>
+      <tr><td>239</td><td>A02 암호화 실패</td><td>git history secret 미검사</td><td>gitleaks 전체 history 스캔 → 발견 시 rotation 우선</td></tr>
+      <tr><td>240</td><td>A05 오설정</td><td>보안 헤더 0(추정)</td><td>HSTS·CSP·X-Frame 등 5종 (lightweight-charts 호환 CSP)</td></tr>
+      <tr><td>241</td><td>A03 인젝션</td><td>입력 검증 0</td><td>ticker/query Pydantic 검증 + Query 상한 + negative test</td></tr>
+      <tr><td>242</td><td>A04/A05</td><td>CORS/rate limit</td><td>production CORS <code>*</code> 금지 + slowapi 60/min + OWASP 매핑</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><div class="ct">정직한 상태</div>리팩토링 트랙(CP221~237)은 전부 커밋 완료. 보안 트랙(CP238~242)은 <b>계획 단계</b>다 — 이 보고서의 “남은 과제”에 속한다.</div>
+</section>
+
+<!-- ===== 13 OPS ===== -->
+<section id="s13">
+  <div class="kicker">Operations &amp; Reproducibility</div>
+  <h2><span class="sn">13</span>운영 자동화 · 재현성</h2>
+  <p class="lead">v1을 “매일 도는 제품”으로 만드는 자동화와, “누구나 다시 만들 수 있게” 잠그는 재현 매니페스트.</p>
+
+  <h3>일일 자동 refresh 파이프라인 (CP212)</h3>
+  <p>윈도우 작업 스케줄러가 PC 기동 시 통합 refresh를 실행: <code>append(yfinance) → market_snapshot → band_refresh → line_refresh → product_history → ai_runs → git push</code>. 정책상 <b>새 학습·calibration·DB write 없음</b>, 라인은 F4 β=4 앙상블 체크포인트로 최근 구간만 재계산. Render/Vercel은 git push를 받아 production을 갱신한다.</p>
+
+  <div class="callout warn"><div class="ct">이 세션에서 발견·수리한 운영 사고 (2026-06-06)</div>
+  <p style="margin:.3em 0"><b>① 백엔드 503 (메모리 초과):</b> 종목 상세를 열면 product_history 78만 행이 lru_cache로 상주하며 331MB를 점유 → Render 무료 512MB OOM → 재시작 → 503. dtype 다이어트(category+datetime64+float32)로 <b>331MB → 22MB(93%↓)</b> 수정, 회귀 0.</p>
+  <p style="margin:.3em 0"><b>② 예측 정체 (라인·밴드가 6/3에 멈춤):</b> CP235가 심은 <code>from app.config</code> 절대 import가 refresh 스크립트 실행 컨텍스트에서 <code>ModuleNotFoundError</code>를 일으켜 band/line refresh가 동반 실패 → market/product만 갱신된 채 push되던 사고. 상대 import로 복구 + unified 스크립트에 <b>단계 실패 시 push 차단 게이트</b> 추가. band/line dry-run 모두 asof 6/5 도달 확인.</p>
+  </div>
+
+  <h3>재현 매니페스트 (CP220)</h3>
+  <table>
+    <thead><tr><th>항목</th><th>값</th></tr></thead>
+    <tbody>
+      <tr><td>Python / torch</td><td>3.10.0 / 2.x+cu128</td></tr>
+      <tr><td>GPU</td><td>RTX 5060 Ti · sm_120 (일반 휠에 없어 nightly/자체 빌드 필요)</td></tr>
+      <tr><td>환경변수</td><td><code>KMP_DUPLICATE_LIB_OK=TRUE</code> · <code>TORCHDYNAMO_DISABLE=1</code> · <code>num_workers=0</code></td></tr>
+      <tr><td>데이터 / feature</td><td>yfinance S&amp;P 500 · <code>v3_adjusted_ohlc</code></td></tr>
+      <tr><td>source hash</td><td>라인 <code>11bf3a48...</code> · 1D 밴드 <code>90666b44...</code></td></tr>
+      <tr><td>seeds / folds</td><td>라인 7/13/23/42/71 (4-fold) · 밴드 7/42/123 (3-fold)</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><div class="ct">정직하게 남긴 TODO</div>학습 시점 git sha 자동 기록 · wall clock · peak GPU memory · <b>학습 시점 parquet 스냅샷 보존</b>(없으면 정확 재현 불가) — v2 manifest 자동화로 이월. 실제로 “라인 v1 성능을 재현하려다 데이터 윈도우가 매일 갱신돼 넘어진” 사고가 이 매니페스트를 만든 동기다.</div>
+</section>
+
+<!-- ===== 14 REMAINING ===== -->
+<section id="s14">
+  <div class="kicker">What Remains</div>
+  <h2><span class="sn">14</span>남은 과제</h2>
+  <div class="grid g2">
+    <div class="card"><h4>① DB 연결 (Supabase)</h4><p style="margin:0">계획서의 Supabase는 현재 <b>골격만</b>(CP236a~d). 결제 후 caller 이전 + 실연결 + Alembic 마이그레이션. PgBouncer 6543 트랜잭션 모드 함정 회피(직접 5432) 등은 ADR-0013에 이미 설계됨. DB로 가면 parquet 메모리 문제(§13 503) 자체가 사라짐.</p></div>
+    <div class="card"><h4>② 보안 트랙 실행</h4><p style="margin:0">CP238~242 설계를 실제 코드로. 의존성 audit, gitleaks history 스캔 + secret rotation, 보안 헤더 5종, 입력 검증, CORS/rate limit. 안전망(snapshot/screenshot)은 재사용 가능.</p></div>
+    <div class="card"><h4>③ 리팩토링 후속</h4><p style="margin:0">mypy 1391 baseline 정리 → CI fail-on-error · StockView 메인 로직 분리(useStockLoader hook) · Playwright CI strict화 · pre-existing pytest 19 fail 정리.</p></div>
+    <div class="card"><h4>④ v2 방향</h4><p style="margin:0"><b>미래 예측성 + XAI</b> 2축. 밴드를 더 살려 전통 통계(GARCH)를 stress 국면에서도 이기기, regime-conditional 밴드 v2, 모델 카드/매니페스트 자동화. 라인의 정확도 야망은 정리하고 “위험 신호” 역할에 집중.</p></div>
+  </div>
+  <div class="callout"><div class="ct">제출 준비 (2026.06.21)</div>보고서(PDF) · 발표자료(초기 계획서 비교 필수) · 데이터 패키지(외부 공유) · README 최종. 개별 CP 보고서 60여 개는 용량 사유로 git에 올리지 않고 제출 시 별도 패키지로 제공.</div>
+</section>
+
+<!-- ===== 15 CONCLUSION ===== -->
+<section id="s15">
+  <div class="kicker">Conclusion · Foundation for Next Plan</div>
+  <h2><span class="sn">15</span>정직한 결론과 다음 계획의 토대</h2>
+  <p class="lead">Lens가 6주에 증명한 것은 “AI가 주식을 잘 맞힌다”가 아니다. 그건 처음부터 가능하지 않다고 선언했다. 증명한 것은 <b>“주장하기 전에 검증하는 방법”</b>이다.</p>
+
+  <h3>세 가지 핵심 교훈</h3>
+  <ul class="clean">
+    <li><b>작은 표본·오염 피처·단일 seed의 좋은 결과는 거의 다 착시였다.</b> 확장·clean feature·multi-seed에서 무너졌고, 이걸 매번 정직하게 인정한 것이 진짜 진전이었다.</li>
+    <li><b>단일 지표(IC, 포함율)로 모델을 살리면 안 된다.</b> 위험을 일관되게 신호하는가는 여러 축(순위·calibration·폭-변동성 동조·하방 recall)으로만 잡힌다.</li>
+    <li><b>베이스라인을 공정하게 만드는 것이 결론의 신뢰도를 가른다.</b> GARCH in-sample 누수를 walk-forward로 고치자 1D는 여전히 졌지만, 1W의 진짜 우위가 드러났다.</li>
+  </ul>
+
+  <h3>다음 계획을 세울 때의 출발점</h3>
+  <div class="grid g3">
+    <div class="card"><h4>살릴 것</h4><p style="margin:0">밴드(특히 1W의 regime-conditional 우위) · 통계검정 인프라 · 로컬 parquet 서빙의 속도 · 안전망(snapshot/CI).</p></div>
+    <div class="card"><h4>정리할 것</h4><p style="margin:0">라인의 정확도 야망(위험 신호 역할로 한정) · composite 모델(이미 legacy) · 단순 지표 목표(MAPE 등).</p></div>
+    <div class="card"><h4>새로 갈 것</h4><p style="margin:0">DB 실연결 → 메모리 제약 해소 · 보안 트랙 실행 · v2 미래 예측성/XAI · 매니페스트 자동화로 재현성 완성.</p></div>
+  </div>
+
+  <div class="callout good"><div class="ct">한 문장 요약</div>Lens v1의 정체성 — <b>“정확도 경쟁이 아니라 calibrated risk interval로 위험을 신호한다”</b> — 는 통계검정으로 비로소 학술적 근거를 얻었다. 못 이긴 곳을 그대로 적은 정직함이, 다음 계획을 현실 위에 세울 수 있는 가장 단단한 토대다.</div>
+
+  <div class="foot">
+    <p>Lens 종합 보고서 · 작성 2026.06 · 22011859 김지형 · 세종대 데이터사이언스 딥러닝실습<br>
+    본 문서는 계획서 PPT(2026.04)와 CP2.5~CP242 기록, 운영 매니페스트, 통계검정 결과(<code>cp216_2_significance</code>)를 시간순으로 종합한 것이다. 모든 수치는 실제 산출물에서 인용했다.</p>
+  </div>
+</section>
+
+<!-- ===== 16 V2 ROADMAP / OPEN DISCUSSION ===== -->
+<section id="s16">
+  <div class="kicker">V2 Roadmap · Open Discussion</div>
+  <h2><span class="sn">16</span>v2 로드맵 — 다음에 만들 것</h2>
+  <p class="lead">v1을 마무리하며 정리한 v2 방향이다. 머릿속에만 흩어져 있던 구상을, 나중에 내가 다시 펴 봐도 바로 이어갈 수 있도록 기록해 둔다. 각 항목에 “지금 가진 것 / 현업 표준 / 정해야 할 것”을 적었다.</p>
+
+  <h3>정체성 전환 — “예측”에서 “리스크 인식”으로</h3>
+  <p>v1에서 가장 크게 배운 것은 라인 IC ~0.04가 약하다는 사실이고, 이건 내 모델의 결함이 아니라 시장 효율성의 본질이다 — 누구도 IC 0.2를 못 낸다(TradingView·Bloomberg도 “예측 정확도”로 팔지 않는다). 그래서 v2의 정체성은 <b>“맞히는 도구”가 아니라 “위험을 먼저 보는 도구”</b>로 굳힌다. 약한 IC를 약점이 아니라 <b>“과신하지 않는다”는 정직함의 강점</b>으로 둔다. 제품 성공 기준도 정확도(IC)가 아니라 신뢰도·UX·차별화된 인사이트로 옮긴다.</p>
+  <div class="grid g4">
+    <div class="card"><h4>① Conformal</h4><p style="margin:0;font-size:12.5px">“이 범위에 X% 확률” 수학적 coverage 보장 (Vovk·Romano)</p></div>
+    <div class="card"><h4>② CBM 설명가능</h4><p style="margin:0;font-size:12.5px">“왜 위험한지” concept 단위 설명 (Koh 2020)</p></div>
+    <div class="card"><h4>③ Selective output</h4><p style="margin:0;font-size:12.5px">확신 없으면 침묵 — 과대예측을 하지 않는다</p></div>
+    <div class="card"><h4>④ LLM 리스크 브리핑</h4><p style="margin:0;font-size:12.5px">가격+뉴스+8-K → 자연어 요약. 기존 제품에 거의 없는 축</p></div>
+  </div>
+  <p class="muted" style="font-size:13px;margin-top:10px">→ 목표 정체성: <b>“가장 정직하고 설명 잘하는 리스크 도구”</b> — 학술·제품·포트폴리오를 동시에 충족.</p>
+
+  <h3>제품 구조 로드맵 (Stage 0 → 5)</h3>
+  <p>“구조적으로 필요한 만큼”만 키운다 — daily batch 리스크 도구 정체성에 맞게. 단계마다 학습 포인트가 따라온다.</p>
+  <table>
+    <thead><tr><th>Stage</th><th>내용</th><th>학습 포인트</th><th>상태</th></tr></thead>
+    <tbody>
+      <tr><td><b>0</b> 현재(v1)</td><td>PC inference → git push → Render(parquet) → Vercel</td><td>—</td><td><span class="pill eq">완료</span></td></tr>
+      <tr><td><b>1</b> 데이터 레이어</td><td>Supabase Pro(Postgres+Auth) + 캐싱 + 증분 업데이트. parquet 탈피 + .git 1.4GB 정리</td><td>DB schema·ORM·캐싱·Auth flow</td><td><span class="pill bad">최우선</span></td></tr>
+      <tr><td><b>2</b> inference 클라우드화</td><td>윈도우 PC → <b>Docker</b> → Modal/GitHub Actions cron (PC 안 켜도 자동)</td><td>Docker(환경 재현)·serverless·아티팩트 버전</td><td><span class="pill warn">v2</span></td></tr>
+      <tr><td><b>3</b> 제품 기능</td><td>워치리스트·알림(위험 진입)·포트폴리오·LLM 리스크 브리핑</td><td>상태관리·webhook·백그라운드 큐</td><td><span class="pill warn">v2</span></td></tr>
+      <tr><td><b>4</b> 관측·신뢰성</td><td>Sentry + drift 모니터(rolling IC) + uptime</td><td>모니터링·ML 관측(evidently)</td><td><span class="pill eq">운영 시작 시</span></td></tr>
+      <tr><td><b>5</b> 스케일</td><td>CDN·다중 인스턴스·실시간</td><td>—</td><td><span class="pill eq">당분간 불필요</span></td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><div class="ct">의도적 제외</div>실시간 serving·K8s·Triton·TorchServe는 daily batch 리스크 도구엔 과투자다. Lens는 5거래일 예측을 하루 한 번 계산·저장·서빙하므로 요청마다 모델을 돌리지 않는다. Stage 5도 끝까지 거의 불필요.</div>
+
+  <div class="callout warn"><div class="ct">정직한 전제 — v1의 가장 큰 구멍 두 가지</div>아래 ④에서 다루지만 먼저 박아둔다. ① 현재 universe는 <b>“2026년 현재 살아남은 S&amp;P 500”</b>이라 생존 편향(survivorship bias)이 들어가 있다. ② 학습 데이터를 <b>2015년부터</b>로 자른 것은 데이터 가용성 때문이지 방법론적 정당성이 아니다 — 2008 금융위기·닷컴버블 같은 극단 국면이 빠졌다. 이 둘은 백테스트 수익률과 통계검정 결론 모두에 영향을 주는 <b>구조적 한계</b>이고, v2의 출발점이 되어야 한다.</div>
+
+  <h3>① 멀티 자산 확장 + MLOps 플랫폼화</h3>
+  <p>현재는 S&amp;P 500 주식 단일, 수동 PowerShell 오케스트레이션이다. v2 비전은 <b>자산군 추상화</b> — 코스피·금·채권·ETF·비트코인까지 같은 밴드/라인 파이프라인을 재사용하는 것.</p>
+  <div class="two">
+    <div>
+      <h4>지금 가진 자산</h4>
+      <ul class="clean">
+        <li>provider 추상화 + adjusted OHLC 계약(자산 추가의 토대)</li>
+        <li>feature_svc를 학습/서빙이 공유(skew 차단)</li>
+        <li>W&amp;B 실험 추적 + source hash provenance</li>
+        <li>통계검정 인프라(모델 승격 게이트로 재활용 가능)</li>
+      </ul>
+    </div>
+    <div>
+      <h4>현업 표준 (도입 후보)</h4>
+      <ul class="clean">
+        <li><b>Feature Store</b> — 자산별 feature 정의·버전 일관성</li>
+        <li><b>Model Registry</b> — 자산 × 타임프레임 × 모델 버전 관리(champion/challenger)</li>
+        <li><b>Orchestration</b> — Airflow/Prefect/Dagster로 PowerShell 대체</li>
+        <li><b>자산 어댑터</b> — OHLCV는 공통, 자산별 특성은 분기</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout"><div class="ct">결정 쟁점</div>자산마다 통계 특성이 다르다 — 코인은 24/7 거래·고변동, 채권은 금리 민감, 금은 달러 역상관. <b>한 모델 구조로 다 덮을지, 자산군별 feature·regime 정의를 분기할지</b>가 첫 갈림길. 권장: 파이프라인·평가 골격은 공유하되 feature 계약과 regime 라벨은 자산별로 분리(주식의 VIX 같은 국면 지표를 자산별 대응물로 교체).</div>
+
+  <h3>② 지속적 성능 평가 + 자동 재실험 (Continuous Training)</h3>
+  <p>요구: “지금 만든 것의 성능을 주기적으로 평가하고, 일정 이하로 떨어지면 MLOps 실험으로 성능을 끌어올린다.” 이건 현업 MLOps의 <b>CT(Continuous Training) 루프</b> 그 자체다.</p>
+  <div class="flow">
+    <div class="step"><div class="lbl">모니터링</div><div class="desc">예측 vs 실현 추적(이미 <code>product_history</code>가 씨앗) → IC·coverage_abs_error·breach를 <b>시계열로</b> 관측</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl alt">드리프트 감지</div><div class="desc"><b>data drift</b>(입력 분포 변화) + <b>concept drift</b>(입력↔타깃 관계 변화) 구분. 성능 저하가 모델 노후인지 국면 변화인지 판별</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl alt">성능 게이트</div><div class="desc">IC &lt; 임계 또는 coverage 오차 &gt; 임계 → 재실험 트리거. <b>“얼마나 떨어지면”</b>의 임계값을 통계적으로 설정</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl ai">자동 재실험</div><div class="desc">재학습 → <b>신모델 vs 구모델을 통계검정(DM/Bootstrap)</b>으로 비교 → 유의하게 나을 때만 승격(champion/challenger)</div></div>
+    <div class="arr">▼</div>
+    <div class="step"><div class="lbl fe">사람 승인</div><div class="desc">자동 승격 전 게이트 — 무한 재학습·최근 과적합 방지. 롤백 경로 확보</div></div>
+  </div>
+  <div class="callout good"><div class="ct">Lens의 강점이 여기서 빛난다</div>대부분의 팀이 “새 모델이 더 나은가”를 단순 지표 비교로 판단하다 함정에 빠진다. Lens는 <b>이미 DM·Bootstrap·Bonferroni 통계검정 인프라를 갖췄으니</b>, 모델 승격 게이트를 “통계적으로 유의하게 우월할 때만”으로 둘 수 있다. 이게 현업 대비 차별점이 된다.</div>
+  <div class="callout warn"><div class="ct">함정</div>“성능 저하 → 무조건 재학습”은 위험하다. 저하 원인이 <b>국면 변화(concept drift)</b>면 재학습이 최근 데이터에 과적합돼 다음 국면에서 더 나빠진다. 드리프트 종류 판별 → 재학습/재보정/대기 분기가 핵심.</div>
+
+  <h3>③ XAI를 밴드에 + lagging 해소 실험</h3>
+  <div class="two">
+    <div>
+      <h4>XAI (설명가능성)</h4>
+      <p>밴드는 “왜 이 폭인가”를 설명할 때 신뢰가 생긴다. 후보: PatchTST/TiDE의 <b>attention/feature attribution 시각화</b>, SHAP로 밴드 폭 기여 feature(VIX·ATR 등) 표시, “이 구간 밴드가 넓은 이유 = 변동성 급등”을 차트에 주석. v1의 “정직한 표시” 원칙의 자연스러운 확장이다.</p>
+    </div>
+    <div>
+      <h4>Lagging 해소 (밴드)</h4>
+      <p>밴드의 약점 지점 — <b>밴드 폭이 변동성을 선행하지 못하고 동시·지연 반영</b>한다(CP202.1: 폭의 미래 severe AUC 0.52 = 선행이 아니라 동시 신호). 밴드가 진짜 “예측”이 되려면 변동성이 터지기 <b>전에</b> 벌어져야 한다. 실험: leading indicator에 attention, regime 전이 예측, 변동성 change 예측, stress 국면 선반응. v1 통계검정에서 1W 밴드가 stress 국면(GW)에 강했던 것과 이어지는 트랙이다.</p>
+    </div>
+  </div>
+
+  <h3>④ 백테스트의 퀀트화 + 편향 직면 (가장 중요)</h3>
+  <p>전략 파트를 퀀트로 발전시키려면 <b>편향을 먼저 직면</b>해야 한다. 작업하며 의심했던 두 가지가 정확히 퀀트에서 가장 치명적인 함정이었다.</p>
+  <table>
+    <thead><tr><th style="width:20%">편향</th><th>무엇이 문제인가</th><th>해결 방향</th></tr></thead>
+    <tbody>
+      <tr><td><b>생존 편향</b><br>(survivorship)</td><td>현재 S&amp;P 500 구성으로 과거를 백테스트하면 “지금까지 살아남은” 종목만 본다. 편입 탈락·상장폐지된 종목이 빠져 <b>수익률이 구조적으로 과대평가</b>된다.</td><td><b>point-in-time 구성</b>(각 시점의 실제 멤버) + 상폐 종목 포함 데이터. 최소한 “현재 구성 기준임”을 한계로 명시</td></tr>
+      <tr><td><b>기간 절단</b><br>(2015 제한)</td><td>2015년부터로 자른 건 데이터 가용성 때문이지 정당성이 아니다. 2008 금융위기·닷컴버블 같은 <b>극단 국면이 학습·검증에서 빠졌다</b>. stress regime 일반화가 약할 수밖에.</td><td>가능하면 2007~(위기 포함)로 확장하거나, 부족하면 regime 가중 샘플링. 길수록 국면 다양 ↔ 시장 구조 변화·데이터 품질 저하 trade-off 명시</td></tr>
+      <tr><td><b>전방 탐색</b><br>(lookahead)</td><td>미래 정보가 신호에 새는 것. v1은 이미 차단(asof 기준 데이터만 사용).</td><td>유지 + walk-forward 일관 적용</td></tr>
+      <tr><td><b>데이터 스누핑</b><br>(p-hacking)</td><td>여러 전략을 시도하다 우연히 좋은 것을 “발견”. 다중 비교 문제.</td><td><b>이미 Bonferroni 보정 인프라 보유</b> — 전략 탐색에도 동일 적용. out-of-sample 분리</td></tr>
+      <tr><td><b>비용 과소평가</b></td><td>거래비용·슬리피지·유동성을 무시하면 종이 위 수익이 부푼다.</td><td>v1의 fee 분리(10bps + sweep)를 유지·확장. 유동성 필터</td></tr>
+    </tbody>
+  </table>
+  <div class="callout good"><div class="ct">스스로 짚은 부분</div>작업 중 직관으로 의심했던 “S&amp;P 500이 항상 같지 않았다”와 “2015 제한의 의미”는 퀀트 실무에서 <b>가장 먼저 배우는 두 함정</b>(survivorship bias, look-back period)이다. v1이 이미 lookahead 차단·거래비용 분리·Bonferroni 보정을 갖췄으니, 남은 건 universe와 기간의 정직성을 마저 닫는 것이다.</div>
+
+  <h3>⑤ 코드 복잡도 점수 — radon 실측 (2026.06)</h3>
+  <p>“시스템을 점수로 평가”하자던 것은 <b>코드 복잡도 점수</b>다. radon(maintainability index + cyclomatic complexity)으로 실측한 결과: <b>backend는 리팩토링 효과가 점수로 증명됐고, ai 핵심 일부가 복잡도 부채로 남았다.</b></p>
+  <table>
+    <thead><tr><th>영역</th><th>MI (유지보수성, A≥20)</th><th>CC (순환복잡도)</th><th>판정</th></tr></thead>
+    <tbody>
+      <tr><td>backend/app (운영 서빙)</td><td>전 파일 A</td><td>평균 <b>3.4 (A)</b> · 최악 C(17)</td><td><span class="pill good">우수</span></td></tr>
+      <tr><td>↳ facade (리팩토링 산물)</td><td>feature_svc <b>100</b> · strategy_backtest_svc <b>77</b></td><td>—</td><td><span class="pill good">효과 증명</span></td></tr>
+      <tr><td>ai/models</td><td>전부 A (patchtst 31 · tide 29)</td><td>—</td><td><span class="pill eq">양호 (수식 본질복잡)</span></td></tr>
+      <tr><td>ai/evaluation·preprocessing·inference·train</td><td><b>C (0~0.7, 바닥)</b></td><td>—</td><td><span class="pill bad">복잡도 부채</span></td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><div class="ct">결론 + CI 게이트 제안</div>backend/app은 리팩토링(CP225~234)으로 거대 파일을 분리한 효과가 MI 점수로 그대로 나타난다(facade 100·77). 반면 <b>ai 핵심 4파일</b>(109지표를 가진 <code>evaluation.py</code> 등)은 리팩토링 트랙이 백엔드/프론트만 손대고 ai/는 건드리지 않아 MI가 바닥이다. <b>제안:</b> backend는 <code>radon mi --min B</code> + <code>xenon --max-absolute C</code> CI 게이트로 복잡도 회귀를 자동 차단(현재 통과), ai 핵심은 baseline 인정 후 점진 분리 — <code>evaluation.py</code>가 1순위. <span class="muted">(보안·사이트 등급은 별도 보안 트랙으로 진행 중이라 이 문서 범위 밖.)</span></div>
+
+  <h3>⑥ ai 리팩토링 — 필요하지만 backend보다 위험하다</h3>
+  <p>backend/프론트는 리팩토링(CP225~234)으로 정리됐지만 <b>ai/ 는 리팩토링 트랙이 건드리지 않았다</b>. evaluation.py(109지표·MI 0) 등이 복잡도 부채로 남아 있다. 다만 ai는 모델 학습/추론이라 접근이 backend와 근본적으로 달라야 한다.</p>
+  <div class="grid g2">
+    <div class="card"><h4>왜 backend보다 위험한가</h4><ul class="clean" style="margin:0">
+      <li><b>모델 영향</b> — backend는 read-path라 출력 불변을 snapshot으로 증명. ai는 리팩토링 실수가 예측값·학습결과를 바꾼다(회귀=모델 손상)</li>
+      <li><b>GPU 의존</b> — ai/tests는 torch cu128 필요 → CI(CPU)에서 skip(CP237). 자동 안전망 없음</li>
+      <li><b>characterization 부재</b> — backend엔 syrupy 9 snapshot, ai엔 없음</li>
+    </ul></div>
+    <div class="card"><h4>접근 (backend 패턴 차용)</h4><ul class="clean" style="margin:0">
+      <li><b>안전망 먼저</b> — 고정 입력 → 예측 parquet/지표 dict golden master</li>
+      <li><b>evaluation.py 1순위</b> — 순수 함수라 안전. line/band/significance/helpers 모듈 + facade</li>
+      <li><b>preprocessing·train·inference 후순위</b> — I/O+상태+GPU라 위험</li>
+      <li>radon 게이트에 ai 모듈 <b>점진 편입</b></li>
+    </ul></div>
+  </div>
+
+  <h3>⑦ 웹앱 프로덕션 갭 — 현업 체크리스트 대조</h3>
+  <p>현업 production checklist(FastAPI/Next.js 2024~25)와 실제 코드를 대조했다. 결론: <b>코드 위생(CI·복잡도 게이트·도메인 settings·구조적 예외처리)은 또래 상위권인데, “보이지 않는 운영”(에러추적·복원력·법적·SEO)이 비어 있다.</b> 마침 포트폴리오에서 면접관이 찌르는 곳이 후자다.</p>
+  <table>
+    <thead><tr><th>영역</th><th>현황</th><th>우선</th><th>갭 / 권장</th></tr></thead>
+    <tbody>
+      <tr><td><b>에러 트래킹</b></td><td>없음</td><td><span class="pill bad">높음</span></td><td>Sentry 부재 → Render 무료티어 로그는 휘발성이라 사후 추적 불가. <code>sentry-sdk[fastapi]</code> + <code>@sentry/nextjs</code>(request_id 태그 연계)</td></tr>
+      <tr><td><b>법적·정책</b></td><td>약함</td><td><span class="pill bad">높음</span></td><td>DISCLAIMER.md만 있고 앱 내 노출 없음. 금융 도메인이라 푸터 상시 면책 + <code>/terms</code>·<code>/privacy</code> + Clarity 쿠키 고지 필수</td></tr>
+      <tr><td><b>SEO·메타</b></td><td>약함</td><td><span class="pill bad">높음</span></td><td>metadataBase·OG·robots·sitemap 전무 → 링크 공유 미리보기 깨짐. App Router 네이티브 파일로 저비용</td></tr>
+      <tr><td><b>에러 복원력</b></td><td>없음</td><td><span class="pill bad">높음</span></td><td>axios timeout 없음 → Render cold start(50초+) 시 무한 스피너. <code>timeout:30000</code> + 1회 retry + "깨우는 중" 카피</td></tr>
+      <tr><td><b>보안 헤더 + rate limit</b></td><td>설계만</td><td><span class="pill warn">중간</span></td><td>CP238~242 미실행. next.config headers(HSTS·nosniff·X-Frame) + slowapi(분당 60, in-memory)</td></tr>
+      <tr><td><b>Uptime 모니터</b></td><td>없음</td><td><span class="pill warn">중간</span></td><td>UptimeRobot 무료로 /health/live 폴링 → 다운 알림 + sleep 방지(cold start 우회)</td></tr>
+      <tr><td><b>env fail-fast</b></td><td>약함</td><td><span class="pill warn">중간</span></td><td>prod에서 BACKEND_URL 누락 시 warn만 → 빌드 실패로 전환</td></tr>
+      <tr><td><b>의존성 자동화</b></td><td>약함</td><td><span class="pill warn">중간</span></td><td>핀·lockfile은 있으나 Dependabot/audit 없음. <code>.github/dependabot.yml</code> + CI audit step</td></tr>
+      <tr><td>a11y / 테스트깊이 / 배포·롤백 / 인증</td><td>약함~의도부재</td><td><span class="pill eq">낮음</span></td><td>axe 스모크 1개, E2E strict화는 후순위. 인증은 공개 읽기앱이라 부재 정상</td></tr>
+    </tbody>
+  </table>
+  <div class="callout bad"><div class="ct">추가 보안 발견 — admin/debug-state 무인증</div><code>/api/v1/admin/debug-state</code>가 인증 없이 내부 상태(환경변수 키 목록·sys.path·Python 버전·parquet 경로)를 반환한다. 민감 값은 마스킹되지만 정보 노출 표면이다. <code>/admin/reload</code>와 동일한 토큰 게이트를 걸거나 prod에서 비활성화 권장.</div>
+  <div class="callout good"><div class="ct">“주말 1개” 우선순위 (포트폴리오 ROI 순, 각 반나절)</div>① Sentry + UptimeRobot(운영 감각 신호) · ② 법적 3종(면책 배너·terms·privacy, 금융 리스크 인지) · ③ SEO 메타(공유 미리보기 복구) · ④ axios timeout/retry + env fail-fast(cold start 데모 실패 차단) · ⑤ CI audit/gitleaks/dependabot + 보안 헤더(CP238~242를 실행으로). <b>오버킬이라 하지 말 것:</b> K8s·blue-green·Terraform·Redis rate limit·정식 staging·APM·부하테스트 — 무료티어 단일 인스턴스엔 비용만 늘고 신호는 0.</div>
+
+  <h3>⑧ 도커 트랙 — v2 첫 CP (환경 재현)</h3>
+  <p>도커는 <b>v1이 아니라 v2 첫 CP</b>로 둔다. 재현성 5축(코드·데이터·config·환경·시드) 중 도커는 <b>환경만</b> 잠그는데, v1의 라인 재현 사고는 데이터 윈도우·시드·config가 원인이었지 환경이 아니었다. v1 막바지엔 데이터·config·시드 lock(Stage 1 + manifest)이 ROI가 더 크고, 도커는 v2 MLOps(champion/challenger 자동 루프 + CI)의 전제조건이라 그 직전에 박는 게 자연스럽다.</p>
+  <div class="grid g2">
+    <div class="card"><h4>도커 dev (CPU)</h4><p style="margin:0;font-size:13px">백엔드 + 프론트 dev 환경, CI 회귀 테스트용. 학습은 하지 않는다.</p></div>
+    <div class="card"><h4>도커 train (GPU)</h4><p style="margin:0;font-size:13px">학습 파이프라인 재현. nvidia-container-toolkit + CUDA 12.8 base + torch nightly (내 GPU = RTX 5060 Ti <code>sm_120 cu128</code>).</p></div>
+  </div>
+  <div class="callout warn"><div class="ct">난점 + ROI</div><code>sm_120</code>은 일반 PyTorch 빌드에 없어 nightly·자체 빌드가 필요 → base image 잠그기가 까다롭다. 학습 재현엔 parquet 마운트 + checkpoint 경로 정책도 필요. <b>ROI 순서:</b> 데이터/config/시드 lock(+80%, v1) → requirements 핀(+10%, v1) → 도커 dev(+5%, v2) → 도커 train(+5%, v2 MLOps 안). 환경 재현은 마지막 5%라 v2로 미루는 게 맞다.</div>
+
+  <h3>⑨ 제품 차별화 — LLM 브리핑 + 전략 결합 + 저작권</h3>
+  <p>전략 빌더 + 백테스트 자체는 이미 레드오션이다(ChartingLens·TradingView·Composer·LuxAlgo). “그런 앱이 없다”는 사실이 아니다. Lens가 살 길은 경쟁자에 없는 <b>결합</b>이다.</p>
+  <ul class="clean">
+    <li><b>AI 리스크 + 사용자 전략 결합</b> — “내 RSI 전략 + Lens AI 밴드 하단 이탈 시 청산”. 단순 백테스트가 아니라 AI 리스크 인식이 필터·안전장치로 끼워진 전략.</li>
+    <li><b>LLM 교육적 해석</b> — “MDD −30%, 2022 약세장 6개월 미회복. 변동성 필터 권장”. 숫자만 주는 경쟁자와 차별. “가장 정직하고 설명 잘하는” 정체성과 일치.</li>
+    <li><b>저작권 안전 = 결과 중심</b> — raw 캔들은 데이터 라이센스(yfinance·EODHD 재배포) 위험. equity curve·drawdown 같은 <b>derived data</b> 중심이면 안전. 저작권 인식이 자연스럽게 “결과 중심” 설계로 이어진다.</li>
+    <li><b>LLM 리스크 브리핑</b> — “AAPL: 변동성 급등 + 8-K 소송 + 추세 약화 → 단기 주의”. 가격+뉴스+공시를 자연어로. 기존 제품에 거의 없는 진짜 차별화.</li>
+  </ul>
+
+  <div class="callout bad"><div class="ct">그 전에 — v1이 먼저다</div>아래 v2 로드맵은 전부 <b>v1 마무리 이후</b>다. v1의 남은 <b>1순위는 Supabase DB 실연결</b>(현재 골격만, §14), 그다음이 <b>2026.06.21 제출물</b>(보고서·발표자료·데이터 패키지)이다. 이 둘을 닫기 전엔 v2 실험을 벌이지 않는다 — v2는 아이디어 기록(이 섹션)으로 충분하다.</div>
+
+  <h3>v2 우선순위 제안 <span class="muted" style="font-size:14px;font-weight:400">(v1 마무리 후)</span></h3>
+  <div class="tl">
+    <div class="node ship"><div class="when">먼저</div><div class="ti">정직성 부채 청산</div><p>생존 편향(point-in-time universe) + 기간 확장 + 보안 트랙 실행. v1 결론의 신뢰도를 먼저 단단히 한다.</p></div>
+    <div class="node"><div class="when">다음</div><div class="ti">CT 루프 골격</div><p>모니터링 → 드리프트 감지 → 통계 게이트 → champion/challenger. 통계검정 인프라를 승격 게이트로 재활용.</p></div>
+    <div class="node"><div class="when">그 다음</div><div class="ti">멀티자산 + 퀀트 전략</div><p>자산 어댑터로 ETF·코인·채권 확장 + 백테스트를 편향 통제된 퀀트 엔진으로.</p></div>
+    <div class="node"><div class="when">병행</div><div class="ti">XAI + lagging 실험</div><p>밴드 설명가능성 + 라인 지연 해소. v1의 “정직한 표시”와 “정확도 한계”를 정면으로 공략하는 연구 트랙.</p></div>
+  </div>
+
+  <div class="callout"><div class="ct">이 기록의 목적</div>여기 적은 건 확정이 아니라 <b>다음 계획의 출발점</b>이다. 흩어져 있던 구상을 “지금 가진 것 / 현업 표준 / 정해야 할 것”의 틀로 정리해 뒀으니, v1을 끝낸 뒤 하나씩 골라 깊게 파면 된다. 가장 먼저 손댈 곳: <b>생존 편향과 기간 절단을 어디까지 감수하고 어디부터 고칠지</b> — 이게 나머지 모든 실험의 신뢰도를 좌우한다.</div>
+</section>
+
+</main>
+</div>
+
+<script>
+// TOC scroll-spy
+const links=[...document.querySelectorAll('nav.toc a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+const obs=new IntersectionObserver((es)=>{
+  es.forEach(e=>{
+    if(e.isIntersecting){
+      const id='#'+e.target.id;
+      links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')===id));
+    }
+  });
+},{rootMargin:'-20% 0px -70% 0px',threshold:0});
+secs.forEach(s=>s&&obs.observe(s));
+// TOC 접기/펼치기 토글
+const _layout=document.querySelector('.layout');
+const _tbtn=document.querySelector('.toc-toggle');
+_tbtn.addEventListener('click',()=>{
+  const collapsed=_layout.classList.toggle('nav-collapsed');
+  _tbtn.textContent=collapsed?'☰':'✕';
+  _tbtn.title=collapsed?'목차 펼치기':'목차 접기';
+});
+</script>
+</body>
+</html>
