@@ -106,12 +106,10 @@ def _load_base_frame() -> pd.DataFrame:
             [
                 "ticker",
                 "date",
-                "ma_5_ratio",
                 "ma_20_ratio",
                 "ma_60_ratio",
                 "macd_ratio",
                 "bb_position",
-                "vol_change",
                 "rsi_norm",
             ]
         ],
@@ -127,6 +125,13 @@ def _load_base_frame() -> pd.DataFrame:
         frame.groupby("ticker")["close"].transform(
             lambda values: values / values.rolling(60, min_periods=40).mean() - 1.0
         )
+    )
+    # CP245 — scan/backtest 에서 안 쓰는 원천 컬럼 drop (메모리). atr_ratio_calc 계산 후
+    # OHLCV·previous_close 는 불필요. daily_return 은 _ticker_metrics/_points 가 쓰므로 유지.
+    frame = frame.drop(
+        columns=[
+            c for c in ["open", "high", "low", "volume", "previous_close"] if c in frame.columns
+        ]
     )
     return frame.sort_values(["ticker", "date"]).reset_index(drop=True)
 
@@ -144,17 +149,9 @@ def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
     line = line.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
     line = _align_date_dtype(line)
     assert pd.api.types.is_datetime64_any_dtype(line["date"]), "line.date not datetime before merge"
+    # CP245 — scan/backtest 는 line_score 만 쓴다 (safe_line_score / rank 미사용 → 메모리 절감).
     return frame.merge(
-        line[
-            [
-                "ticker",
-                "date",
-                "line_score",
-                "safe_line_score",
-                "line_rank_by_date",
-                "safe_line_rank_by_date",
-            ]
-        ],
+        line[["ticker", "date", "line_score"]],
         on=["ticker", "date"],
         how="left",
     )
@@ -186,7 +183,8 @@ def _merge_band(frame: pd.DataFrame) -> pd.DataFrame:
     )
     frame["band_width_expansion"] = frame["band_width_expansion"].fillna(1.0)
     frame["band_width_percentile"] = frame.groupby("ticker")["band_width_return"].rank(pct=True)
-    return frame
+    # CP245 — band_lower/upper/upper_return 은 return/width 파생 계산 후 불필요. drop (메모리).
+    return frame.drop(columns=["band_lower", "band_upper", "band_upper_return"])
 
 
 @lru_cache(maxsize=4)
