@@ -170,9 +170,14 @@ App Router 의 `src/app/layout.tsx`, `src/app/page.tsx`, `ClarityInit.tsx` 등�
 - **최대 실제 영향**: DoS (vercel quota 초과). cache poisoning 류는 mitigation
   factor 적용 시 실효 낮음.
 - Mitigation factor:
-  - ISR/revalidate/generateStaticParams 0 hit (F8) → cache 자체가 거의 없음 →
-    cache poisoning / cache-busting collision 실효 매우 낮음
+  - ISR/revalidate/generateStaticParams 0 hit (F8) → server-side cache 자체가
+    거의 없음 → server cache poisoning / cache-busting collision 실효 매우 낮음
   - experimental.staleTimes 0 hit (F9) → cache 정책 default
+  - browser cache poisoning (vfv6 RSC cache-busting collision 의 변형) 은
+    사용자 본인 browser 에 잘못된 RSC response cache → 다음 페이지 로드 시
+    잘못된 UI. 단 인증 없음 → cross-user impact 0, 데이터 유출 0
+  - RSC DoS (h25m/q4gf/8h8q) 는 cache 와 무관 request-level trigger →
+    Vercel function quota / 응답 시간 영향. backend (별 process) 까지는 X
   - 인증 없음 → cross-user impact 0
   - 공개 read-only 데이터만 → 유출 시 손실 0
 - v2 mitigation: next 16 major bump (RSC 호환 검증 + React 19 호환).
@@ -184,12 +189,16 @@ factor 와 함께 risk 인정하고 진행한다. v2 (Supabase Auth + production
 진입 시 next 16 major bump 동시 진행을 commitment 으로 박는다.
 
 ```
-Acknowledged by: <pending — 사용자 서명 위치>
-Date: <pending>
-v2 mitigation commitment: next 16 major bump + RSC 호환 재검증
+Acknowledged by: 김지형
+Date: 2026-06-08
+v2 mitigation commitment: Supabase Auth + production 본격화 트랙 진입 시
+  next 16 major bump 동시 진행 (RSC + React 19 호환 재검증 포함).
+Pre-sign review (agent 세 번 검수): rewrites 영향 (vercel/render quota DoS +
+  log injection 가능, 금전/데이터 유출 0) / RSC 영향 (vercel function quota
+  DoS + browser cache poisoning, cross-user 0 + 데이터 유출 0) / mitigation
+  factor 정확성 (인증 없음 / 공개 데이터 / ISR 미사용 / CP241 예정) 모두
+  정직성 확인. browser cache 영향 1건 본 acknowledgement 직전 보강 박힘.
 ```
-
-→ 본 commit 후 사용자 직접 위 placeholder 를 채워 정직성의 마지막 lock 박는다.
 
 ### Frontend 모니터링 / 갱신 정책
 
