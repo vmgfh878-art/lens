@@ -3,10 +3,10 @@
   "band_run_id": "tide-1D-ea54dcae654d",
   "asof_start": "2024-11-12",
   "asof_end": "2026-06-05",
-  "row_count": 780429,
+  "row_count": 781395,
   "source": "v1_local_parquet",
-  "built_at": "2026-06-06T06:54:20.803216+00:00",
-  "cp": "CP210",
-  "line_policy": "existing_line_rows_preserved",
-  "band_policy": "cp153_1d_band_rows_replaced"
+  "built_at": "2026-06-07T03:22:04.282498+00:00",
+  "cp": "CP212",
+  "line_policy": "current_predictions_line_1d_serving_rows",
+  "band_policy": "current_predictions_band_1d_serving_rows"
 }
