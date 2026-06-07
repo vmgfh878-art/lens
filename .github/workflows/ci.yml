@@ -58,6 +58,16 @@ jobs:
           radon mi backend/app -s
           xenon --max-absolute C --max-modules B --max-average A backend/app
 
+      - name: Code complexity report (ai, measure-only)
+        # CP243 — ai/ 는 GPU 의존(CI skip) + characterization 안전망 부재라
+        # 차단(xenon) 대신 추세 측정만 한다. evaluation·preprocessing·inference·
+        # train 이 MI C(복잡도 부채). 안전망(golden master) 깐 뒤 모듈을 분리하며
+        # 점진적으로 차단 게이트에 편입할 예정. radon 은 정적 분석이라 torch 불필요 → CI 가능.
+        continue-on-error: true
+        run: |
+          radon mi ai/models ai/inference.py ai/preprocessing.py ai/evaluation.py ai/loss.py ai/train.py ai/calibration_artifacts.py -s
+          radon cc ai/models ai/inference.py ai/evaluation.py -a -s -nc
+
       - name: Pytest (backend only — ai/tests skipped, GPU(torch cu128) absent on CI)
         # 사용자 명시: GPU 의존 ai/tests 는 CI(CPU)에서 skip 마킹. requirements.txt
         # 에 torch 없음 → ai/tests collection 자체가 깨질 수 있어 backend/tests
