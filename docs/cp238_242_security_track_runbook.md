@@ -1,18 +1,39 @@
-# Lens 보안 트랙 Runbook (CP238 ~ CP242)
+# Lens 보안 트랙 Runbook (CP237.5 + CP238 ~ CP242)
 
-> 작성: 2026-06-06. 단일 진입점. **다음 세션 명령 하나만 전달하면 agent 가 이걸 읽고 CP238 부터 순차 자동 진행**.
+> 작성: 2026-06-06. 단일 진입점. **다음 세션 명령 하나만 전달하면 agent 가 이걸 읽고 CP237.5 → CP238 부터 순차 자동 진행**.
+> 2026-06-06 업데이트: CP223 snapshot 8 개가 daily refresh 의 data drift 에 깨져 있음 확인. **CP237.5 (drift-resilient snapshot 재설계) 를 prerequisite 으로 추가**. 그 다음 CP238 진입.
 
 ---
 
-## 🚀 사용자가 다음 세션에 던질 명령 (한 줄)
+## 🚀 사용자가 다음 세션에 던질 명령 (그대로 복붙)
 
-다음 프롬프트를 그대로 복사해서 새 세션에 던지면 됩니다:
+````
+Lens 보안 트랙 진행. 작업 디렉터리 C:\Users\user\lens. 메인 runbook: docs\cp238_242_security_track_runbook.md. 진입 순서: CP237.5 → CP238 → CP239 → CP240 → CP241 → CP242. 지시서 6개: docs\cp237_5_snapshot_drift_resilient_instructions.md + docs\cp238_*_instructions.md ~ docs\cp242_*_instructions.md.
 
-```
-Lens 보안 트랙 진행. C:\Users\user\lens\docs\cp238_242_security_track_runbook.md 따라서 CP238부터 순차 자동 진행해. 각 CP는 docs/cp{NN}_*_instructions.md 지시서를 읽고 Step 단위로 실행 → 매 Step 끝마다 commit → CP 완료 시 ADR + 보고서. 사람 확인 필요 단계(이 runbook §3 목록)에서는 무조건 멈추고 사용자에게 묻고 응답 기다림. 진행 보고는 §8 양식. 시작 전 §5 checkpoint 통과 확인 필수.
-```
+다음 규칙을 무조건 지킨다. 어떤 경우에도 우회/생략 X:
 
-(필요 시 "CP240부터" 같이 시작 CP 지정 가능. 단 의존성 그래프(§4) 위반 X.)
+[R1] 시작 전 Checkpoint (runbook §5). main branch / clean tree / 도구 가용성 (.\.venv\Scripts\ 직접 호출) / CP223 snapshot 상태 확인. CP223 RED 면 즉시 CP237.5 진입 (이게 prerequisite). FE 테스트는 cd frontend; npm run test:unit. Checkpoint RED 있으면 사용자에게 보고 후 의논.
+
+[R2] 진행 중 선택 애매한 거 / 결론 둘 이상으로 갈리는 거 / 지시서에 명시 안 된 함정 / 운영 영향 가능성 있는 결정 / 의심 신호는 무조건 멈추고 사용자에게 묻는다. "이 정도면 알아서 가도 되겠지" 절대 금지. 자율 판단 금지. 의심되면 멈춤 → 상황 + 옵션 + 권장안 보고 → 응답 대기.
+
+[R3] runbook §3 사람 확인 필요 Step 9 개에서는 무조건 멈춤:
+  CP238 Step 8 (Dependabot UI), CP238 Step 3·6 (버전 bump 후 회귀),
+  CP239 Step 3a·3b·3c (provider rotation / dashboard env / history rewrite),
+  CP240 Step 5 (CSP 조정), CP240 Step 8·9 (외부 검증 사이트),
+  CP242 Step 2 (Render dashboard CORS 확인), CP242 Step 5 (rate limit 도입 결정)
+
+[R4] 각 Step 끝마다 commit (지시서 §11 양식). CP 완료 시 ADR + 보고서. 회귀 안전망 (CP237.5 후 CP223 snapshot + CP230 FE smoke) 깨지면 즉시 중단 + revert 제안.
+
+[R5] 환경 = Windows PowerShell 5.1. ?? / ?. / ??= 안 됨. 한 줄 여러 명령은 ; 만. venv tool 은 .\.venv\Scripts\<tool>.exe 직접 호출. pytest 항상 --ignore=backend\tests\test_services.py. pytest env: $env:PYTHONPATH=".;backend"; $env:LENS_FORCE_LOCAL="1".
+
+[R6] 다른 세션에서 사용자가 동시에 작업 중 가능 (예: 최근 "503 해결" / refresh 핫픽스). 시작 전 git fetch 후 last commit 다시 확인. push 전에도 fetch. 충돌 신호 있으면 즉시 멈춤 → 사용자에게 알리고 어떻게 할지 의논.
+
+진행 보고는 runbook §8 양식. 시작 시점 첫 응답은 runbook §11 template.
+
+CP237.5 부터 시작.
+````
+
+(필요 시 "CP238부터" 같이 시작 CP 지정 가능. 단 §4 의존성 위반 X.)
 
 ---
 
@@ -32,10 +53,11 @@ Lens 보안 트랙 진행. C:\Users\user\lens\docs\cp238_242_security_track_runb
 
 | CP | 카테고리 | OWASP | 지시서 | 진입 조건 |
 |---|---|---|---|---|
-| CP238 | Dependency CVE audit | A06 | `docs/cp238_dependency_audit_instructions.md` | 없음 (독립) |
-| CP239 | Secrets history (gitleaks) | A02 | `docs/cp239_secrets_history_instructions.md` | 없음 (독립). **Step 3 rotation 은 사람 수동** |
-| CP240 | HTTP 보안 헤더 + CSP | A05 | `docs/cp240_security_headers_instructions.md` | CP223 BE snapshot + CP230 FE smoke GREEN |
-| CP241 | Input validation (Pydantic) | A03 | `docs/cp241_input_validation_instructions.md` | CP223 BE snapshot GREEN |
+| **CP237.5** | **Snapshot drift-resilient 재설계 (prerequisite)** | — | `docs/cp237_5_snapshot_drift_resilient_instructions.md` | 없음. CP238 진입 전 필수. CP223 RED 라 |
+| CP238 | Dependency CVE audit | A06 | `docs/cp238_dependency_audit_instructions.md` | CP237.5 완료 (CP223 GREEN) |
+| CP239 | Secrets history (gitleaks) | A02 | `docs/cp239_secrets_history_instructions.md` | CP237.5 완료. **Step 3 rotation 은 사람 수동** |
+| CP240 | HTTP 보안 헤더 + CSP | A05 | `docs/cp240_security_headers_instructions.md` | CP237.5 + CP230 FE smoke GREEN |
+| CP241 | Input validation (Pydantic) | A03 | `docs/cp241_input_validation_instructions.md` | CP237.5 GREEN |
 | CP242 | CORS + rate limit + 트랙 종료 | A04/A05 | `docs/cp242_cors_rate_limit_instructions.md` | CP235 Pydantic Settings 존재 (확인됨) |
 
 ---
