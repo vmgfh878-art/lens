@@ -79,27 +79,24 @@ def _load(name: str) -> pd.DataFrame | None:
 
 
 def _compress_strings(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert object columns to ordered categorical to save memory.
+    """object 컬럼은 ordered categorical 로, 날짜 컬럼은 datetime64 로 압축해 메모리 절감.
 
-    Prediction parquets have columns like model_id / source_cp that store the
-    same string in every row (e.g. 1 unique value × 597 k rows ≈ 44 MB as
-    object, < 1 MB as ordered category).
+    model_id / source_cp 처럼 한 값이 597 k 행 반복되는 컬럼은 category 로 (44MB → <1MB).
 
-    CP214 — `asof_date` / `forecast_date` 는 **categorical 에서 제외**한다.
-    이유:
-      - Categorical[str] vs str 비교 (`sub["asof_date"] >= cutoff`) 가 TypeError 발생
-        (predictions.py 라우터에서 `Invalid comparison between dtype=category and str`).
-      - `pd.to_datetime(Categorical[str])` 가 dtype 을 datetime64 가 아닌 **Categorical[datetime]**
-        으로 유지 → strategy_backtest_svc 의 merge 가 `datetime64[ns] vs category` 충돌로 실패.
-    날짜 컬럼은 unique 수가 700~2000 정도라 categorical 효과가 크지 않고, object 로 유지해도
-    메모리 절감 효과의 대부분(ticker / model_id / source_cp)은 유지된다.
+    CP245 — `asof_date` / `forecast_date` 는 **datetime64 로 변환**한다. 이전엔 CP214 가
+    category 비교 TypeError 때문에 object 로 뒀으나, 597 k 행 날짜 문자열이 수십 MB 를
+    먹었다(band_1d 97MB 의 큰 비중). 라우터(predictions.py)의 `asof_date >= cutoff` 비교를
+    문자열이 아니라 `pd.Timestamp` 로 올려 정공법으로 해결했고, strategy_scan 은
+    `pd.to_datetime(asof_date)` 로 datetime64 를 그대로 받으므로 영향이 없다. 응답
+    직렬화(_jsonable)는 Timestamp 를 date 문자열로 내보내 출력 JSON 은 기존과 동일하다.
     """
     cat_dtype = pd.CategoricalDtype(ordered=True)
-    skip = {"asof_date", "forecast_date"}
+    date_cols = {"asof_date", "forecast_date"}
     for col in df.select_dtypes(include="object").columns:
-        if col in skip:
-            continue
-        df[col] = df[col].astype(cat_dtype)
+        if col in date_cols:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+        else:
+            df[col] = df[col].astype(cat_dtype)
     return df
 
 

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +76,10 @@ def _jsonable(value: Any) -> Any:
         if math.isnan(value) or math.isinf(value):
             return None
         return float(value)
+    if isinstance(value, pd.Timestamp):
+        # CP245 — asof/forecast 가 store 에서 datetime64 라 Timestamp 로 온다.
+        # 기존 object("YYYY-MM-DD") 응답과 동일하도록 date 문자열로 직렬화한다.
+        return None if pd.isna(value) else value.strftime("%Y-%m-%d")
     if hasattr(value, "isoformat"):
         return value.isoformat()
     if hasattr(value, "item"):  # numpy scalars
@@ -139,7 +142,7 @@ def get_line(
         raise HTTPException(status_code=404, detail=f"ticker {ticker} not found in 1D line cache")
 
     # filter by days
-    cutoff = (date.fromisoformat(sub["asof_date"].max()) - timedelta(days=days)).isoformat()
+    cutoff = sub["asof_date"].max() - pd.Timedelta(days=days)
     sub = sub[sub["asof_date"] >= cutoff]
 
     return success_response(
@@ -171,7 +174,7 @@ def get_band_1d(
     if sub.empty:
         raise HTTPException(status_code=404, detail=f"ticker {ticker} not found in 1D band cache")
 
-    cutoff = (date.fromisoformat(sub["asof_date"].max()) - timedelta(days=days)).isoformat()
+    cutoff = sub["asof_date"].max() - pd.Timedelta(days=days)
     sub = sub[sub["asof_date"] >= cutoff]
 
     if horizon is not None:
@@ -209,7 +212,7 @@ def get_band_1w(
     if sub.empty:
         raise HTTPException(status_code=404, detail=f"ticker {ticker} not found in 1W band cache")
 
-    cutoff = (date.fromisoformat(sub["asof_date"].max()) - timedelta(days=days)).isoformat()
+    cutoff = sub["asof_date"].max() - pd.Timedelta(days=days)
     sub = sub[sub["asof_date"] >= cutoff]
 
     if horizon is not None:
