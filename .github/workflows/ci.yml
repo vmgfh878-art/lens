@@ -131,3 +131,10 @@ jobs:
         # 막지 않도록 continue-on-error (cleanup CP 에서 strict 화).
         continue-on-error: true
         run: npm run test:e2e
+
+      - name: audit-ci (CP238 — high+ with documented allowlist)
+        # 15 advisories (next 14 + postcss 1) allowlist 박힘. 8 justified
+        # (Lens 사용 패턴 grep 0) + 7 acknowledged (rewrites + RSC, v2 next
+        # 16 major bump 동시 진행 commitment). 근거는 docs/security/
+        # cve_exceptions.md + docs/cp238_grep_evidence.md.
+        run: npx audit-ci --config audit-ci.json

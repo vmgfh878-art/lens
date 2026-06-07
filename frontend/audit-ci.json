@@ -1,0 +1,22 @@
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "$comment": "CP238 Step 6 — high+ gate. allowlist 15 GHSA: 8 justified (Lens 사용 패턴 0) + 7 acknowledged (rewrites + RSC, v2 next 16 bump 시점에 정리). 근거 docs/security/cve_exceptions.md + docs/cp238_grep_evidence.md.",
+  "high": true,
+  "allowlist": [
+    "GHSA-9g9p-9gw9-jx7f",
+    "GHSA-3x4c-7xq6-9pq8",
+    "GHSA-h64f-5h5j-jqjh",
+    "GHSA-c4j6-fc7j-m34r",
+    "GHSA-36qx-fr4f-26g5",
+    "GHSA-ffhc-5mcf-pf4q",
+    "GHSA-gx5p-jg67-6x7h",
+    "GHSA-qx2v-qp2m-jg93",
+    "GHSA-ggv3-7p47-pfv8",
+    "GHSA-3g8h-86w9-wvmq",
+    "GHSA-h25m-26qc-wcjf",
+    "GHSA-q4gf-8mx6-v5v3",
+    "GHSA-8h8q-6873-q5fj",
+    "GHSA-vfv6-92ff-j949",
+    "GHSA-wfc6-r584-vfw7"
+  ]
+}
