@@ -60,6 +60,18 @@ def _safe(series: pd.Series, default: float = np.nan) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(default)
 
 
+def _safe_col(frame: pd.DataFrame, col: str, default: float = np.nan) -> pd.Series:
+    """전략이 안 쓰는 예측 컬럼(line/band)이 frame 에 없을 때 default Series 반환.
+
+    band 를 안 쓰는 전략(indicator_balance_v2)은 _load_frame 이 band 를 머지하지
+    않으므로 band_* 컬럼이 frame 에 없다. 이때 KeyError 대신 NaN(또는 default)으로
+    안전 처리한다. 해당 전략은 이 컬럼을 entry/exit 로직에서 쓰지 않으므로 결과 불변.
+    """
+    if col not in frame.columns:
+        return pd.Series(default, index=frame.index, dtype="float64")
+    return _safe(frame[col], default)
+
+
 def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.Series, pd.Series]:
     ma60 = _safe(frame["ma_60_ratio"])
     ma20 = _safe(frame["ma_20_ratio"])
@@ -67,9 +79,9 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
     rsi = _safe(frame["rsi_norm"], 50.0)
     atr = _safe(frame["atr_ratio_calc"], 0.0)
     bb = _safe(frame["bb_position"], 1.0)
-    line = _safe(frame["line_score"])
-    lower = _safe(frame["band_lower_return"])
-    width_expansion = _safe(frame["band_width_expansion"], 1.0)
+    line = _safe_col(frame, "line_score")
+    lower = _safe_col(frame, "band_lower_return")
+    width_expansion = _safe_col(frame, "band_width_expansion", 1.0)
 
     if rule.id == "indicator_balance_v2":
         trend_entry = (ma60 >= 0.02) & (ma20 >= -0.02) & (macd >= 0.0) & (rsi < 75.0)

@@ -1,7 +1,13 @@
 """
 전략 데이터 로딩 + 캐시 + 집계.
 
-CP226 분리 산출. parquet I/O, lru_cache 보존, 티커별 시그널 + aggregate 산출.
+CP226 분리 산출. CP244 메모리 재설계:
+  - `_load_base_frame` : 가격 + 지표 (line/band 없이) — 모든 전략 공통 base.
+  - `_load_frame(needs_line, needs_band)` : base + 전략이 필요로 하는 line/band 만 머지.
+    band 를 안 쓰는 전략(indicator_balance_v2)이 band(97MB) 를 로드하지 않게 한다.
+  - `_scan_results` : scan 용. 종목별 최신 신호 row 만 보관 (by_ticker full 75MB 미상주).
+  - `_backtest_signal_frame` : backtest 용. 종목 1개 full signal_frame.
+
 의존: strategy_indicators (align_date_dtype / normalize_rsi / compute_signal_frame),
 strategy_backtest_engine (ticker_metrics), strategy_rules (STRATEGIES/StrategyRule),
 parquet_store.
@@ -33,7 +39,12 @@ def _data_dir() -> Path:
 
 
 @lru_cache(maxsize=1)
-def _load_frame() -> pd.DataFrame:
+def _load_base_frame() -> pd.DataFrame:
+    """가격 + 지표 (line/band 없이). 모든 전략 공통 base.
+
+    band/line 은 _load_frame(needs_line, needs_band) 에서 전략이 실제로 필요로 할
+    때만 머지한다 — band 를 안 쓰는 전략이 band parquet(97MB)을 로드하지 않게.
+    """
     base = _data_dir()
     price = pd.read_parquet(base / "market_prices_1d.parquet")
     close_column = "adjusted_close" if "adjusted_close" in price.columns else "close"
@@ -83,41 +94,9 @@ def _load_frame() -> pd.DataFrame:
         _normalize_rsi(indicators["rsi"]) if "rsi" in indicators.columns else np.nan
     )
 
-    # Use shared parquet_store to avoid loading a second copy of these files
-    # (predictions.py already holds them; store ensures only one in-process copy).
-    _raw_line = parquet_store.get_raw("line_1d")
-    if _raw_line is None:
-        raise FileNotFoundError("predictions_line_1d.parquet not found in parquet_store")
-    line = _raw_line.copy()
-    line["ticker"] = line["ticker"].astype(str).str.upper()
-    line["date"] = pd.to_datetime(line["asof_date"])
-    for column in ["line_score", "safe_line_score", "line_rank_by_date", "safe_line_rank_by_date"]:
-        if column in line.columns:
-            line[column] = pd.to_numeric(line[column], errors="coerce")
-    line = line.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
-
-    _raw_band = parquet_store.get_raw("band_1d")
-    if _raw_band is None:
-        raise FileNotFoundError("predictions_band_1d.parquet not found in parquet_store")
-    band = _raw_band[pd.to_numeric(_raw_band["horizon_step"], errors="coerce") == 5].copy()
-    band["ticker"] = band["ticker"].astype(str).str.upper()
-    band["date"] = pd.to_datetime(band["asof_date"])
-    for column in ["band_lower", "band_upper"]:
-        band[column] = pd.to_numeric(band[column], errors="coerce")
-    band = band.groupby(["ticker", "date"], as_index=False, observed=True).agg(
-        band_lower=("band_lower", "min"), band_upper=("band_upper", "max")
-    )
-
-    # CP214 — 머지 직전 date dtype 평탄화 (방어). 근본 fix 는 parquet_store 에서 했지만
-    # 향후 다른 source 가 추가돼도 머지가 깨지지 않게 idempotent helper 적용.
     price = _align_date_dtype(price)
     indicators = _align_date_dtype(indicators)
-    line = _align_date_dtype(line)
-    band = _align_date_dtype(band)
-
-    # CP227 — 머지 직전 dtype 계약 강제. _align_date_dtype 이후 date 는 datetime64 여야
-    # 머지 키가 호환되며, 어긋나면 silent 머지 실패 (CP214 사고) 가 다시 들어온다.
-    for _nm, _f in (("price", price), ("indicators", indicators), ("line", line), ("band", band)):
+    for _nm, _f in (("price", price), ("indicators", indicators)):
         assert pd.api.types.is_datetime64_any_dtype(
             _f["date"]
         ), f"{_nm}.date not datetime before merge"
@@ -139,7 +118,33 @@ def _load_frame() -> pd.DataFrame:
         on=["ticker", "date"],
         how="left",
     )
-    frame = frame.merge(
+    frame["ma_20_ratio"] = frame["ma_20_ratio"].fillna(
+        frame.groupby("ticker")["close"].transform(
+            lambda values: values / values.rolling(20, min_periods=15).mean() - 1.0
+        )
+    )
+    frame["ma_60_ratio"] = frame["ma_60_ratio"].fillna(
+        frame.groupby("ticker")["close"].transform(
+            lambda values: values / values.rolling(60, min_periods=40).mean() - 1.0
+        )
+    )
+    return frame.sort_values(["ticker", "date"]).reset_index(drop=True)
+
+
+def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
+    raw_line = parquet_store.get_raw("line_1d")
+    if raw_line is None:
+        raise FileNotFoundError("predictions_line_1d.parquet not found in parquet_store")
+    line = raw_line.copy()
+    line["ticker"] = line["ticker"].astype(str).str.upper()
+    line["date"] = pd.to_datetime(line["asof_date"])
+    for column in ["line_score", "safe_line_score", "line_rank_by_date", "safe_line_rank_by_date"]:
+        if column in line.columns:
+            line[column] = pd.to_numeric(line[column], errors="coerce")
+    line = line.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last")
+    line = _align_date_dtype(line)
+    assert pd.api.types.is_datetime64_any_dtype(line["date"]), "line.date not datetime before merge"
+    return frame.merge(
         line[
             [
                 "ticker",
@@ -153,18 +158,23 @@ def _load_frame() -> pd.DataFrame:
         on=["ticker", "date"],
         how="left",
     )
-    frame = frame.merge(band, on=["ticker", "date"], how="left")
 
-    frame["ma_20_ratio"] = frame["ma_20_ratio"].fillna(
-        frame.groupby("ticker")["close"].transform(
-            lambda values: values / values.rolling(20, min_periods=15).mean() - 1.0
-        )
+
+def _merge_band(frame: pd.DataFrame) -> pd.DataFrame:
+    raw_band = parquet_store.get_raw("band_1d")
+    if raw_band is None:
+        raise FileNotFoundError("predictions_band_1d.parquet not found in parquet_store")
+    band = raw_band[pd.to_numeric(raw_band["horizon_step"], errors="coerce") == 5].copy()
+    band["ticker"] = band["ticker"].astype(str).str.upper()
+    band["date"] = pd.to_datetime(band["asof_date"])
+    for column in ["band_lower", "band_upper"]:
+        band[column] = pd.to_numeric(band[column], errors="coerce")
+    band = band.groupby(["ticker", "date"], as_index=False, observed=True).agg(
+        band_lower=("band_lower", "min"), band_upper=("band_upper", "max")
     )
-    frame["ma_60_ratio"] = frame["ma_60_ratio"].fillna(
-        frame.groupby("ticker")["close"].transform(
-            lambda values: values / values.rolling(60, min_periods=40).mean() - 1.0
-        )
-    )
+    band = _align_date_dtype(band)
+    assert pd.api.types.is_datetime64_any_dtype(band["date"]), "band.date not datetime before merge"
+    frame = frame.merge(band, on=["ticker", "date"], how="left")
     frame["band_lower_return"] = frame["band_lower"] / frame["close"] - 1.0
     frame["band_upper_return"] = frame["band_upper"] / frame["close"] - 1.0
     frame["band_width_return"] = frame["band_upper_return"] - frame["band_lower_return"]
@@ -176,6 +186,24 @@ def _load_frame() -> pd.DataFrame:
     )
     frame["band_width_expansion"] = frame["band_width_expansion"].fillna(1.0)
     frame["band_width_percentile"] = frame.groupby("ticker")["band_width_return"].rank(pct=True)
+    return frame
+
+
+@lru_cache(maxsize=4)
+def _load_frame(needs_line: bool = True, needs_band: bool = True) -> pd.DataFrame:
+    """base + 전략이 필요로 하는 line/band 만 머지.
+
+    하위호환: 인자 없이 호출하면 line/band 둘 다 머지(기존 _load_frame() 동작과 동일).
+    band 를 안 쓰는 전략은 `_load_frame(False, False)` → base 그대로(band 미로드).
+    """
+    frame = _load_base_frame()
+    if not needs_line and not needs_band:
+        return frame
+    frame = frame.copy()
+    if needs_line:
+        frame = _merge_line(frame)
+    if needs_band:
+        frame = _merge_band(frame)
     return frame.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
@@ -192,12 +220,15 @@ def _sector_map() -> dict[str, str]:
     }
 
 
-@lru_cache(maxsize=16)
-def _strategy_results(strategy_id: str) -> dict[str, Any]:
-    if strategy_id not in STRATEGIES:
-        raise HTTPException(status_code=404, detail=f"지원하지 않는 전략입니다: {strategy_id}")
-    rule = STRATEGIES[strategy_id]
-    frame = _load_frame()
+def _filtered_windowed_frame(
+    rule: Any,
+) -> tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
+    """전략별 frame: 필요한 line/band 머지 + notna 필터 + 최근 365일 윈도우.
+
+    scan/backtest 공통 전처리. _load_frame 이 lru_cache 라 반복 호출해도 디스크
+    재로딩은 없다 (필터·윈도우만 매번).
+    """
+    frame = _load_frame(rule.uses_line, rule.uses_band)
     if rule.uses_line:
         frame = frame[frame["line_score"].notna()].copy()
     if rule.uses_band:
@@ -208,20 +239,33 @@ def _strategy_results(strategy_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=404, detail=f"{rule.label}에 사용할 로컬 데이터가 없습니다."
         )
-
     end_date = frame["date"].max()
     start_date = end_date - pd.Timedelta(days=365)
     frame = frame[(frame["date"] >= start_date) & (frame["date"] <= end_date)].copy()
+    return frame, start_date, end_date
 
-    by_ticker: dict[str, pd.DataFrame] = {}
+
+@lru_cache(maxsize=16)
+def _scan_results(strategy_id: str) -> dict[str, Any]:
+    """scan 용 — 종목별 최신 신호 row + metrics + aggregate.
+
+    cards 는 종목별 최신 1 row 만 쓰므로, by_ticker full signal_frame 을 상주시키지
+    않는다 (메모리 75MB → 수MB). full frame 이 필요한 backtest 는
+    `_backtest_signal_frame` 으로 종목 1개만 별도 계산한다.
+    """
+    if strategy_id not in STRATEGIES:
+        raise HTTPException(status_code=404, detail=f"지원하지 않는 전략입니다: {strategy_id}")
+    rule = STRATEGIES[strategy_id]
+    frame, start_date, end_date = _filtered_windowed_frame(rule)
+
+    latest_rows: dict[str, dict[str, Any]] = {}
     metrics_rows = []
     for ticker, ticker_frame in frame.groupby("ticker", sort=False):
         if len(ticker_frame) < MIN_EVAL_DAYS:
             continue
         signal_frame = _compute_signal_frame(ticker_frame, rule)
-        by_ticker[str(ticker)] = signal_frame
-        metrics = _ticker_metrics(signal_frame)
-        metrics_rows.append({"ticker": str(ticker), **metrics})
+        latest_rows[str(ticker)] = signal_frame.iloc[-1].to_dict()
+        metrics_rows.append({"ticker": str(ticker), **_ticker_metrics(signal_frame)})
 
     if not metrics_rows:
         raise HTTPException(
@@ -255,16 +299,37 @@ def _strategy_results(strategy_id: str) -> dict[str, Any]:
         "rule": rule,
         "start_date": start_date,
         "end_date": end_date,
-        "by_ticker": by_ticker,
+        "latest_rows": latest_rows,
         "metrics": metrics_frame,
         "aggregate": aggregate,
     }
 
 
+def _backtest_signal_frame(strategy_id: str, ticker: str) -> tuple[Any, pd.DataFrame]:
+    """backtest 용 — 종목 1개 full signal_frame (전종목 상주 없이)."""
+    if strategy_id not in STRATEGIES:
+        raise HTTPException(status_code=404, detail=f"지원하지 않는 전략입니다: {strategy_id}")
+    rule = STRATEGIES[strategy_id]
+    frame, _start, _end = _filtered_windowed_frame(rule)
+    normalized = ticker.upper()
+    ticker_frame = frame[frame["ticker"] == normalized].copy()
+    if len(ticker_frame) < MIN_EVAL_DAYS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{normalized}에는 {rule.label} 백테스트에 필요한 로컬 데이터가 없습니다.",
+        )
+    return rule, _compute_signal_frame(ticker_frame, rule)
+
+
 __all__ = [
     "MIN_EVAL_DAYS",
     "_data_dir",
+    "_load_base_frame",
     "_load_frame",
+    "_merge_line",
+    "_merge_band",
     "_sector_map",
-    "_strategy_results",
+    "_filtered_windowed_frame",
+    "_scan_results",
+    "_backtest_signal_frame",
 ]

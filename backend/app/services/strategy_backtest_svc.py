@@ -42,10 +42,12 @@ from app.services.strategy_indicators import (
 )
 from app.services.strategy_scan import (
     MIN_EVAL_DAYS,  # noqa: F401 (re-export)
+    _backtest_signal_frame,
     _data_dir,  # noqa: F401 (re-export)
-    _load_frame,
+    _load_base_frame,
+    _load_frame,  # noqa: F401 (re-export)
+    _scan_results,
     _sector_map,
-    _strategy_results,
 )
 
 # 전략 정의 (StrategyRule + STRATEGIES) 는 strategy_rules.py 에서 단일 관리한다 (모델 급 관리).
@@ -54,16 +56,14 @@ from app.strategies.strategy_rules import (
     STRATEGIES,  # noqa: F401 (re-export for router/admin caller)
     StrategyRule,
 )
-from fastapi import HTTPException
 
 
 def get_strategy_scan(strategy_id: str, limit: int = 500) -> dict[str, Any]:
-    result = _strategy_results(strategy_id)
+    result = _scan_results(strategy_id)
     rule: StrategyRule = result["rule"]
     sectors = _sector_map()
     cards = []
-    for ticker, signal_frame in result["by_ticker"].items():
-        row = signal_frame.iloc[-1]
+    for ticker, row in result["latest_rows"].items():
         has_usable_signal = bool(pd.notna(row.get("close")))
         cards.append(
             {
@@ -110,7 +110,7 @@ def get_strategy_scan(strategy_id: str, limit: int = 500) -> dict[str, Any]:
         "strategyLabel": rule.label,
         "timeframe": "1D",
         "asofDate": pd.Timestamp(result["end_date"]).date().isoformat(),
-        "scopeTickerCount": len(result["by_ticker"]),
+        "scopeTickerCount": len(result["latest_rows"]),
         "usableSignalCount": sum(1 for card in cards if card["hasUsableSignal"]),
         "latestValidTickerCount": sum(1 for card in cards if card["hasUsableSignal"]),
         "cards": cards[:limit],
@@ -123,22 +123,14 @@ def get_strategy_scan(strategy_id: str, limit: int = 500) -> dict[str, Any]:
 def clear_strategy_cache() -> None:
     """admin/reload 에서 호출. parquet 갱신 후 전략 frame/결과/sector cache 를 비운다.
     이게 안 되면 새 데이터를 받아도 전략은 옛 결과를 계속 노출한다."""
+    _load_base_frame.cache_clear()
     _load_frame.cache_clear()
-    _strategy_results.cache_clear()
+    _scan_results.cache_clear()
     _sector_map.cache_clear()
 
 
 def get_strategy_backtest(strategy_id: str, ticker: str) -> dict[str, Any]:
-    result = _strategy_results(strategy_id)
-    rule: StrategyRule = result["rule"]
-    normalized = ticker.upper()
-    if normalized not in result["by_ticker"]:
-        raise HTTPException(
-            status_code=404,
-            detail=f"{normalized}에는 {rule.label} 백테스트에 필요한 로컬 데이터가 없습니다.",
-        )
-
-    signal_frame = result["by_ticker"][normalized]
+    rule, signal_frame = _backtest_signal_frame(strategy_id, ticker)
     metrics = _ticker_metrics(signal_frame)
     return {
         "points": _points(signal_frame),
