@@ -132,6 +132,11 @@ CI step:
 이게 "그냥 ignore 박고 잊어" 패턴 차단의 lock. 정책상 acknowledged advisory 는 항상
 사용자 서명 + commitment 의 짝.
 
+**CP238 closure 결과**: 사용자 김지형 (2026-06-08) 본인 서명 박힘 (commit
+ccc82c2). agent 세 번 검수 후 박음. browser cache 영향 1건 보강 추가.
+v2 mitigation commitment: Supabase Auth + production 본격화 트랙 진입 시
+next 16 major bump 동시 진행 + RSC + React 19 호환 재검증.
+
 ### 7. Dependabot alerts
 
 GitHub Settings → Security → Code security and analysis:
@@ -140,6 +145,12 @@ GitHub Settings → Security → Code security and analysis:
 - **Dependabot version updates**: 보류 (PR noise 우려)
 
 CP238 Step 8 에서 사용자 직접 GitHub UI 작업 (R3).
+
+**CP238 closure 결과**: 사용자 응답 `"238 8 done (or skip)"`. GitHub UI 외부라
+agent 가 직접 상태 확인 불가. 사용자 본인 결정 박힘. 보고서 §Step 8 참조.
+미활성 상태로 운영 진입 시 GitHub Advisory DB 의 push-time alert 못 받음 —
+CI workflow 의 `pip-audit` + `audit-ci` 게이트 가 사실상 대체 (단 신규 CVE
+출시 시 PR 깨질 때까지 모름, Dependabot 활성 시 즉시 알람).
 
 ### 8. 재발 차단
 
