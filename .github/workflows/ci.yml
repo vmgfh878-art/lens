@@ -148,3 +148,26 @@ jobs:
         # 16 major bump 동시 진행 commitment). 근거는 docs/security/
         # cve_exceptions.md + docs/cp238_grep_evidence.md.
         run: npx audit-ci --config audit-ci.json
+
+  secrets:
+    # CP239 Step 7 — secrets gate. Windows pre-commit hook 가 unreliable 라
+    # off-ramp 결과 본 CI gate 가 진짜 enforcement. `gitleaks detect` (default,
+    # git history 모드). --no-git 안 씀. .gitleaks.toml allowlist 자동 로드
+    # (ML training metric identifier false positive 흡수). v2 재검토 (allowlist
+    # 흡수 mystery — 사용자 명령 "더 시도 X").
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks v8.30.1
+        run: |
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Detect secrets in git history (CP239)
+        run: gitleaks detect --redact --no-banner
