@@ -131,6 +131,13 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   .g2,.g3,.g4,.arch,.two{grid-template-columns:1fr} .g4{grid-template-columns:1fr 1fr}
   .flow .step{grid-template-columns:110px 1fr} .bar{grid-template-columns:130px 1fr 64px}
 }
+.shotwrap{position:relative}
+.shothint{position:absolute;top:9px;right:9px;background:rgba(22,30,40,.62);color:#fff;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;pointer-events:none;z-index:3;letter-spacing:.02em}
+.shot{overflow-y:auto;overflow-x:hidden;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);aspect-ratio:16/9;scrollbar-width:thin;cursor:ns-resize}
+.shot.hero{aspect-ratio:2/1}
+.shot img{display:block;width:100%}
+.shot::-webkit-scrollbar{width:8px}
+.shot::-webkit-scrollbar-thumb{background:rgba(120,134,148,.45);border-radius:8px}
 </style>
 </head>
 <body>
@@ -144,17 +151,16 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   <a href="#s3"><span class="n">03</span>계획서 vs 현재</a>
   <a href="#s4"><span class="n">04</span>시스템 아키텍처</a>
   <a href="#s5"><span class="n">05</span>데이터 인프라 진화</a>
-  <a href="#s6"><span class="n">06</span>예측선(라인) 계보</a>
-  <a href="#s7"><span class="n">07</span>예측 밴드 계보</a>
-  <a href="#s8"><span class="n">08</span>평가지표 철학</a>
-  <a href="#s9"><span class="n">09</span>통계적 유의성 검정</a>
-  <a href="#s10"><span class="n">10</span>프론트엔드 3화면</a>
-  <a href="#s11"><span class="n">11</span>코드 안정성 리팩토링</a>
-  <a href="#s12"><span class="n">12</span>보안 트랙</a>
-  <a href="#s13"><span class="n">13</span>운영 자동화·재현성</a>
-  <a href="#s14"><span class="n">14</span>남은 과제</a>
-  <a href="#s15"><span class="n">15</span>결론·다음 계획 토대</a>
-  <a href="#s16"><span class="n">16</span>v2 로드맵</a>
+  <a href="#s6"><span class="n">06</span>모델 실험 — 라인·밴드 계보</a>
+  <a href="#s7"><span class="n">07</span>평가 철학 — 리스크·전략 가치</a>
+  <a href="#s8"><span class="n">08</span>통계적 유의성 검정</a>
+  <a href="#s9"><span class="n">09</span>프론트엔드 3화면</a>
+  <a href="#s10"><span class="n">10</span>코드 안정성 리팩토링</a>
+  <a href="#s11"><span class="n">11</span>보안 트랙</a>
+  <a href="#s12"><span class="n">12</span>운영 자동화·재현성</a>
+  <a href="#s13"><span class="n">13</span>남은 과제</a>
+  <a href="#s14"><span class="n">14</span>결론·다음 계획 토대</a>
+  <a href="#s15"><span class="n">15</span>v2 로드맵</a>
 </nav>
 <main>
 
@@ -215,12 +221,12 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   <div class="grid g3" style="margin:24px 0">
     <div class="card"><h4>예측선 (보수적 기준선)</h4><p style="margin:0">앞으로 5거래일 수익률을 점으로 예측하되, <b>위로 틀리는 것(낙관)을 아래로 틀리는 것보다 더 크게 벌하는</b> 비대칭 손실로 학습. “맞히는 선”이 아니라 “덜 위험하게 틀리는 선”.</p></div>
     <div class="card"><h4>예측 밴드 (위험 구간)</h4><p style="margin:0">미래 수익률의 분위수 구간(q15~q85 등)을 직접 예측. “어디까지 떨어질 수 있고 어디까지 오를 수 있는가”라는 <b>calibrated risk interval</b>. Plan v3에서 밴드가 본체로 확정.</p></div>
-    <div class="card"><h4>규칙 기반 시그널 (전략)</h4><p style="margin:0">AI 출력을 기존 보조지표와 조합한 매매 규칙. 예: <code>밴드 하단 &gt; −5%</code> AND <code>60일선 위</code> AND <code>RSI&lt;82</code> → 추세 추종. 백테스트로 검증.</p></div>
+    <div class="card"><h4>규칙 기반 시그널</h4><p style="margin:0">AI 출력을 기존 보조지표와 조합한 매매 규칙. 예: <code>밴드 하단 &gt; −5%</code> AND <code>60일선 위</code> AND <code>RSI&lt;82</code> → 추세 추종. 백테스트로 검증.</p></div>
   </div>
 
   <figure style="margin:28px 0">
-    <img src="img/demo_stocks.png" alt="Lens 종목 분석 화면 — AAPL 차트 위 예측선·밴드 오버레이" style="width:100%;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)">
-    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:8px">그림 3. 실제 화면 — AAPL 캔들 위에 <b>보수적 기준선</b>(점선)과 <b>AI 밴드</b>(상·하단)가 겹쳐 보인다. 우측 모델 패널에 신선도(2026-06-05 fresh)와 오버레이 토글. 세 출력이 한 화면에서 함께 읽힌다.</figcaption>
+    <div class="shotwrap"><div class="shot hero"><img src="img/demo_stocks.png" alt="Lens 종목 분석 화면 — AAPL 차트 위 예측선·밴드 오버레이"></div><span class="shothint">↕ 직접 스크롤</span></div>
+    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:8px">그림 3. 실제 화면 — AAPL 캔들 위에 <b>보수적 기준선</b>과 <b>AI 밴드</b>가 겹쳐 보인다. 우측 모델 패널에 신선도·오버레이 토글. 세 출력이 한 화면에서 함께 읽힌다.</figcaption>
   </figure>
 
   <h3>비대칭 손실 — 보수 철학의 수학적 본체</h3>
@@ -253,6 +259,8 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
       <tr><td><b>결론 프레이밍</b></td><td>“AI 보조지표로 의사결정 지원”</td><td>좌동 + “ML은 통계 베이스라인을 이기기 어렵다”를 통계로 증명</td><td>Welch-Goyal·Makridakis 통설과 일치. 정직성을 핵심 가치로</td></tr>
     </tbody>
   </table>
+
+  <p style="margin:18px 0 0"><b>β 하드코딩 → β 스윕 → β=4 앙상블 (정체성 변경의 핵심).</b> 계획서는 보수성을 정하는 비대칭 손실 가중을 <code>α=1·β=2</code>로 <b>손으로 박아뒀다</b>. 그러나 “보수성의 정도를 사람이 임의로 고정하는 것”이 자의적이라 판단해, <b>β를 더 높은 보수성 방향으로 스윕</b>했고 그 결과 <b>β=4 5-seed 앙상블(CP210 F4 b4)</b>이 채택됐다. 단순 하이퍼파라미터 튜닝이 아니라 ‘예측 정확도’에서 ‘<b>낙관 억제 = 리스크 인식</b>’으로 모델의 무게중심을 옮긴 결정 — 계획서엔 없던 <b>정체성의 구체적 이동</b>이다.</p>
 
   <div class="callout"><div class="ct">변하지 않은 것</div>“AI = 보조지표, 의사결정은 사용자”라는 정체성, 비대칭 손실로 낙관을 억제하는 보수 철학, 예측선·밴드·규칙시그널 3출력 구조, S&amp;P 500 universe — 계획서의 골격은 그대로다. 바뀐 것은 <b>그 골격을 채우는 방법의 정직성</b>이다.</div>
 
@@ -412,8 +420,8 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 <!-- ===== 06 LINE ===== -->
 <section id="s6">
   <div class="kicker">Line Model Lineage</div>
-  <h2><span class="sn">06</span>예측선(라인) 계보 — PatchTST의 진화</h2>
-  <p class="lead">예측선은 처음부터 “맞히는 선”이 아니라 “덜 위험하게 틀리는 보수적인 선”을 목표로 출발했다. CP13의 PatchTST solo 선언에서 CP210의 F4 β=4 앙상블까지, 그 사이에 굵직한 실패 분기들이 박혀 있다.</p>
+  <h2><span class="sn">06</span>모델 실험 — 라인·밴드 계보</h2>
+  <p class="lead">라인과 밴드는 <b>같은 실험·평가 파이프라인(그림 2)</b>을 돌며 수렴했다. 라인은 PatchTST에서 F4 β=4 앙상블로, 밴드는 CNN-LSTM에서 TiDE 분위수로 전환됐다. 아래 한 흐름 안에서 라인·밴드 계보를 차례로 본다.</p>
 
   <figure style="margin:26px 0">
   <svg viewBox="0 0 1120 348" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="딥러닝 실험·평가 파이프라인">
@@ -479,6 +487,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   <figcaption style="text-align:center;font-size:12.5px;color:#7a8694;margin-top:8px">그림 2. 딥러닝 실험·평가 파이프라인 (라인·밴드 공통) — 250+ CP의 반복이 이 흐름을 돌며 운영 3모델로 수렴했다</figcaption>
   </figure>
 
+  <h3 style="margin-top:30px">라인 계보 — PatchTST의 진화</h3>
   <div class="tl">
     <div class="node"><div class="when">CP13</div><div class="ti">PatchTST solo 선언</div><p>모델을 늘리는 게 아니라 <b>줄이는</b> 단계. TiDE·CNN-LSTM을 동결하고 PatchTST 하나만 논문 기준으로 재정렬. “성능보다 먼저 지표가 실험 축을 따라 일관되게 움직이는지”를 본다는 원칙 수립.</p></div>
     <div class="node fail"><div class="when">CP25→28</div><div class="ti">Universe 확장의 붕괴</div><p>50종목에서 멀쩡하던 밴드 calibration이 100·200종목으로 가며 coverage 0.89→0.46으로 붕괴. 진단: <code>val_total</code> 기준 best와 coverage 기준 best가 다르다 → coverage-aware checkpoint 도입.</p></div>
@@ -490,12 +499,8 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   </div>
 
   <div class="callout warn"><div class="ct">라인의 정직한 한계</div>CP216 통계검정 결과 <b>라인은 통계 베이스라인과 사실상 동등</b>하다(앙상블의 추가 가치가 통계적으로 확인되지 않음). 라인은 가격 절대값이 아니라 수익률 score 모델이라 계획서의 MAPE는 아예 산정하지 않았고, IC 0.0325는 양수지만 약하다. 처음 설계대로 <b>“부족한 걸 알고 시작한 보수선”</b>으로 v1에 남았다.</div>
-</section>
 
-<!-- ===== 07 BAND ===== -->
-<section id="s7">
-  <div class="kicker">Band Model Lineage</div>
-  <h2><span class="sn">07</span>예측 밴드 계보 — TiDE 분위수 밴드</h2>
+  <h3 style="margin-top:34px">밴드 계보 — TiDE 분위수 밴드</h3>
   <p class="lead">Plan v3에서 밴드가 본체로 확정됐다. 계보의 줄기는 <b>Bollinger 기준선 → PatchTST 분위수 → TiDE 전환 → conformal 보정 → true walk-forward → 1D/1W 운영 lock</b>이다. 밴드 백본이 CNN-LSTM에서 TiDE로 갈아탄 것이 가장 큰 전환점이다.</p>
 
   <div class="two">
@@ -532,9 +537,9 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 08 METRICS ===== -->
-<section id="s8">
+<section id="s7">
   <div class="kicker">Evaluation Philosophy</div>
-  <h2><span class="sn">08</span>평가지표 철학 — MAPE를 버린 이유</h2>
+  <h2><span class="sn">07</span>평가 철학 — 점예측에서 리스크·전략 가치로</h2>
   <p class="lead">계획서의 합격 기준(MAPE&lt;5%, 방향정확도&gt;55%, 포함율&gt;90%)은 “AI가 가격을 잘 맞히는가”를 묻는다. 그런데 Lens가 실제로 파는 것은 “맞히기”가 아니라 <b>“위험을 일관되게 신호하기”</b>다. 이 간극이 지표 재설계의 출발점이다.</p>
 
   <h3>왜 단순 지표가 무너졌나</h3>
@@ -550,12 +555,62 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 
   <h3>역할 분리 원칙</h3>
   <p>CP37에서 line_gate / band_gate를 분리했다. <b>밴드 모델은 순위 예측력(IC)으로 평가하지 않고, 라인 모델은 coverage로 평가하지 않는다.</b> <code>ai/evaluation.py</code>는 총 109개 지표를 정의하지만 운영 판정에는 핵심 12개만 쓴다 — 계획서의 MAPE·방향정확도는 그 12개에 없다.</p>
+
+  <h3>정량을 넘어 — 모델이 “전략에 도움 되나” (백테스트)</h3>
+  <p>위까지는 <b>모델이 잘 맞추나</b>(정량 예측력)를 본다. 그러나 Lens가 답해야 할 마지막 질문은 <b>“그 신호가 실제 매매에 도움 되나”</b>이고, 이건 백테스트로만 답한다. 그래서 평가를 <b>세 층</b>으로 본다 — 마지막 두 층이 v1에서 약했던 부분이고, 백테스트로 채운다.</p>
+  <div class="grid g3">
+    <div class="card"><h4>① 정량 — 예측력</h4><p style="margin:0">IC·severe recall(라인), pinball·coverage_abs_error·band_width_ic. <span class="muted">“모델이 통계적으로 잘 맞추나.”</span></p></div>
+    <div class="card"><h4>② 백테스트 — 유용성</h4><p style="margin:0"><b>AI 지표를 전략에 끼웠을 때</b> ΔCalmar·ΔSortino·ΔMDD·대형손실회피. <span class="muted">“리스크 관리에 실제로 도움 되나” — <b>정성적 질문에 정량적 근거</b>.</span></p></div>
+    <div class="card"><h4>③ 정성 — 해석·정직성</h4><p style="margin:0">lagging↔leading 해석, regime 행동, <b>“저장된 평가 없으면 성능 주장 안 함”</b> 원칙. <span class="muted">숫자가 못 잡는 판단.</span></p></div>
+  </div>
+
+  <figure style="margin:22px 0">
+  <svg viewBox="0 0 1120 196" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="전략 가치 평가 흐름 (백테스트 ablation)">
+    <defs><marker id="arrC" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0e5563"/></marker></defs>
+    <rect x="2" y="4" width="1116" height="24" rx="8" fill="#eef3f5" stroke="#9aa6b2" stroke-dasharray="4 3"/>
+    <text x="560" y="20" text-anchor="middle" font-size="11" fill="#43505f" font-style="italic">모델 평가(정량 예측력)를 넘어 — AI 신호가 실매매에 가치 있나? · CP248~251 설계 · ◆=사용자 판단 게이트</text>
+    <!-- c1 모델 -->
+    <rect x="2" y="44" width="206" height="106" rx="10" fill="#eaf0fa" stroke="#1a4a8a" stroke-width="1.5"/>
+    <text x="105" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#1a4a8a">모델 세팅</text>
+    <text x="105" y="96" text-anchor="middle" font-size="9.5" fill="#5a6b7a">서빙 라인·밴드</text>
+    <text x="105" y="112" text-anchor="middle" font-size="9.5" fill="#5a6b7a">(그림 2 실험 산출)</text>
+    <!-- c2 ablation -->
+    <rect x="224" y="44" width="206" height="106" rx="10" fill="#e6f0f1" stroke="#0e5563" stroke-width="1.6"/>
+    <text x="327" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#0e5563">ablation 하니스</text>
+    <text x="327" y="96" text-anchor="middle" font-size="9.5" fill="#5a6b7a">base 고정 × AI 토글</text>
+    <text x="327" y="112" text-anchor="middle" font-size="9.5" fill="#5a6b7a">none·+line·+band·+both</text>
+    <!-- c3 screening gate -->
+    <rect x="446" y="44" width="206" height="106" rx="10" fill="#fbf0e0" stroke="#d97a0a" stroke-width="2"/>
+    <text x="549" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#b06a12">◆ 200티커 스크리닝</text>
+    <text x="549" y="96" text-anchor="middle" font-size="9.5" fill="#7a5a2a">dev에서 후보 좁힘</text>
+    <text x="549" y="112" text-anchor="middle" font-size="9.5" fill="#7a5a2a">게이트: 후보·컷</text>
+    <!-- c4 holdout gate -->
+    <rect x="668" y="44" width="206" height="106" rx="10" fill="#fbf0e0" stroke="#d97a0a" stroke-width="2"/>
+    <text x="771" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#b06a12">◆ held-out 검증+통계</text>
+    <text x="771" y="96" text-anchor="middle" font-size="9.5" fill="#7a5a2a">274티커+test 1회</text>
+    <text x="771" y="112" text-anchor="middle" font-size="9.5" fill="#7a5a2a">게이트: 성능 결론</text>
+    <!-- c5 promote -->
+    <rect x="890" y="44" width="228" height="106" rx="10" fill="#e0f0e8" stroke="#0f7a52" stroke-width="2.2"/>
+    <text x="1004" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#0f7a52">(조건부) 승급</text>
+    <text x="1004" y="96" text-anchor="middle" font-size="9.5" fill="#5a6b7a">통과 시 라이브+UI</text>
+    <text x="1004" y="112" text-anchor="middle" font-size="9.5" fill="#5a6b7a">보고서 그림</text>
+    <!-- arrows -->
+    <line x1="208" y1="97" x2="222" y2="97" stroke="#0e5563" stroke-width="2" marker-end="url(#arrC)"/>
+    <line x1="430" y1="97" x2="444" y2="97" stroke="#0e5563" stroke-width="2" marker-end="url(#arrC)"/>
+    <line x1="652" y1="97" x2="666" y2="97" stroke="#0e5563" stroke-width="2" marker-end="url(#arrC)"/>
+    <line x1="874" y1="97" x2="888" y2="97" stroke="#0e5563" stroke-width="2" marker-end="url(#arrC)"/>
+    <text x="560" y="176" text-anchor="middle" font-size="9.5" fill="#9aa6b2" font-style="italic">헤드라인 = ΔCalmar·ΔSortino paired 델타(같은 base, AI만 토글) — “AI 지표가 판단에 도움 되는지”의 정량화. 티커+시간 OOS·Bonferroni로 과적합 차단.</text>
+  </svg>
+  <figcaption style="text-align:center;font-size:12.5px;color:#7a8694;margin-top:8px">그림 6. 전략 가치 평가 — 모델 평가(정량)를 넘어 AI 지표를 <b>실제 전략에 끼웠을 때 가치 있나</b>를 통제 ablation으로 검증(CP248~251 설계). ◆ = 사용자 판단이 들어가는 컷 게이트.</figcaption>
+  </figure>
+
+  <div class="callout"><div class="ct">평가는 성공 증명이 아니라 한계 발견 도구</div>이 절의 지표들은 “이겼다”를 자랑하려는 게 아니다. CP54의 “AI가 통계 베이스라인에 밀린다”, 밴드의 lagging, 라인의 베이스라인급 IC — <b>지표가 한계를 정직하게 드러내게</b> 두는 것이 Lens의 평가 철학이다. 백테스트(②)도 같은 원칙: AI가 전략에 도움 되면 그 정량 근거를, 안 되면 “약하다”를 그대로 기록한다.</div>
 </section>
 
 <!-- ===== 09 SIGNIFICANCE ===== -->
-<section id="s9">
+<section id="s8">
   <div class="kicker">Statistical Significance · 학술적 클라이맥스</div>
-  <h2><span class="sn">09</span>통계적 유의성 검정 — 정직한 결론</h2>
+  <h2><span class="sn">08</span>통계적 유의성 검정 — 정직한 결론</h2>
   <p class="lead">운영 3모델을 베이스라인과 정식 통계검정으로 비교했다. 핵심 결론을 먼저: <b>ML이 단순 통계 베이스라인을 이기는 일은 어렵고, Lens도 그 통설에서 자유롭지 않았다. 다만 1W 밴드 한 곳에서만 명확한 우위를 확보했고, 그 우위가 시장 국면에 조건부로 체계적</b>이라는 점이 선택적 출력의 근거가 됐다.</p>
 
   <figure style="margin:24px 0">
@@ -636,19 +691,19 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 10 FRONTEND ===== -->
-<section id="s10">
+<section id="s9">
   <div class="kicker">Frontend Evolution</div>
-  <h2><span class="sn">10</span>프론트엔드 — “연구 콘솔”에서 “주식 앱”으로</h2>
+  <h2><span class="sn">09</span>프론트엔드 — “연구 콘솔”에서 “주식 앱”으로</h2>
   <p class="lead">초기엔 모델 선택·target type이 뒤섞인 연구자용 대시보드였다. 제품 트랙의 두 원칙 — “모델 성능과 무관하게 발표 가능한 제품 루프를 먼저 닫는다”, “첫 화면은 논문이 아니라 주식 앱처럼 보인다” — 에서 세 화면 체제가 나왔다.</p>
 
   <figure style="margin:24px 0">
     <div class="grid g2">
-      <div><img src="img/demo_stocks.png" alt="종목 분석" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>주식 보기</b> — 차트 + 예측선·밴드 + 보조지표 패널</div></div>
-      <div><img src="img/demo_backtests.png" alt="백테스트" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>백테스트</b> — 단일 종목 규칙 전략 시뮬레이션</div></div>
-      <div><img src="img/demo_training.png" alt="AI 모델" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>AI 모델</b> — 목표 대비 평가·통계검정·재현 매니페스트</div></div>
-      <div><img src="img/demo_report.png" alt="지표 가이드" style="width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)"><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>지표 가이드</b> — 사용자용 지표 설명</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_stocks.png" alt="종목 분석"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>주식 보기</b> — 차트 + 예측선·밴드 + 보조지표 패널</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_backtests.png" alt="백테스트"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>백테스트</b> — 전략 신호 + 지표 균형 v2 성과</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_training.png" alt="AI 모델"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>AI 모델</b> — 목표 대비 평가·통계검정·재현 매니페스트</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_report.png" alt="지표 가이드"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>지표 가이드</b> — 사용자용 지표 설명</div></div>
     </div>
-    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:10px">그림 4. 라이브 데모 4화면 (lens-ten-delta.vercel.app · 2026-06-05 데이터 기준)</figcaption>
+    <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:10px">그림 4. 라이브 데모 4화면 — 각 화면이 자동 스크롤된다 (lens-ten-delta.vercel.app · 2026-06-05 데이터)</figcaption>
   </figure>
 
   <div class="grid g3">
@@ -661,9 +716,9 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 11 REFACTOR ===== -->
-<section id="s11">
+<section id="s10">
   <div class="kicker">Engineering · Refactoring</div>
-  <h2><span class="sn">11</span>코드 안정성 리팩토링 (CP221 → 237) — 완료</h2>
+  <h2><span class="sn">10</span>코드 안정성 리팩토링 (CP221 → 237) — 완료</h2>
   <p class="lead">계획서엔 없던 현업 수준 정비 트랙. 철학은 명확하다 — <b>“동작 보존을 기계가 증명할 안전망을 먼저 박고, 그 위에서만 구조를 건드린다”</b>(Feathers/Fowler 정합). 절대 규칙: 백엔드 snapshot 그린 전 분리 금지, 프론트 screenshot 그린 전 분리 금지.</p>
 
   <h3>Phase A — 안전망 우선 구축</h3>
@@ -697,10 +752,10 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 12 SECURITY ===== -->
-<section id="s12">
+<section id="s11">
   <div class="kicker">Security Track</div>
-  <h2><span class="sn">12</span>보안 트랙 (CP238 → 242) — 설계 완료, 실행 대기</h2>
-  <p class="lead">OWASP Top 10(2021) 중 v1 적용 가능 항목의 baseline을 박는 계획. <b>현재 상태는 “명세(지시서)만 작성, 코드 미실행”</b> — 보안 코드 파일·ADR·CI job이 아직 없다. 보고서에선 완료가 아니라 “설계된 점검 항목”으로 정확히 기술한다.</p>
+  <h2><span class="sn">11</span>보안 트랙 (CP238 → 242) — 설계 완료, 실행 대기</h2>
+  <p class="lead">OWASP Top 10(2021) 중 v1 적용 가능 항목의 baseline을 박는 계획. <b>현재 상태는 “명세만 작성, 코드 미실행”</b> — 보안 코드 파일·ADR·CI job이 아직 없다. 보고서에선 완료가 아니라 “설계된 점검 항목”으로 정확히 기술한다.</p>
   <table>
     <thead><tr><th>CP</th><th>OWASP</th><th>점검 대상</th><th>설계된 산출</th></tr></thead>
     <tbody>
@@ -715,13 +770,63 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 13 OPS ===== -->
-<section id="s13">
+<section id="s12">
   <div class="kicker">Operations &amp; Reproducibility</div>
-  <h2><span class="sn">13</span>운영 자동화 · 재현성</h2>
+  <h2><span class="sn">12</span>운영 자동화 · 재현성</h2>
   <p class="lead">v1을 “매일 도는 제품”으로 만드는 자동화와, “누구나 다시 만들 수 있게” 잠그는 재현 매니페스트.</p>
 
   <h3>일일 자동 refresh 파이프라인 (CP212)</h3>
   <p>윈도우 작업 스케줄러가 PC 기동 시 통합 refresh를 실행: <code>append(yfinance) → market_snapshot → band_refresh → line_refresh → product_history → ai_runs → git push</code>. 정책상 <b>새 학습·calibration·DB write 없음</b>, 라인은 F4 β=4 앙상블 체크포인트로 최근 구간만 재계산. Render/Vercel은 git push를 받아 production을 갱신한다.</p>
+
+  <figure style="margin:22px 0">
+  <svg viewBox="0 0 1120 178" style="width:100%;height:auto;font-family:inherit" role="img" aria-label="일일 데이터 refresh 자동화 흐름">
+    <defs><marker id="arrA" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0f7a52"/></marker></defs>
+    <rect x="2" y="4" width="1116" height="24" rx="8" fill="#eef6f0" stroke="#9fc4ad" stroke-dasharray="4 3"/>
+    <text x="560" y="20" text-anchor="middle" font-size="11" fill="#0f7a52" font-style="italic">매일 자동 — 윈도우 작업 스케줄러가 PC 기동 시 실행 · 새 학습·calibration·DB write 없음</text>
+    <!-- b1 append -->
+    <rect x="2" y="44" width="148" height="98" rx="10" fill="#eef3f5" stroke="#7a8694" stroke-width="1.4"/>
+    <text x="76" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#43505f">append</text>
+    <text x="76" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">yfinance 증분</text>
+    <text x="76" y="108" text-anchor="middle" font-size="9" fill="#9aa6b2">cp151</text>
+    <!-- b2 market -->
+    <rect x="163" y="44" width="148" height="98" rx="10" fill="#eef3f5" stroke="#7a8694" stroke-width="1.4"/>
+    <text x="237" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#43505f">market snapshot</text>
+    <text x="237" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">serving parquet 4종</text>
+    <!-- b3 refresh -->
+    <rect x="324" y="44" width="148" height="98" rx="10" fill="#eaf0fa" stroke="#1a4a8a" stroke-width="1.4"/>
+    <text x="398" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#1a4a8a">band·line refresh</text>
+    <text x="398" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">체크포인트·F4앙상블</text>
+    <text x="398" y="108" text-anchor="middle" font-size="9.5" fill="#5a6b7a">최근 구간 재계산</text>
+    <!-- b4 product -->
+    <rect x="485" y="44" width="148" height="98" rx="10" fill="#eef3f5" stroke="#7a8694" stroke-width="1.4"/>
+    <text x="559" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#43505f">product·ai_runs</text>
+    <text x="559" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">이력/요약 재구성</text>
+    <!-- b5 compact -->
+    <rect x="646" y="44" width="148" height="98" rx="10" fill="#e6f0f1" stroke="#0e5563" stroke-width="1.6"/>
+    <text x="720" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#0e5563">compact</text>
+    <text x="720" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">CP246 · read</text>
+    <text x="720" y="108" text-anchor="middle" font-size="9.5" fill="#5a6b7a">스파이크 제거</text>
+    <!-- b6 push gate -->
+    <rect x="807" y="44" width="148" height="98" rx="10" fill="#fbefec" stroke="#c0492f" stroke-width="2"/>
+    <text x="881" y="70" text-anchor="middle" font-size="11.5" font-weight="800" fill="#c0492f">◆ push 게이트</text>
+    <text x="881" y="91" text-anchor="middle" font-size="9.5" fill="#8a3a2a">단계 실패 시</text>
+    <text x="881" y="106" text-anchor="middle" font-size="9.5" fill="#8a3a2a">push 차단(CP238)</text>
+    <!-- b7 deploy -->
+    <rect x="968" y="44" width="150" height="98" rx="10" fill="#e0f0e8" stroke="#0f7a52" stroke-width="2.2"/>
+    <text x="1043" y="72" text-anchor="middle" font-size="11.5" font-weight="800" fill="#0f7a52">배포</text>
+    <text x="1043" y="93" text-anchor="middle" font-size="9.5" fill="#5a6b7a">Render·Vercel</text>
+    <text x="1043" y="108" text-anchor="middle" font-size="9.5" fill="#5a6b7a">자동 재배포</text>
+    <!-- arrows -->
+    <line x1="150" y1="93" x2="161" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="311" y1="93" x2="322" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="472" y1="93" x2="483" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="633" y1="93" x2="644" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="794" y1="93" x2="805" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <line x1="955" y1="93" x2="966" y2="93" stroke="#0f7a52" stroke-width="2" marker-end="url(#arrA)"/>
+    <text x="560" y="166" text-anchor="middle" font-size="9.5" fill="#9aa6b2" font-style="italic">↑ 모델 실험(그림 2)이 ship/채택한 체크포인트·export가 band·line refresh의 입력이 된다 — B가 가끔, A가 매일</text>
+  </svg>
+  <figcaption style="text-align:center;font-size:12.5px;color:#7a8694;margin-top:8px">그림 7. 데이터 자동화 — 매일 도는 refresh 파이프라인. 어느 단계든 실패하면 <b>push 게이트</b>가 배포를 막는다(예측 정체 데이터가 production에 나가는 사고 방지).</figcaption>
+  </figure>
 
   <div class="callout warn"><div class="ct">이 세션에서 발견·수리한 운영 사고 (2026-06-06)</div>
   <p style="margin:.3em 0"><b>① 백엔드 503 (메모리 초과):</b> 종목 상세를 열면 product_history 78만 행이 lru_cache로 상주하며 331MB를 점유 → Render 무료 512MB OOM → 재시작 → 503. dtype 다이어트(category+datetime64+float32)로 <b>331MB → 22MB(93%↓)</b> 수정, 회귀 0.</p>
@@ -744,11 +849,11 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 14 REMAINING ===== -->
-<section id="s14">
+<section id="s13">
   <div class="kicker">What Remains</div>
-  <h2><span class="sn">14</span>남은 과제</h2>
+  <h2><span class="sn">13</span>남은 과제</h2>
   <div class="grid g2">
-    <div class="card"><h4>① DB 연결 (Supabase)</h4><p style="margin:0">계획서의 Supabase는 현재 <b>골격만</b>(CP236a~d). 결제 후 caller 이전 + 실연결 + Alembic 마이그레이션. PgBouncer 6543 트랜잭션 모드 함정 회피(직접 5432) 등은 ADR-0013에 이미 설계됨. DB로 가면 parquet 메모리 문제(§13 503) 자체가 사라짐.</p></div>
+    <div class="card"><h4>① DB 연결 (Supabase)</h4><p style="margin:0">계획서의 Supabase는 현재 <b>골격만</b>(CP236a~d). 결제 후 caller 이전 + 실연결 + Alembic 마이그레이션. PgBouncer 6543 트랜잭션 모드 함정 회피(직접 5432) 등은 ADR-0013에 이미 설계됨. DB로 가면 parquet 메모리 문제(§12 503) 자체가 사라짐.</p></div>
     <div class="card"><h4>② 보안 트랙 실행</h4><p style="margin:0">CP238~242 설계를 실제 코드로. 의존성 audit, gitleaks history 스캔 + secret rotation, 보안 헤더 5종, 입력 검증, CORS/rate limit. 안전망(snapshot/screenshot)은 재사용 가능.</p></div>
     <div class="card"><h4>③ 리팩토링 후속</h4><p style="margin:0">mypy 1391 baseline 정리 → CI fail-on-error · StockView 메인 로직 분리(useStockLoader hook) · Playwright CI strict화 · pre-existing pytest 19 fail 정리.</p></div>
     <div class="card"><h4>④ v2 방향</h4><p style="margin:0"><b>미래 예측성 + XAI</b> 2축. 밴드를 더 살려 전통 통계(GARCH)를 stress 국면에서도 이기기, regime-conditional 밴드 v2, 모델 카드/매니페스트 자동화. 라인의 정확도 야망은 정리하고 “위험 신호” 역할에 집중.</p></div>
@@ -757,9 +862,9 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 15 CONCLUSION ===== -->
-<section id="s15">
+<section id="s14">
   <div class="kicker">Conclusion · Foundation for Next Plan</div>
-  <h2><span class="sn">15</span>정직한 결론과 다음 계획의 토대</h2>
+  <h2><span class="sn">14</span>정직한 결론과 다음 계획의 토대</h2>
   <p class="lead">Lens가 6주에 증명한 것은 “AI가 주식을 잘 맞힌다”가 아니다. 그건 처음부터 가능하지 않다고 선언했다. 증명한 것은 <b>“주장하기 전에 검증하는 방법”</b>이다.</p>
 
   <h3>세 가지 핵심 교훈</h3>
@@ -785,9 +890,9 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 <!-- ===== 16 V2 ROADMAP / OPEN DISCUSSION ===== -->
-<section id="s16">
+<section id="s15">
   <div class="kicker">V2 Roadmap · Open Discussion</div>
-  <h2><span class="sn">16</span>v2 로드맵 — 다음에 만들 것</h2>
+  <h2><span class="sn">15</span>v2 로드맵 — 다음에 만들 것</h2>
   <p class="lead">v1을 마무리하며 정리한 v2 방향이다. 머릿속에만 흩어져 있던 구상을, 나중에 내가 다시 펴 봐도 바로 이어갈 수 있도록 기록해 둔다. 각 항목에 “지금 가진 것 / 현업 표준 / 정해야 할 것”을 적었다.</p>
 
   <h3>정체성 전환 — “예측”에서 “리스크 인식”으로</h3>
@@ -882,6 +987,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
     </tbody>
   </table>
   <div class="callout good"><div class="ct">스스로 짚은 부분</div>작업 중 직관으로 의심했던 “S&amp;P 500이 항상 같지 않았다”와 “2015 제한의 의미”는 퀀트 실무에서 <b>가장 먼저 배우는 두 함정</b>(survivorship bias, look-back period)이다. v1이 이미 lookahead 차단·거래비용 분리·Bonferroni 보정을 갖췄으니, 남은 건 universe와 기간의 정직성을 마저 닫는 것이다.</div>
+  <div class="callout"><div class="ct">엔진 개선 항목 (편향과 별개, 2026.06 추가)</div>편향 직면과 별개로 백테스트 <b>엔진 자체</b>도 v2에서 키운다. 현재 계약은 <code>single_ticker_long_cash_average</code> — 단일 종목 long/cash 평균이라 “전략”이라기엔 얇다. 키울 축: ① <b>포트폴리오 백테스트</b>(N종목 동시 보유·리밸런싱·자본 배분), ② <b>포지션 사이징</b>(고정 비중 → 변동성·신뢰도 기반), ③ <b>슬리피지·체결·유동성</b> 모델(현재는 거래비용만 분리), ④ <b>전략 walk-forward 검증</b>(룩백 파라미터 최적화 → 분리 구간 검증으로 과적합 차단). 아래 ⑨의 “AI 밴드 하단 이탈 → 청산 필터” 결합도 이 엔진 위에서 동작한다. <span class="muted">상세: docs/backtest_single_ticker_strategy_v2_plan.md</span></div>
 
   <h3>⑤ 코드 복잡도 점수 — radon 실측 (2026.06)</h3>
   <p>“시스템을 점수로 평가”하자던 것은 <b>코드 복잡도 점수</b>다. radon(maintainability index + cyclomatic complexity)으로 실측한 결과: <b>backend는 리팩토링 효과가 점수로 증명됐고, ai 핵심 일부가 복잡도 부채로 남았다.</b></p>
@@ -938,6 +1044,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
     <div class="card"><h4>도커 train (GPU)</h4><p style="margin:0;font-size:13px">학습 파이프라인 재현. nvidia-container-toolkit + CUDA 12.8 base + torch nightly (내 GPU = RTX 5060 Ti <code>sm_120 cu128</code>).</p></div>
   </div>
   <div class="callout warn"><div class="ct">난점 + ROI</div><code>sm_120</code>은 일반 PyTorch 빌드에 없어 nightly·자체 빌드가 필요 → base image 잠그기가 까다롭다. 학습 재현엔 parquet 마운트 + checkpoint 경로 정책도 필요. <b>ROI 순서:</b> 데이터/config/시드 lock(+80%, v1) → requirements 핀(+10%, v1) → 도커 dev(+5%, v2) → 도커 train(+5%, v2 MLOps 안). 환경 재현은 마지막 5%라 v2로 미루는 게 맞다.</div>
+  <div class="callout good"><div class="ct">재검토 (2026.06) — 제출·재현 편의 관점에선 v1에 “서빙 도커”까지</div>위 ROI 논리는 <b>학습 재현</b> 기준이라 여전히 유효하다(GPU 학습 도커 = v2). 다만 <b>제출/채점자 재현</b> 축을 더하면 결론이 한 겹 갈린다. ① 도커는 <b>매니페스트를 대체하지 않는다</b> — 매니페스트는 “무엇으로(데이터 윈도우·시드·config·hash) 만들었나”(lineage)를, 도커는 “어떤 환경에서 도나”(runtime)를 잠근다. 서로 다른 축이라 매니페스트 작업은 헛수고가 아니다. ② <b>운영 배포는 이미 git push → Render 자동</b>이라 도커로 바꿔도 더 편해지지 않고 512MB 제약도 그대로 — “도커로 배포가 편해진다”는 통념은 이 프로젝트엔 거의 해당 안 된다. ③ 진짜 이득은 채점자가 <code>docker run</code> 한 줄로 API 를 띄우는 <b>재현 편의</b>(+ 포트폴리오 신호). <b>절충:</b> v1엔 <b>CPU 서빙/추론 Dockerfile</b>(백엔드 + 45MB 서빙 parquet → <code>docker run</code> → API)까지가 저위험·고효용. <b>GPU 학습 도커(cu128·sm_120)는 마감 리스크가 커 v2 유지.</b></div>
 
   <h3>⑨ 제품 차별화 — LLM 브리핑 + 전략 결합 + 저작권</h3>
   <p>전략 빌더 + 백테스트 자체는 이미 레드오션이다(ChartingLens·TradingView·Composer·LuxAlgo). “그런 앱이 없다”는 사실이 아니다. Lens가 살 길은 경쟁자에 없는 <b>결합</b>이다.</p>
@@ -948,7 +1055,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
     <li><b>LLM 리스크 브리핑</b> — “AAPL: 변동성 급등 + 8-K 소송 + 추세 약화 → 단기 주의”. 가격+뉴스+공시를 자연어로. 기존 제품에 거의 없는 진짜 차별화.</li>
   </ul>
 
-  <div class="callout bad"><div class="ct">그 전에 — v1이 먼저다</div>아래 v2 로드맵은 전부 <b>v1 마무리 이후</b>다. v1의 남은 <b>1순위는 Supabase DB 실연결</b>(현재 골격만, §14), 그다음이 <b>2026.06.21 제출물</b>(보고서·발표자료·데이터 패키지)이다. 이 둘을 닫기 전엔 v2 실험을 벌이지 않는다 — v2는 아이디어 기록(이 섹션)으로 충분하다.</div>
+  <div class="callout bad"><div class="ct">그 전에 — v1이 먼저다</div>아래 v2 로드맵은 전부 <b>v1 마무리 이후</b>다. v1의 남은 <b>1순위는 Supabase DB 실연결</b>(현재 골격만, §13), 그다음이 <b>2026.06.21 제출물</b>(보고서·발표자료·데이터 패키지)이다. 이 둘을 닫기 전엔 v2 실험을 벌이지 않는다 — v2는 아이디어 기록(이 섹션)으로 충분하다.</div>
 
   <h3>v2 우선순위 제안 <span class="muted" style="font-size:14px;font-weight:400">(v1 마무리 후)</span></h3>
   <div class="tl">
@@ -957,8 +1064,6 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
     <div class="node"><div class="when">그 다음</div><div class="ti">멀티자산 + 퀀트 전략</div><p>자산 어댑터로 ETF·코인·채권 확장 + 백테스트를 편향 통제된 퀀트 엔진으로.</p></div>
     <div class="node"><div class="when">병행</div><div class="ti">XAI + lagging 실험</div><p>밴드 설명가능성 + 라인 지연 해소. v1의 “정직한 표시”와 “정확도 한계”를 정면으로 공략하는 연구 트랙.</p></div>
   </div>
-
-  <div class="callout"><div class="ct">이 기록의 목적</div>여기 적은 건 확정이 아니라 <b>다음 계획의 출발점</b>이다. 흩어져 있던 구상을 “지금 가진 것 / 현업 표준 / 정해야 할 것”의 틀로 정리해 뒀으니, v1을 끝낸 뒤 하나씩 골라 깊게 파면 된다. 가장 먼저 손댈 곳: <b>생존 편향과 기간 절단을 어디까지 감수하고 어디부터 고칠지</b> — 이게 나머지 모든 실험의 신뢰도를 좌우한다.</div>
 </section>
 
 </main>

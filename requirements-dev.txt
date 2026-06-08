@@ -14,3 +14,5 @@ radon==6.0.1           # MI/CC 측정.
 xenon==0.9.3           # radon 기반 복잡도 CI 게이트.
 # CP238 — 의존성 CVE audit (OWASP A06).
 pip-audit==2.7.3       # PyPA 공식 audit, PyPI advisory DB 직접 조회.
+# CP247 — 보고서 마크다운 → Word(.docx) 변환 (scripts/md_to_docx.py).
+python-docx==1.2.0     # pandoc 없이 .docx 생성.
