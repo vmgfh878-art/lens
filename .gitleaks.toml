@@ -6,7 +6,12 @@
 
 title = "Lens gitleaks config (CP239)"
 
-# 기본 gitleaks rule set 사용. extend 안 함 (rule 추가/제거 X).
+# 기본 gitleaks rule set 사용. [extend] useDefault = true 필수 — 이게 없으면
+# default secret rules (ghp_/AWS/Slack/...) 자체가 적용 안 되어 어떤 secret 도
+# 못 잡는 silent-PASS 상태. CP239 Step 7 의 mystery (allowlist 좁혀도 차단 X)
+# 가 바로 이 누락 때문이었음.
+[extend]
+useDefault = true
 
 [allowlist]
 description = """CP239 false positive 흡수:
