@@ -17,17 +17,10 @@ description = """CP239 false positive 흡수:
   그 자체가 secret 패턴으로 잡히면 안 됨.
 """
 
-# path-based allow — ML training 코드 디렉토리. backend/frontend 모두.
+# path-based allow — ML training 코드 디렉토리만.
+# CP239 Step 7 검증에서 regexes + `.gitleaks.toml$` path 가 진짜 secret 도 흡수
+# 하는 mystery 발견 (사용자 명령 "v2 재검토"). 좁혀서 ML training file 만 흡수.
 paths = [
     '''frontend/src/lib/training/.*\.(ts|tsx)$''',
     '''ai/.*\.py$''',
-    '''.gitleaks.toml$''',
-]
-
-# regex-based allow — metricKey/identifier 패턴.
-# - metricKey: "..." (frontend evaluation UI)
-# - target/actual/diff 등 ML metric label 형태는 entropy 가 있어도 secret 아님.
-regexes = [
-    '''metricKey:\s*"[a-z_0-9]+"''',
-    '''(?:title|source|judgement)\s*[:=]\s*"[가-힣A-Za-z0-9 _]+"''',
 ]
