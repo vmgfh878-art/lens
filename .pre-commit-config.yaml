@@ -32,3 +32,10 @@ repos:
         language: system
         pass_filenames: false
         stages: [manual]
+  # CP239 — gitleaks: commit 단계에서 secret 차단. .gitleaks.toml allowlist 가
+  # ML training metric identifier (false positive) 흡수.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks (CP239 — block secrets in commits)
