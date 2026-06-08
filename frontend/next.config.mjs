@@ -28,6 +28,48 @@ if (process.env.NODE_ENV === "production" && !proxyTarget) {
   );
 }
 
+// CP240 — HTTP 보안 헤더 5종.
+// CSP 정책:
+// - script-src 'unsafe-inline' / 'unsafe-eval': lightweight-charts + Next.js
+//   hydration + Microsoft Clarity init 호환 (임시). v2 에서 nonce 적용 검토.
+// - *.clarity.ms: Microsoft Clarity script + telemetry (외부 도메인,
+//   frontend/src/app/ClarityInit.tsx 의 @microsoft/clarity init).
+// - connect-src 의 http://127.0.0.1:8000: 로컬 dev 환경에서 frontend(3000)
+//   가 backend(8000) 직접 호출 (baseClient.ts 의 localhost 분기 — proxy 안 씀).
+// - production 의 same-origin proxy (/__backend/*) 는 'self' 가 처리.
+const securityHeaders = [
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains",
+  },
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff",
+  },
+  {
+    key: "X-Frame-Options",
+    value: "DENY",
+  },
+  {
+    key: "Referrer-Policy",
+    value: "strict-origin-when-cross-origin",
+  },
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clarity.ms",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://*.clarity.ms",
+      "font-src 'self' data:",
+      "connect-src 'self' https://*.clarity.ms http://127.0.0.1:8000",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+  },
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async rewrites() {
@@ -39,6 +81,14 @@ const nextConfig = {
       {
         source: "/__backend/:path*",
         destination: `${proxyTarget}/:path*`,
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
       },
     ];
   },
