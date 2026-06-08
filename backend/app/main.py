@@ -11,6 +11,7 @@ from app.config import get_cache_config, get_cors_config
 from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.core.logging import configure_logging
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import request_id_middleware
 from app.routers.v1 import admin, ai, health, stocks, predictions as v1_predictions, strategies
 
@@ -36,6 +37,10 @@ app.add_middleware(
     allow_credentials=False,
 )
 app.add_middleware(GZipMiddleware, minimum_size=get_cache_config().gzip_minimum_size)
+# CP240 — 보안 헤더 미들웨어. last add = outermost. 응답 후처리 마지막에
+# 5 헤더 (HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy /
+# Content-Security-Policy) 박음. setdefault 라 기존 헤더 보존.
+app.add_middleware(SecurityHeadersMiddleware)
 app.middleware("http")(request_id_middleware)
 
 app.include_router(health.router, prefix="/api/v1")
