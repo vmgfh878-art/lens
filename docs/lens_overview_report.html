@@ -135,9 +135,13 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 .shothint{position:absolute;top:9px;right:9px;background:rgba(22,30,40,.62);color:#fff;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;pointer-events:none;z-index:3;letter-spacing:.02em}
 .shot{overflow-y:auto;overflow-x:hidden;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);aspect-ratio:16/9;scrollbar-width:thin;cursor:ns-resize}
 .shot.hero{aspect-ratio:2/1}
-.shot img{display:block;width:100%}
+.shot img{display:block;width:100%;cursor:zoom-in}
 .shot::-webkit-scrollbar{width:8px}
 .shot::-webkit-scrollbar-thumb{background:rgba(120,134,148,.45);border-radius:8px}
+.lightbox{position:fixed;inset:0;background:rgba(15,20,28,.9);z-index:500;display:none;overflow:auto;padding:28px;cursor:zoom-out}
+.lightbox.open{display:block}
+.lightbox img{display:block;max-width:1080px;width:100%;margin:0 auto;border-radius:10px;box-shadow:0 12px 50px rgba(0,0,0,.55)}
+.lightbox .lbclose{position:fixed;top:14px;right:22px;color:#fff;font-size:28px;font-weight:300;cursor:pointer;line-height:1;z-index:501}
 </style>
 </head>
 <body>
@@ -154,7 +158,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   <a href="#s6"><span class="n">06</span>모델 실험 — 라인·밴드 계보</a>
   <a href="#s7"><span class="n">07</span>평가 철학 — 리스크·전략 가치</a>
   <a href="#s8"><span class="n">08</span>통계적 유의성 검정</a>
-  <a href="#s9"><span class="n">09</span>프론트엔드 3화면</a>
+  <a href="#s9"><span class="n">09</span>프론트엔드 4화면</a>
   <a href="#s10"><span class="n">10</span>코드 안정성 리팩토링</a>
   <a href="#s11"><span class="n">11</span>보안 트랙</a>
   <a href="#s12"><span class="n">12</span>운영 자동화·재현성</a>
@@ -225,7 +229,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
   </div>
 
   <figure style="margin:28px 0">
-    <div class="shotwrap"><div class="shot hero"><img src="img/demo_stocks.png" alt="Lens 종목 분석 화면 — AAPL 차트 위 예측선·밴드 오버레이"></div><span class="shothint">↕ 직접 스크롤</span></div>
+    <div class="shotwrap"><div class="shot hero"><img src="img/demo_stocks.png" alt="Lens 종목 분석 화면 — AAPL 차트 위 예측선·밴드 오버레이"></div><span class="shothint">↕ 스크롤 · 클릭 확대</span></div>
     <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:8px">그림 3. 실제 화면 — AAPL 캔들 위에 <b>보수적 기준선</b>과 <b>AI 밴드</b>가 겹쳐 보인다. 우측 모델 패널에 신선도·오버레이 토글. 세 출력이 한 화면에서 함께 읽힌다.</figcaption>
   </figure>
 
@@ -698,10 +702,10 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 
   <figure style="margin:24px 0">
     <div class="grid g2">
-      <div><div class="shotwrap"><div class="shot"><img src="img/demo_stocks.png" alt="종목 분석"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>주식 보기</b> — 차트 + 예측선·밴드 + 보조지표 패널</div></div>
-      <div><div class="shotwrap"><div class="shot"><img src="img/demo_backtests.png" alt="백테스트"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>백테스트</b> — 전략 신호 + 지표 균형 v2 성과</div></div>
-      <div><div class="shotwrap"><div class="shot"><img src="img/demo_training.png" alt="AI 모델"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>AI 모델</b> — 목표 대비 평가·통계검정·재현 매니페스트</div></div>
-      <div><div class="shotwrap"><div class="shot"><img src="img/demo_report.png" alt="지표 가이드"></div><span class="shothint">↕ 직접 스크롤</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>지표 가이드</b> — 사용자용 지표 설명</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_stocks.png" alt="종목 분석"></div><span class="shothint">↕ 스크롤 · 클릭 확대</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>주식 보기</b> — 차트 + 예측선·밴드 + 보조지표 패널</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_backtests.png" alt="백테스트"></div><span class="shothint">↕ 스크롤 · 클릭 확대</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>백테스트</b> — 전략 신호 + 지표 균형 v2 성과</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_training.png" alt="AI 모델"></div><span class="shothint">↕ 스크롤 · 클릭 확대</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>AI 모델</b> — 목표 대비 평가·통계검정·재현 매니페스트</div></div>
+      <div><div class="shotwrap"><div class="shot"><img src="img/demo_report.png" alt="지표 가이드"></div><span class="shothint">↕ 스크롤 · 클릭 확대</span></div><div style="font-size:12px;color:var(--muted);margin-top:6px"><b>지표 가이드</b> — 사용자용 지표 설명</div></div>
     </div>
     <figcaption style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:10px">그림 4. 라이브 데모 4화면 — 각 화면이 자동 스크롤된다 (lens-ten-delta.vercel.app · 2026-06-05 데이터)</figcaption>
   </figure>
@@ -1067,6 +1071,7 @@ ul.clean li::before{content:"▸";position:absolute;left:4px;color:var(--primary
 </section>
 
 </main>
+<div class="lightbox" id="lightbox"><span class="lbclose" aria-label="닫기">✕</span><img alt="확대 보기"></div>
 </div>
 
 <script>
@@ -1090,6 +1095,17 @@ _tbtn.addEventListener('click',()=>{
   _tbtn.textContent=collapsed?'☰':'✕';
   _tbtn.title=collapsed?'목차 펼치기':'목차 접기';
 });
+// 데모 화면 클릭 → 확대 라이트박스 (안에서도 스크롤로 끝까지 읽기)
+(function(){
+  const lb=document.getElementById('lightbox'); if(!lb) return;
+  const lbimg=lb.querySelector('img');
+  const close=()=>{lb.classList.remove('open');document.body.style.overflow='';};
+  document.querySelectorAll('.shot img').forEach(im=>{
+    im.addEventListener('click',()=>{lbimg.src=im.src;lb.classList.add('open');lb.scrollTop=0;document.body.style.overflow='hidden';});
+  });
+  lb.addEventListener('click',close);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+})();
 </script>
 </body>
 </html>
