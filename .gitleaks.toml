@@ -1,0 +1,33 @@
+# CP239 — gitleaks config + allowlist for known false positives.
+#
+# Lens 운영 코드에 진짜 secret 박힌 게 발견되면 ADR-0030 정책 (rotation 먼저 →
+# code/env 교체 → history rewrite 검토) 따른다. 본 파일의 allowlist 는 명확한
+# false positive (ML evaluation metric identifier 등) 만 흡수.
+
+title = "Lens gitleaks config (CP239)"
+
+# 기본 gitleaks rule set 사용. extend 안 함 (rule 추가/제거 X).
+
+[allowlist]
+description = """CP239 false positive 흡수:
+- ML training/evaluation metric identifier (lower_breach_fold N, line_score 등).
+  `frontend/src/lib/training/` 의 `metricKey: \"...\"` 같은 식 식별자.
+  실제 API key/토큰 아님. entropy 만 높아 generic-api-key 룰에 잡힘.
+- 본 .gitleaks.toml 자체. 본 파일에 예시 fingerprint 또는 룰 설명을 박을 때
+  그 자체가 secret 패턴으로 잡히면 안 됨.
+"""
+
+# path-based allow — ML training 코드 디렉토리. backend/frontend 모두.
+paths = [
+    '''frontend/src/lib/training/.*\.(ts|tsx)$''',
+    '''ai/.*\.py$''',
+    '''.gitleaks.toml$''',
+]
+
+# regex-based allow — metricKey/identifier 패턴.
+# - metricKey: "..." (frontend evaluation UI)
+# - target/actual/diff 등 ML metric label 형태는 entropy 가 있어도 secret 아님.
+regexes = [
+    '''metricKey:\s*"[a-z_0-9]+"''',
+    '''(?:title|source|judgement)\s*[:=]\s*"[가-힣A-Za-z0-9 _]+"''',
+]
