@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
 from app.config import get_market_config
 from app.core.exceptions import UpstreamUnavailableError
-
+from pandas.api import types as pdt
 
 # Render free tier (512MB) 에서 매 요청마다 11MB parquet 을 메모리에 로드하면
 # 메모리 spike (~50-80MB) → OOM 으로 워커가 죽는 사례가 있었다. lru_cache 로
@@ -83,6 +82,29 @@ def _load_manifest(path: Path) -> dict[str, Any]:
         ) from exc
 
 
+def _normalize_text(series: pd.Series, how: str) -> pd.Series:
+    """ticker/timeframe/role 대소문자 정규화 — category 입력 시 object 미경유.
+
+    CP246 — compact parquet 은 이 컬럼들을 category 로 저장한다. 기존
+    `.astype(str).str.upper()` 는 category 를 597k+ object 로 되살려 cold load
+    peak +270MB(product_history) → 512MB OOM 을 유발했다. category 면 **카테고리
+    (수백 개)만** 변환해 category 를 유지한다. object 면 종전 경로 그대로.
+    raw object 와 결과가 동일하다(데이터는 ticker 전부 upper / role 전부 lower /
+    null 0 으로 검증됨).
+    """
+    upper = how == "upper"
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        cats = series.cat.categories
+        new_cats = cats.str.upper() if upper else cats.str.lower()
+        if len(set(new_cats)) == len(new_cats):
+            return series.cat.rename_categories(new_cats)
+        # 변환 후 카테고리 충돌(드묾) — codes 매핑으로 처리(부분 object).
+        mapping = dict(zip(cats, new_cats, strict=False))
+        return series.map(mapping).astype("category")
+    normalized = series.astype(str)
+    return normalized.str.upper() if upper else normalized.str.lower()
+
+
 @lru_cache(maxsize=2)
 def _load_history_frame_cached(path_str: str, mtime: float) -> pd.DataFrame:
     """parquet 을 한 번만 읽어 메모리 유지. mtime 이 바뀌면 자동 reload."""
@@ -95,10 +117,11 @@ def _load_history_frame_cached(path_str: str, mtime: float) -> pd.DataFrame:
     if frame.empty:
         return frame
     frame = frame.copy()
-    frame["ticker"] = frame["ticker"].astype(str).str.upper()
-    frame["timeframe"] = frame["timeframe"].astype(str).str.upper()
-    frame["role"] = frame["role"].astype(str).str.lower()
-    frame["asof_date"] = pd.to_datetime(frame["asof_date"], errors="coerce")
+    frame["ticker"] = _normalize_text(frame["ticker"], "upper")
+    frame["timeframe"] = _normalize_text(frame["timeframe"], "upper")
+    frame["role"] = _normalize_text(frame["role"], "lower")
+    if not pdt.is_datetime64_any_dtype(frame["asof_date"]):
+        frame["asof_date"] = pd.to_datetime(frame["asof_date"], errors="coerce")
     frame = frame.dropna(subset=["ticker", "timeframe", "role", "asof_date"])
     return _compress_history_dtypes(frame)
 

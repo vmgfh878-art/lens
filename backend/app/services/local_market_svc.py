@@ -20,11 +20,7 @@ logger = structlog.get_logger("lens.local_market")
 
 _BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
 
-# CP227 — read 경계 dtype 계약 검증 (CP214 회귀 방지).
-_FILE_MODELS = {
-    "market_prices_1d.parquet": _frames.MarketPrices1d,
-    "market_indicators_1d.parquet": _frames.MarketIndicators1d,
-}
+# CP227/CP246 — read 경계 dtype 계약은 frames.assert_contract(파일명 키) 가 담당.
 
 _PRICES_1D: pd.DataFrame | None = None
 _PRICES_1W: pd.DataFrame | None = None
@@ -38,14 +34,29 @@ def _load(path: Path) -> pd.DataFrame | None:
         logger.warning("local_market parquet missing", path=str(path))
         return None
     df = pd.read_parquet(path)
-    model = _FILE_MODELS.get(path.name)
-    if model is not None:
-        df = _frames.validate(model, df, name=path.name)
+    # CP246 — pandera coerce-validate(ticker/date 를 object 로 복제)를 할당 0 경량
+    # 계약 검사로 교체. market 도 같은 spike 병을 앓았다.
+    df = _frames.assert_contract(path.name, df)
     if "ticker" in df.columns:
-        df["ticker"] = df["ticker"].astype(str).str.upper()
+        df["ticker"] = _upper_category(df["ticker"])
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
     return df
+
+
+def _upper_category(series: pd.Series) -> pd.Series:
+    """ticker 를 대문자 category 로 정규화 — category 입력 시 object 미경유.
+
+    CP246 — compact parquet 은 ticker 를 category 로 저장한다. 기존
+    `.astype(str).str.upper()` 는 category 를 object 로 되살려 read 스파이크를
+    재발시켰다. category 면 카테고리(수백 개)만 대문자화해 category 를 유지한다.
+    """
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        new_cats = series.cat.categories.str.upper()
+        if len(set(new_cats)) == len(new_cats):
+            return series.cat.rename_categories(new_cats)
+        return series.astype(str).str.upper().astype("category")
+    return series.astype(str).str.upper().astype("category")
 
 
 def clear_caches() -> dict[str, Any]:

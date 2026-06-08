@@ -160,6 +160,13 @@ Invoke-PythonStep -Name "line_refresh" -Arguments @(
 if ($Apply) {
     Invoke-PythonStep -Name "product_history_rebuild" -Arguments @("backend\scripts\rebuild_product_history_parquet.py") -StdoutPath (Join-Path $RunDirPath "history_stdout_${SafeDate}_${RunStamp}.log") -StderrPath (Join-Path $RunDirPath "history_stderr_${SafeDate}_${RunStamp}.log") | Out-Null
     Invoke-PythonStep -Name "ai_runs_mock_rebuild" -Arguments @("backend\scripts\build_ai_runs_mock.py") -StdoutPath (Join-Path $RunDirPath "ai_runs_stdout_${SafeDate}_${RunStamp}.log") -StderrPath (Join-Path $RunDirPath "ai_runs_stderr_${SafeDate}_${RunStamp}.log") | Out-Null
+    # CP246 — serving parquet 재인코딩(compaction). build 단계들은 문자열/날짜를
+    # plain object 로 쓰므로, 그대로 두면 cold load read 스파이크가 누적돼 512MB
+    # Render 무료에서 OOM(503/502)이 재발한다. 여기서 category(dictionary)+datetime
+    # 으로 재저장해 read 스파이크를 제거한다. 스크립트가 값 동일성 게이트를 거쳐
+    # 불일치 시 해당 파일을 건너뛰고 exit 1 → 아래 FailedSteps 가 push 를 막는다.
+    # $FailedSteps 집계(아래) 전에 위치해야 compact 실패가 push 차단에 반영된다.
+    Invoke-PythonStep -Name "parquet_compact" -Arguments @("backend\scripts\compact_v1_parquets.py", "--apply") -StdoutPath (Join-Path $RunDirPath "compact_stdout_${SafeDate}_${RunStamp}.log") -StderrPath (Join-Path $RunDirPath "compact_stderr_${SafeDate}_${RunStamp}.log") | Out-Null
 } else {
     Write-Log "product history와 ai_runs_mock은 dry-run에서 파일을 쓰므로 실행하지 않음"
     $Steps.Add([pscustomobject]@{ name = "product_history_rebuild"; status = "SKIPPED_DRY_RUN_WRITES_OUTPUT"; exit_code = $null; elapsed_seconds = 0; stdout = $null; stderr = $null }) | Out-Null
