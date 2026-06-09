@@ -5,11 +5,14 @@
 ## 0. 한 줄 요약
 
 backend (FastAPI `SecurityHeadersMiddleware`) + frontend (Next.js
-`next.config.mjs` 의 `async headers()`) 양쪽에 5 보안 헤더 박음. CSP 는
-Lens 사용 패턴 (lightweight-charts / Microsoft Clarity / 로컬 dev 직접
-호출 / production same-origin proxy) 정확 반영. backend pytest 7 + Playwright
-e2e 4 view CSP guard 영구 안전망 박음. 외부 검증 (securityheaders.com +
-Mozilla Observatory) 은 사용자 직접 (Step 8/9 R3).
+`next.config.mjs` 의 `async headers()`) 양쪽에 **6 보안 헤더** (HSTS /
+X-Content-Type-Options / X-Frame-Options / Referrer-Policy /
+Content-Security-Policy / Permissions-Policy) 박음. CSP 는 Lens 사용
+패턴 (lightweight-charts / Microsoft Clarity / 로컬 dev 직접 호출 /
+production same-origin proxy) 정확 반영. backend pytest 8 + Playwright
+e2e 4 view CSP guard 영구 안전망 박음. 외부 검증: 사용자가 production
+live URL 에 curl 으로 6 헤더 직접 확인 완료. securityheaders.com 등급 A
+예상 (A+ 는 v2 nonce 도입 commitment). **CP240 마감**.
 
 ## 1. 핵심 컴포넌트 존재 체크리스트
 
@@ -88,22 +91,31 @@ Playwright e2e `csp_violation_guard.spec.ts` (4 view × CSP violation 0):
   in depth.
 - middleware 순서: GZip 다음 (outermost) — 모든 응답 후처리 마지막
 
-## 5. 외부 검증 결과 (Step 8/9 R3 사용자 직접)
+## 5. 외부 검증 결과 (Step 8 사용자 직접)
 
-### 5.1 securityheaders.com
+### 5.1 헤더 prod live 직접 검증 (curl)
+
+사용자가 production live URL 에 curl 으로 6 헤더 직접 확인:
+
+URL | 6 헤더 | 비고
+---|---|---
+`https://lens-ten-delta.vercel.app` (frontend) | ✅ HSTS / X-Content-Type-Options / X-Frame-Options / Referrer-Policy / Content-Security-Policy / Permissions-Policy | curl 응답 직접 확인 완료 |
+`https://lens-backend-7stj.onrender.com` (backend) | ✅ 동일 6 헤더 | curl 응답 직접 확인 완료 |
+
+### 5.2 securityheaders.com
 
 URL | 등급 | 비고
 ---|---|---
-`https://lens-ten-delta.vercel.app` (frontend) | _<pending — 사용자 입력>_ | A 등급 목표
-`https://lens-backend-7stj.onrender.com` (backend) | _<pending>_ | 동일
+`https://lens-ten-delta.vercel.app` | **A (예상)** | 헤더 직접 검증 완료, 스캔 스크린샷은 선택 |
+`https://lens-backend-7stj.onrender.com` | **A (예상)** | 동일 |
 
-### 5.2 Mozilla Observatory
+A+ 가 아닌 이유 (ADR-0031 §5 / §6 와 일관): `'unsafe-inline'` + `'unsafe-eval'`
+유지 (lightweight-charts + Next.js hydration + Clarity init 호환). v2 에서
+nonce 적용해 A+ 도전 commitment.
 
-URL | 점수 | 비고
----|---|---
-`https://lens-ten-delta.vercel.app` | _<pending>_ | 75+ 목표
+### 5.3 Mozilla Observatory
 
-→ 사용자가 검증 후 본 §5 갱신.
+스킵 (사용자 결정 — 직접 헤더 검증으로 충분).
 
 ## 6. 산출물
 
@@ -120,14 +132,16 @@ URL | 점수 | 비고
 
 ### 운영 코드 / ML 모델 / 응답 schema 0 수정
 
-## 7. commit 이력 (CP240, 5 commit + closure)
+## 7. commit 이력 (CP240, 6 commit + closure)
 
 ```
 13d4280 CP240 Step 1-2: backend SecurityHeadersMiddleware + 영구 안전망 test
 ed26a12 CP240 Step 3: next.config.mjs 의 async headers() — 5 헤더 + CSP
 fa103d6 CP240 Step 4-5: CSP 조정 (Clarity 도메인 + production backend + dev localhost)
 6994e84 CP240 Step 6: Playwright e2e CSP violation guard
-<본 commit> CP240 Step 10 closure: report + ADR-0031
+3d3cdab CP240 Step 10 closure draft: report + ADR-0031
+9aee8d4 CP240 Step 8 보강: Permissions-Policy (deny unused features + topics opt-out)
+<본 commit> CP240 closing: report §5 갱신 (Step 8 done — 6 헤더 prod live curl 확인 A 예상)
 ```
 
 ## 8. v2 재검토 commitment (ADR-0031 §6)

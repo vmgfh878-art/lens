@@ -12,7 +12,7 @@ OWASP A05 Security Misconfiguration 무방비. v2 (Supabase Auth + production
 
 ## Decision
 
-### 1. 5 헤더 박음 (backend FastAPI + frontend Next.js 양쪽)
+### 1. 6 헤더 박음 (backend FastAPI + frontend Next.js 양쪽)
 
 | 헤더 | 값 |
 |---|---|
@@ -21,6 +21,7 @@ OWASP A05 Security Misconfiguration 무방비. v2 (Supabase Auth + production
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Content-Security-Policy` | (§3 참조) |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), browsing-topics=()` (사용 0 features deny + Topics API opt-out) |
 
 ### 2. HSTS preload list 등록은 보류
 
@@ -71,15 +72,18 @@ API 응답은 JSON 만 반환이라 JS 실행 X — script-src / connect-src 효
 
 ### 5. 회귀 안전망
 
-- **`backend/tests/test_security_headers.py`** (영구 안전망, 7 test):
-  5 헤더 존재 + 5 헤더별 정확한 값 + CSP 필수 directive 4개.
-  `SecurityHeadersMiddleware` 가 끊기면 즉시 RED.
+- **`backend/tests/test_security_headers.py`** (영구 안전망, 8 test):
+  6 헤더 존재 + 6 헤더별 정확한 값 + CSP 필수 directive 4개 +
+  Permissions-Policy 필수 deny 5개. `SecurityHeadersMiddleware` 가 끊기면
+  즉시 RED.
 - **`frontend/tests/e2e/csp_violation_guard.spec.ts`** (Playwright):
   4 view 별 CSP violation console error 0 검증. lightweight-charts /
   Clarity / Next.js hydration 호환 검증.
-- **외부 검증** (Step 8/9 사용자 직접):
-  - https://securityheaders.com — A 등급 목표 (A+ 는 v2 nonce 필요)
-  - https://observatory.mozilla.org — 75+ 목표
+- **외부 검증 결과** (Step 8 사용자 직접 완료):
+  - 사용자 curl 으로 production live URL 에 6 헤더 직접 확인 완료
+    (frontend `lens-ten-delta.vercel.app` + backend `lens-backend-7stj.onrender.com`)
+  - securityheaders.com 등급: **A 예상** (스캔 스크린샷은 선택)
+  - Mozilla Observatory: 스킵 (사용자 결정 — 직접 헤더 검증으로 충분)
 
 ### 6. v2 재검토 commitment
 
