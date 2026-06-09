@@ -55,6 +55,23 @@ const securityHeaders = [
     value: "strict-origin-when-cross-origin",
   },
   {
+    // 사용 안 하는 브라우저 기능 명시적 deny — Lens 는 차트/분석 SPA 라
+    // camera/mic/geo/payment/USB/sensor 0개 사용. browsing-topics 는 Google
+    // Topics API opt-out (프라이버시, Clarity 정책과 정합).
+    key: "Permissions-Policy",
+    value: [
+      "camera=()",
+      "microphone=()",
+      "geolocation=()",
+      "payment=()",
+      "usb=()",
+      "magnetometer=()",
+      "accelerometer=()",
+      "gyroscope=()",
+      "browsing-topics=()",
+    ].join(", "),
+  },
+  {
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",

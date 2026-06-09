@@ -16,6 +16,7 @@ EXPECTED_HEADERS = {
     "x-frame-options",
     "referrer-policy",
     "content-security-policy",
+    "permissions-policy",
 }
 
 
@@ -72,3 +73,15 @@ def test_csp_required_directives(client):
     assert "script-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
     assert "base-uri 'self'" in csp
+
+
+def test_permissions_policy_denies_unused_features(client):
+    """Permissions-Policy 의 필수 deny: camera / microphone / geolocation /
+    payment / browsing-topics (Topics API opt-out)."""
+    resp = client.get("/api/v1/health/live", headers=FIXED_HEADERS)
+    pp = resp.headers.get("permissions-policy", "")
+    assert "camera=()" in pp
+    assert "microphone=()" in pp
+    assert "geolocation=()" in pp
+    assert "payment=()" in pp
+    assert "browsing-topics=()" in pp

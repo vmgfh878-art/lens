@@ -44,12 +44,30 @@ _API_CSP = (
     "form-action 'self'"
 )
 
+# Permissions-Policy — 사용 안 하는 브라우저 기능 명시적 deny.
+# Lens 는 차트/분석 SPA 라 camera/mic/geo/payment/USB/sensor 0개 사용 →
+# 전부 빈 allowlist 박아 차단. XSS 발생 시 권한 남용 차단 + securityheaders.com
+# A 등급 안정. browsing-topics 는 Google Topics API opt-out (프라이버시,
+# Microsoft Clarity 사용 정책과 정합).
+_PERMISSIONS_POLICY = (
+    "camera=(), "
+    "microphone=(), "
+    "geolocation=(), "
+    "payment=(), "
+    "usb=(), "
+    "magnetometer=(), "
+    "accelerometer=(), "
+    "gyroscope=(), "
+    "browsing-topics=()"
+)
+
 _HEADERS: dict[str, str] = {
     "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Content-Security-Policy": _API_CSP,
+    "Permissions-Policy": _PERMISSIONS_POLICY,
 }
 
 
