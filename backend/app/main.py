@@ -100,13 +100,16 @@ def handle_app_error(request: Request, exc: AppError):
 
 @app.exception_handler(RequestValidationError)
 def handle_validation_error(request: Request, exc: RequestValidationError):
+    # CP241 — details 를 loc + type 으로 minimal. 공격자에게 "이 필드는 이런
+    # 형식" 같은 raw pydantic 메시지 (ctx.pattern 등) 노출 차단.
+    minimal_details = [{"loc": err.get("loc"), "type": err.get("type")} for err in exc.errors()]
     return JSONResponse(
         status_code=422,
         content=error_response(
             request,
             code="VALIDATION_ERROR",
             message="요청 값이 올바르지 않습니다.",
-            details=exc.errors(),
+            details=minimal_details,
         ),
     )
 
