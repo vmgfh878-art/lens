@@ -20,6 +20,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.core.http import success_response
+from app.core.validators import TickerStr
 from app.services import parquet_store
 
 logger = logging.getLogger("lens.predictions")
@@ -131,7 +132,7 @@ def list_tickers(
 @router.get("/line/{ticker}")
 def get_line(
     request: Request,
-    ticker: str,
+    ticker: TickerStr,
     days: int = Query(default=365, ge=1, le=730, description="과거 며칠 표시"),
 ):
     """1D Line — conservative h5 보수 예측선."""
@@ -163,7 +164,7 @@ def get_line(
 @router.get("/band/1d/{ticker}")
 def get_band_1d(
     request: Request,
-    ticker: str,
+    ticker: TickerStr,
     days: int = Query(default=365, ge=1, le=730),
     horizon: int | None = Query(default=None, ge=1, le=5, description="특정 horizon_step 만"),
 ):
@@ -201,7 +202,7 @@ def get_band_1d(
 @router.get("/band/1w/{ticker}")
 def get_band_1w(
     request: Request,
-    ticker: str,
+    ticker: TickerStr,
     days: int = Query(default=730, ge=1, le=1095),
     horizon: int | None = Query(default=None, ge=1, le=4),
 ):
