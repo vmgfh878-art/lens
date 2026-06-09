@@ -21,25 +21,24 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-# CSP — API 응답용. frontend next.config 와 정합 유지.
-# - default-src 'self': 외부 리소스 차단 (baseline)
-# - script-src 'self' 'unsafe-inline': lightweight-charts inline script
-#   호환 (임시 — v2 에서 nonce 도입해 'unsafe-inline' 제거 검토)
-# - style-src 'self' 'unsafe-inline': Next.js styled-jsx 호환
-# - img-src 'self' data:: data URL 이미지 허용 (base64 등)
-# - connect-src 'self': API 자체. backend 가 외부 호출 안 함 (Lens 의 backend
-#   는 Supabase / EODHD 등 server-side 호출이지만 그건 outgoing 이라 CSP
-#   영향 0. CSP 의 connect-src 는 browser 가 발신하는 fetch/XHR/WebSocket
-#   대상이라 frontend next.config 의 connect-src 가 본질)
-# - frame-ancestors 'none': iframe 삽입 차단 (X-Frame-Options 보강)
-# - base-uri 'self': base tag 우회 방지
-# - form-action 'self': form submit 대상 제한
+# CSP — API 응답용. frontend next.config 와 동일 정책 (defense in depth 일관성).
+# API 응답은 JS 실행 안 하니 script-src / connect-src 효과는 작음 — 주된 효과는
+# frontend next.config 의 headers() 에서. 단 일관성 유지 위해 동일 정책.
+#
+# - 'unsafe-inline' / 'unsafe-eval': lightweight-charts + Next.js hydration +
+#   Microsoft Clarity init 호환 (임시). v2 에서 nonce 적용해 제거 검토.
+# - *.clarity.ms / www.clarity.ms: Microsoft Clarity (외부 script + telemetry).
+# - lens-backend-7stj.onrender.com: production frontend (vercel.app) 의 same-origin
+#   proxy 우회 호출 대비 (보통은 'self' 가 처리).
+# - 127.0.0.1:8000: 로컬 dev 의 baseClient.ts localhost 직접 호출 분기.
 _API_CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+    "https://www.clarity.ms https://*.clarity.ms; "
     "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; "
-    "connect-src 'self'; "
+    "img-src 'self' data: https://*.clarity.ms; "
+    "connect-src 'self' https://www.clarity.ms https://*.clarity.ms "
+    "https://lens-backend-7stj.onrender.com http://127.0.0.1:8000; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'"

@@ -58,11 +58,18 @@ const securityHeaders = [
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clarity.ms",
+      // www.clarity.ms + *.clarity.ms 둘 다 명시 (브라우저별 wildcard
+      // 처리 차이 대비, 안전 우선)
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.clarity.ms https://*.clarity.ms",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https://*.clarity.ms",
+      // Clarity 트래킹 픽셀 포함. blob: 제거 (lightweight-charts 가 안 씀,
+      // Playwright e2e 에서 회귀 감지)
+      "img-src 'self' data: https://*.clarity.ms",
       "font-src 'self' data:",
-      "connect-src 'self' https://*.clarity.ms http://127.0.0.1:8000",
+      // production same-origin proxy(/__backend/*) 는 'self' 가 처리.
+      // 직접 backend URL 호출 대비 lens-backend-7stj.onrender.com 명시.
+      // 127.0.0.1:8000 은 로컬 dev 의 baseClient.ts localhost 직접 호출.
+      "connect-src 'self' https://www.clarity.ms https://*.clarity.ms https://lens-backend-7stj.onrender.com http://127.0.0.1:8000",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
