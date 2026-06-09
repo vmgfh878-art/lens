@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _TRUTHY = {"1", "true", "yes"}
@@ -62,12 +62,32 @@ class MarketConfig(BaseSettings):
 
 
 class CorsConfig(BaseSettings):
-    """BACKEND_CORS_ORIGINS / BACKEND_CORS_ORIGIN_REGEX."""
+    """BACKEND_CORS_ORIGINS / BACKEND_CORS_ORIGIN_REGEX.
+
+    CP242 — env 의 `*` 차단 validator. production / dev 무관 단일 guard
+    (env 에 `*` 박는 실수 / 외부 침입 시 즉시 fail-loud).
+    """
 
     model_config = _BASE_CONFIG
 
     raw_origins: str = Field(default=_DEFAULT_CORS_ORIGINS, alias="BACKEND_CORS_ORIGINS")
     origin_regex: str = Field(default=_DEFAULT_CORS_ORIGIN_REGEX, alias="BACKEND_CORS_ORIGIN_REGEX")
+
+    @field_validator("raw_origins")
+    @classmethod
+    def _forbid_wildcard(cls, v: str) -> str:
+        """env 의 BACKEND_CORS_ORIGINS 에 `*` 박힌 경우 즉시 fail.
+
+        명시 origin 만 허용. `*` 는 모든 출처 허용이라 보안 트랙 종료 시점에
+        근본 차단. 사용자가 Render dashboard 에서 `*` 박지 않게 강제.
+        """
+        items = [o.strip() for o in v.split(",") if o.strip()]
+        if "*" in items:
+            raise ValueError(
+                "BACKEND_CORS_ORIGINS 에 '*' 박을 수 없습니다 (CP242). "
+                "명시 origin (https://...) 만 허용."
+            )
+        return v
 
     @property
     def origins(self) -> list[str]:
