@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Literal
 
 from app.core.http import success_response
+from app.core.validators import SearchStr, TickerStr
 from app.schemas.common import ApiResponse, ErrorResponse
 from app.schemas.stocks import (
     IndicatorResponseData,
@@ -41,7 +43,7 @@ def _build_price_etag(payload: dict) -> str:
 def list_stocks(
     request: Request,
     response: Response,
-    search: str | None = Query(default=None, description="티커 검색어"),
+    search: SearchStr | None = Query(default=None, description="티커 검색어"),
     limit: int = Query(default=50, ge=1, le=500, description="반환할 최대 종목 수"),
 ):
     stocks = get_stocks(search=search, limit=limit)
@@ -61,10 +63,10 @@ def list_stocks(
 def get_prices(
     request: Request,
     response: Response,
-    ticker: str,
+    ticker: TickerStr,
     start: str | None = Query(default=None, description="조회 시작일"),
     end: str | None = Query(default=None, description="조회 종료일"),
-    timeframe: str = Query(default="1D", description="조회 타임프레임"),
+    timeframe: Literal["1D", "1W"] = Query(default="1D", description="조회 타임프레임"),
     limit: int = Query(default=366, ge=1, le=1500, description="반환할 최대 포인트 수"),
 ):
     data = get_price_response_data(ticker, start=start, end=end, timeframe=timeframe, limit=limit)
@@ -84,8 +86,8 @@ def get_prices(
 def get_indicators(
     request: Request,
     response: Response,
-    ticker: str,
-    timeframe: str = Query(default="1D", description="보조지표 타임프레임"),
+    ticker: TickerStr,
+    timeframe: Literal["1D", "1W"] = Query(default="1D", description="보조지표 타임프레임"),
     limit: int = Query(default=300, ge=1, le=1000, description="반환할 최대 포인트 수"),
 ):
     data = get_indicator_response_data(ticker, timeframe=timeframe, limit=limit)
@@ -101,8 +103,10 @@ def get_indicators(
 def get_product_prediction_history(
     request: Request,
     response: Response,
-    ticker: str,
-    timeframe: str = Query(default="1D", description="제품 rolling history timeframe"),
+    ticker: TickerStr,
+    timeframe: Literal["1D", "1W"] = Query(
+        default="1D", description="제품 rolling history timeframe"
+    ),
     roles: str = Query(default="all", description="all, line, band 또는 line,band"),
     run_id: str | None = Query(default=None, description="선택 run_id 필터"),
     limit: int | None = Query(
