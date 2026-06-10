@@ -20,6 +20,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# CP253 — 발굴(CP252) 에서 held-out 271 test·Bonferroni(1300) 통과한 방어 전략의 frozen 컷.
+# 출처 backend/data/ablation/v2_cuts.json (dev/val 분위, 누수 0). 라인/밴드를 절대값이 아니라
+# "이 종목 기준 상대 분위"로 읽어 위험 국면에서 노출을 줄인다. 운영 1D 라인/밴드 모델(CP153/210)
+# 분포 기준 — 재학습으로 분포가 바뀌면 재보정 필요(v2 과제, 구 절대임계가 죽은 드리프트와 동일).
+LINE_GATE_Q50 = -0.03742746263742447  # line_score dev/val p50 (gate: 이 이상이어야 진입)
+LINE_GATE_Q60 = -0.026474294364452363  # line_score dev/val p60 (더 엄격한 gate)
+BAND_LOWER_P10 = -0.027661561347678353  # band_lower_return dev/val p10 (깊은 하단 = 꼬리위험)
+BAND_WIDTH_P90 = 1.0452357822024705  # band_width_expansion dev/val p90 (넓은 폭 = 고변동)
+
 
 @dataclass(frozen=True)
 class StrategyRule:
@@ -54,39 +63,68 @@ STRATEGIES: dict[str, StrategyRule] = {
         exit_desc="MA60 ≤ -5% 또는 MA20 ≤ -5% 또는 (ATR ≥ 7% & MA20 < 0).",
         risk_desc="청산 조건과 동일 (추세 붕괴 / 변동성 급등).",
     ),
-    "ai_balance_v2": StrategyRule(
-        id="ai_balance_v2",
-        label="AI 균형 v2",
-        short_label="AI 균형",
+    # CP253 — CP252 발굴에서 held-out 271 test·엄격 Bonferroni(1300) 통과한 방어 전략 3개.
+    # 구 ai_band_defense_v2(CP251, +2% 방어)를 이들(2~4배 강함)로 교체. 모두 **보수적 리스크
+    # 가드**: 위험 국면엔 현금으로 빠져 낙폭·대형손실을 줄이되 평균 참여율 24~33%(현금 多).
+    # ★정직: AI 는 수익엔 기여 못함(공격형 OOS null, 상승장 caveat) — 방어에만 효과.
+    "lineband_risk_guard": StrategyRule(
+        id="lineband_risk_guard",
+        label="라인밴드 리스크 가드",
+        short_label="리스크 가드",
         uses_ai=True,
         uses_line=True,
         uses_band=True,
         entry_confirm_days=2,
         exit_confirm_days=3,
         entry_desc=(
-            "line_score ≥ -2% & MA60 ≥ 0 & MA20 ≥ -4% & "
-            "(밴드 하단 ≥ -6% 또는 밴드폭 확장 < 1.25x)."
+            "모멘텀 진입(ROC20 ≥ +2% & MACD 가속 ≥ 0 & MA5 ≥ 0 & RSI < 80) & "
+            "AI 라인 ≥ 중간분위(p50) & 밴드 위험-상태 아님."
         ),
-        exit_desc=("(line 약함 < -6% & 밴드 위험) 또는 MA20 < -10% 또는 (ATR > 12% & MA20 < 0)."),
-        risk_desc="밴드 하단 < -6% 또는 밴드폭 확장 > 1.25x 또는 가격/변동성 붕괴.",
+        exit_desc=(
+            "ROC20 < 0 또는 MA60 ≤ -5% 또는 MA20 ≤ -6% 또는 (ATR > 10% & MA20 < 0) "
+            "또는 밴드 위험-상태."
+        ),
+        risk_desc=(
+            "밴드 위험-상태(하단이 이 종목 p10 이하로 깊거나 밴드폭이 p90 이상으로 넓음) 또는 "
+            "추세·변동성 붕괴. 위험하면 현금 — 보수적 방어(낙폭 −6%, 수익 비용 작음)."
+        ),
     ),
-    "ai_band_defense_v1": StrategyRule(
-        id="ai_band_defense_v1",
-        label="AI 밴드 방어 v1",
-        short_label="밴드 방어",
+    "lineband_defense": StrategyRule(
+        id="lineband_defense",
+        label="라인밴드 방어",
+        short_label="라인밴드 방어",
         uses_ai=True,
-        uses_line=False,
+        uses_line=True,
         uses_band=True,
         entry_confirm_days=2,
         exit_confirm_days=3,
         entry_desc=(
-            "(추세: MA60 ≥ +2% & MA20 ≥ -3% & RSI < 82 / 또는 눌림목: MA60 ≥ +2% & "
-            "BB ≤ 0.45 & RSI < 60) & 밴드 안정 (하단 ≥ -8% 또는 밴드폭 < 1.60x)."
+            "눌림목 진입(MA60 ≥ +2% & BB위치 ≤ 0.30 & RSI < 50) & AI 라인 모멘텀(라인 상승) & "
+            "밴드 위험-상태 아님."
         ),
-        exit_desc=(
-            "(밴드 하단 < -8% & 밴드폭 > 1.60x) 또는 (MA60 < -5% 또는 MA20 < -8%) "
-            "또는 (ATR > 12% & MA20 < 0)."
+        exit_desc="MA60 ≤ -5% 또는 MA20 ≤ -6% 또는 (ATR > 10% & MA20 < 0) 또는 밴드 위험-상태.",
+        risk_desc=(
+            "밴드 위험-상태(하단 p10 이하 / 폭 p90 이상) 또는 추세·변동성 붕괴. 선별적·보수적 "
+            "방어(가장 강한 낙폭 −8%, 진입 빈도 낮음)."
         ),
-        risk_desc="밴드 스트레스 / 추세 붕괴 / 변동성 급등.",
+    ),
+    "line_defense": StrategyRule(
+        id="line_defense",
+        label="라인 방어",
+        short_label="라인 방어",
+        uses_ai=True,
+        uses_line=True,
+        uses_band=False,
+        entry_confirm_days=2,
+        exit_confirm_days=3,
+        entry_desc=(
+            "모멘텀 진입(ROC20 ≥ +2% & MACD 가속 ≥ 0 & MA5 ≥ 0 & RSI < 80) & "
+            "AI 라인 ≥ p60(밴드 미사용 — 라인 단독 게이트)."
+        ),
+        exit_desc="ROC20 < 0 또는 MA60 ≤ -5% 또는 MA20 ≤ -6% 또는 (ATR > 10% & MA20 < 0).",
+        risk_desc=(
+            "추세·변동성 붕괴. 밴드 없이 AI 라인만으로 위험 국면 진입을 막는 보수적 방어 "
+            "(낙폭 −4.5%). '라인 부활' 쇼케이스 — 옛 라인 임계가 망가졌던 것을 교정."
+        ),
     ),
 }

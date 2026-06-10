@@ -106,6 +106,7 @@ def _load_base_frame() -> pd.DataFrame:
             [
                 "ticker",
                 "date",
+                "ma_5_ratio",  # CP253 — 발굴 momentum archetype 용
                 "ma_20_ratio",
                 "ma_60_ratio",
                 "macd_ratio",
@@ -133,7 +134,13 @@ def _load_base_frame() -> pd.DataFrame:
             c for c in ["open", "high", "low", "volume", "previous_close"] if c in frame.columns
         ]
     )
-    return frame.sort_values(["ticker", "date"]).reset_index(drop=True)
+    frame = frame.sort_values(["ticker", "date"]).reset_index(drop=True)
+    # CP253 — 발굴 전략(momentum) 파생. strategy_ablation_v2 와 동일(groupby ticker, 당일까지
+    # shift = 미래 누수 0). 동일 프레임에서 _raw_target 이 v2_raw 와 byte-identical 재현.
+    grp = frame.groupby("ticker")
+    frame["roc_20"] = grp["close"].transform(lambda s: s / s.shift(20) - 1.0)
+    frame["macd_accel"] = grp["macd_ratio"].transform(lambda s: s - s.shift(3))
+    return frame
 
 
 def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
@@ -150,11 +157,14 @@ def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
     line = _align_date_dtype(line)
     assert pd.api.types.is_datetime64_any_dtype(line["date"]), "line.date not datetime before merge"
     # CP245 — scan/backtest 는 line_score 만 쓴다 (safe_line_score / rank 미사용 → 메모리 절감).
-    return frame.merge(
+    merged = frame.merge(
         line[["ticker", "date", "line_score"]],
         on=["ticker", "date"],
         how="left",
     )
+    # CP253 — 발굴 전략 line.momentum 파생 (line_score 5일 변화, 당일까지 = 누수 0). v2 와 동일.
+    merged["line_mom"] = merged.groupby("ticker")["line_score"].transform(lambda s: s - s.shift(5))
+    return merged
 
 
 def _merge_band(frame: pd.DataFrame) -> pd.DataFrame:

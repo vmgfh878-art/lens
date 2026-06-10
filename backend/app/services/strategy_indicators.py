@@ -12,7 +12,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from app.strategies.strategy_rules import StrategyRule
+from app.strategies.strategy_rules import (
+    BAND_LOWER_P10,
+    BAND_WIDTH_P90,
+    LINE_GATE_Q50,
+    LINE_GATE_Q60,
+    StrategyRule,
+)
 from fastapi import HTTPException
 
 
@@ -39,12 +45,12 @@ def _align_date_dtype(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
 def _jsonable(value: Any) -> Any:
     if value is None:
         return None
-    if isinstance(value, (np.floating, float)):
+    if isinstance(value, np.floating | float):
         number = float(value)
         return number if math.isfinite(number) else None
-    if isinstance(value, (np.integer, int)):
+    if isinstance(value, np.integer | int):
         return int(value)
-    if isinstance(value, (np.bool_, bool)):
+    if isinstance(value, np.bool_ | bool):
         return bool(value)
     if hasattr(value, "isoformat"):
         return value.isoformat()
@@ -79,9 +85,15 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
     rsi = _safe(frame["rsi_norm"], 50.0)
     atr = _safe(frame["atr_ratio_calc"], 0.0)
     bb = _safe(frame["bb_position"], 1.0)
-    line = _safe_col(frame, "line_score")
     lower = _safe_col(frame, "band_lower_return")
     width_expansion = _safe_col(frame, "band_width_expansion", 1.0)
+    # CP253 — 발굴 전략(A/B/C)용 파생 피처. strategy_scan 로더가 frame 에 채운다(누수 없는
+    # 당일까지 rolling/shift). v2 와 동일 컬럼·로직 → 동일 프레임 byte-identical 재현.
+    line = _safe_col(frame, "line_score")
+    line_mom = _safe_col(frame, "line_mom", 0.0)
+    roc20 = _safe_col(frame, "roc_20", 0.0)
+    macd_accel = _safe_col(frame, "macd_accel", 0.0)
+    ma5 = _safe_col(frame, "ma_5_ratio", 0.0)
 
     if rule.id == "indicator_balance_v2":
         trend_entry = (ma60 >= 0.02) & (ma20 >= -0.02) & (macd >= 0.0) & (rsi < 75.0)
@@ -91,32 +103,27 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
         risk_signal = exit_signal
         return entry, exit_signal, risk_signal
 
-    if rule.id == "ai_balance_v2":
-        entry = (
-            (line >= -0.02)
-            & (ma60 >= 0.0)
-            & (ma20 >= -0.04)
-            & ((lower >= -0.06) | (width_expansion < 1.25))
-        )
-        line_weak = line < -0.06
-        band_risk = (lower < -0.06) | (width_expansion > 1.25)
-        price_break = ma20 < -0.10
-        volatility_break = (atr > 0.12) & (ma20 < 0.0)
-        exit_signal = (line_weak & band_risk) | price_break | volatility_break
-        risk_signal = band_risk | price_break | volatility_break
-        return entry, exit_signal, risk_signal
+    # CP253 — CP252 발굴 검증 방어 전략. momentum/pullback archetype + 라인(gate/momentum) +
+    # (선택) 밴드 위험-상태(both). 컷은 dev/val frozen(strategy_rules 상수, v2_cuts.json 출처).
+    # 위험 국면엔 현금으로 빠지는 보수적 리스크 가드(수익엔 기여 못함, 방어 전용).
+    band_risk = (lower <= BAND_LOWER_P10) | (width_expansion >= BAND_WIDTH_P90)
+    common_exit = (ma60 <= -0.05) | (ma20 <= -0.06) | ((atr > 0.10) & (ma20 < 0.0))
+    momentum_entry = (roc20 >= 0.02) & (macd_accel >= 0.0) & (ma5 >= 0.0) & (rsi < 80.0)
+    momentum_exit = (roc20 < 0.0) | common_exit
 
-    if rule.id == "ai_band_defense_v1":
-        indicator_trend = (ma60 >= 0.02) & (ma20 >= -0.03) & (rsi < 82.0)
-        indicator_pullback = (ma60 >= 0.02) & (bb <= 0.45) & (rsi < 60.0)
-        band_clear = (lower >= -0.08) | (width_expansion < 1.60)
-        entry = (indicator_trend | indicator_pullback) & band_clear
-        band_stress = (lower < -0.08) & (width_expansion > 1.60)
-        trend_break = (ma60 < -0.05) | (ma20 < -0.08)
-        volatility_break = (atr > 0.12) & (ma20 < 0.0)
-        exit_signal = band_stress | trend_break | volatility_break
-        risk_signal = band_stress | trend_break | volatility_break
-        return entry, exit_signal, risk_signal
+    if rule.id == "lineband_risk_guard":  # A: momentum + line.gate(p50) + band.both
+        entry = momentum_entry & (line >= LINE_GATE_Q50) & ~band_risk
+        exit_signal = momentum_exit | band_risk
+        return entry, exit_signal, exit_signal
+
+    if rule.id == "lineband_defense":  # B: pullback + line.momentum + band.both
+        entry = (ma60 >= 0.02) & (bb <= 0.30) & (rsi < 50.0) & (line_mom > 0.0) & ~band_risk
+        exit_signal = common_exit | band_risk
+        return entry, exit_signal, exit_signal
+
+    if rule.id == "line_defense":  # C: momentum + line.gate(p60), 밴드 미사용
+        entry = momentum_entry & (line >= LINE_GATE_Q60)
+        return entry, momentum_exit, momentum_exit
 
     raise HTTPException(status_code=404, detail=f"지원하지 않는 전략입니다: {rule.id}")
 
@@ -137,9 +144,20 @@ def _reason(rule: StrategyRule, position: int, target: int, risk: bool) -> tuple
     return "watch", "관망", f"{rule.label} 기준 신규 진입 조건이 아직 충분하지 않습니다."
 
 
-def _compute_signal_frame(ticker_frame: pd.DataFrame, rule: StrategyRule) -> pd.DataFrame:
-    frame = ticker_frame.sort_values("date").copy()
-    entry, exit_signal, risk_signal = _raw_target(frame, rule)
+def _run_state_machine(
+    frame: pd.DataFrame,
+    entry: pd.Series,
+    exit_signal: pd.Series,
+    risk_signal: pd.Series,
+    rule: Any,
+) -> pd.DataFrame:
+    """진입/청산/위험 boolean → confirm-day 상태머신 → position/신호 컬럼 부착.
+
+    CP248 분리 — _compute_signal_frame 의 순수 상태머신 부분. ablation 하니스가
+    재래/AI 합성 신호로 동일 엔진을 재사용할 수 있게 추출했다. `rule` 은
+    entry_confirm_days / exit_confirm_days / label 만 요구(StrategyRule 또는
+    AblationConfig 모두 duck-type). 기존 호출(_compute_signal_frame)은 동작 불변.
+    """
     current = 0
     entry_streak = 0
     exit_streak = 0
@@ -179,6 +197,12 @@ def _compute_signal_frame(ticker_frame: pd.DataFrame, rule: StrategyRule) -> pd.
     return frame
 
 
+def _compute_signal_frame(ticker_frame: pd.DataFrame, rule: StrategyRule) -> pd.DataFrame:
+    frame = ticker_frame.sort_values("date").copy()
+    entry, exit_signal, risk_signal = _raw_target(frame, rule)
+    return _run_state_machine(frame, entry, exit_signal, risk_signal, rule)
+
+
 __all__ = [
     "_align_date_dtype",
     "_jsonable",
@@ -186,5 +210,6 @@ __all__ = [
     "_safe",
     "_raw_target",
     "_reason",
+    "_run_state_machine",
     "_compute_signal_frame",
 ]

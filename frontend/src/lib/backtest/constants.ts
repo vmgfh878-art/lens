@@ -14,8 +14,9 @@ export const SIGNAL_SCAN_TICKERS = [
 
 export const BACKEND_STRATEGY_IDS = new Set<StrategyId>([
   "indicator_balance_v2",
-  "ai_balance_v2",
-  "ai_band_defense_v1",
+  "lineband_risk_guard",
+  "lineband_defense",
+  "line_defense",
 ]);
 
 export const LENS_BALANCE_RULE = {
@@ -88,59 +89,89 @@ export const STRATEGIES: StrategyDefinition[] = [
     usesAi: false,
   },
   {
-    id: "ai_balance_v2",
-    label: "AI 균형 v2",
-    shortLabel: "AI 균형",
+    id: "lineband_risk_guard",
+    label: "라인밴드 리스크 가드",
+    shortLabel: "리스크 가드",
     description:
-      "AI line은 방향과 보유 의지로, AI band는 하방 위험과 불확실성 확인용으로 쓰는 티커별 long/cash 전략입니다.",
+      "모멘텀(20일 수익률·MACD 가속)으로 진입하되, AI 라인이 약하거나 AI 밴드가 위험-상태(이 종목 기준 깊은 하단/넓은 폭 = 고변동·꼬리위험)면 진입을 막고 현금으로 빠지는 보수적 리스크 가드입니다. 수익을 키우는 전략이 아니라, 위험할 때 빠져 낙폭과 대형손실을 줄이는 방어 전략입니다(참여율 낮음·현금 비중 큼).",
     ruleRows: [
       ["전략 단위", "각 티커별 100% 보유 또는 100% 현금"],
-      ["사용 AI", "1D Line + 1D Band"],
-      ["진입", "line_score -2% 이상, 60일 추세 0% 이상, 20일 추세 -4% 이상"],
-      ["밴드 확인", "하방 밴드 -6% 이상 또는 밴드 폭 확장 1.25배 미만"],
-      ["청산", "line_score -6% 미만이면서 하방 밴드나 밴드 폭 위험이 동시에 발생"],
-      ["가격 방어", "20일 추세 -10% 이하 또는 ATR 급등과 단기 추세 약화"],
+      ["사용 AI", "1D 라인 + 1D 밴드"],
+      ["진입", "20일 수익률 +2% 이상 & MACD 가속 ≥ 0 & MA5 ≥ 0 & RSI 80 미만"],
+      ["AI 라인 확인", "AI 라인이 이 종목 기준 중간분위(p50) 이상"],
+      ["밴드 위험-상태 veto", "하방 밴드가 p10 이하로 깊거나 밴드 폭이 p90 이상으로 넓으면 진입 차단·청산"],
+      ["청산", "20일 수익률 음전 또는 추세·변동성 붕괴 또는 밴드 위험-상태"],
       ["확인일", "진입 2일 확인, 청산 3일 확인"],
+      ["성격", "방어 전용 · 위험할 때 현금 (수익 개선 아님)"],
     ],
-    visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "ma60Trend", "ma20Trend", "atr"],
+    visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "ma60Trend", "ma20Trend", "macd", "rsi", "atr"],
     validationRows: [
-      ["전략 수익률", "19.6%"],
-      ["단순 보유", "32.9%"],
-      ["MDD 개선폭", "+9.5%p"],
-      ["손실 회피율", "41.9%"],
-      ["시장 참여율", "56.0%"],
-      ["상태", "보류/설명용 후보"],
+      ["AI 평가창", "~471티커, 2025-06~2026-06"],
+      ["전략 수익률", "3.3% (단순 보유 28.7%)"],
+      ["MDD 개선폭(보유 대비)", "+15.3%p"],
+      ["손실 회피율", "76.8%"],
+      ["시장 참여율", "23% (대부분 현금)"],
+      ["held-out OOS 검증", "ΔMaxDD +6.0%p, Bonferroni 통과 (n=255)"],
     ],
     scopeNote:
-      "AI line과 AI band를 하나의 composite 모델로 합성하지 않습니다. 두 AI 지표를 각각 읽어 티커별 보유/현금 판단에만 사용합니다.",
+      "AI는 수익엔 기여하지 못합니다(공격형 전략 OOS null, 상승장 caveat). AI 라인·밴드를 '위험-상태 게이지'로 보고 위험할 때만 현금으로 빠져 낙폭·대형손실을 줄이는 보수적 방어에만 효과가 있습니다. CP252 통제 발굴(티커 200/271 + 시간 val/test OOS 두 축 · 엄격 Bonferroni)로 검증했습니다.",
     usesAi: true,
   },
   {
-    id: "ai_band_defense_v1",
-    label: "AI 밴드 방어 v1",
-    shortLabel: "밴드 방어",
+    id: "lineband_defense",
+    label: "라인밴드 방어",
+    shortLabel: "라인밴드 방어",
     description:
-      "AI 지표 중 1D band만 사용합니다. 방향성은 가격 보조지표가 담당하고, AI band는 위험 veto와 청산 확인에만 쓰는 방어 전략입니다.",
+      "눌림목(60일 추세 살아 있고 Bollinger 하단·RSI 낮음)에서, AI 라인이 상승 전환하고 AI 밴드가 위험-상태가 아닐 때만 선별 진입하는 가장 보수적인 방어 전략입니다. 진입 빈도가 매우 낮은(참여율 ~6%) 대신 낙폭 방어가 가장 강합니다. 수익 개선용이 아닙니다.",
     ruleRows: [
       ["전략 단위", "각 티커별 100% 보유 또는 100% 현금"],
-      ["사용 AI", "1D Band만 사용"],
-      ["진입", "60일 추세 +2% 이상, 20일 추세 -3% 이상, RSI 82 미만"],
-      ["반등 진입", "60일 추세가 살아 있고 Bollinger 위치가 낮으며 RSI 60 미만"],
-      ["밴드 veto", "하방 밴드 -8% 미만이면서 밴드 폭 1.60배 이상이면 진입 제한"],
-      ["청산", "밴드 stress, 60/20일 추세 이탈, 또는 ATR 급등"],
+      ["사용 AI", "1D 라인 + 1D 밴드"],
+      ["진입", "60일 추세 +2% 이상 & Bollinger 위치 ≤ 0.30 & RSI 50 미만"],
+      ["AI 라인 확인", "AI 라인이 상승 중(5일 모멘텀 > 0)"],
+      ["밴드 위험-상태 veto", "하방 밴드 p10 이하 또는 밴드 폭 p90 이상이면 진입 차단·청산"],
+      ["청산", "추세·변동성 붕괴 또는 밴드 위험-상태"],
       ["확인일", "진입 2일 확인, 청산 3일 확인"],
+      ["성격", "선별적·최강 방어 · 진입 드묾 (수익 개선 아님)"],
     ],
-    visibleFactors: ["lowerBand", "bandWidth", "bandExpansion", "ma60Trend", "ma20Trend", "rsi", "atr"],
+    visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "ma60Trend", "ma20Trend", "rsi", "atr"],
     validationRows: [
-      ["전략 수익률", "23.8%"],
-      ["단순 보유", "32.9%"],
-      ["MDD 개선폭", "+5.2%p"],
-      ["손실 회피율", "32.0%"],
-      ["시장 참여율", "67.0%"],
-      ["상태", "방어 후보"],
+      ["AI 평가창", "~471티커, 2025-06~2026-06"],
+      ["전략 수익률", "1.6% (단순 보유 28.7%)"],
+      ["MDD 개선폭(보유 대비)", "+23.1%p"],
+      ["손실 회피율", "93.8%"],
+      ["시장 참여율", "6% (대부분 현금)"],
+      ["held-out OOS 검증", "ΔMaxDD +7.8%p, Bonferroni 통과 (n=98)"],
     ],
     scopeNote:
-      "AI line은 사용하지 않습니다. AI band가 가격 지표 기반 진입을 막거나 위험 확대를 확인하는 보조 역할만 합니다.",
+      "AI는 수익엔 기여하지 못합니다(공격형 OOS null). 위험·약세 국면을 피해 매우 선별적으로만 보유해 낙폭·대형손실을 줄이는 보수적 방어입니다(커버리지 98/271로 선별적). CP252 통제 발굴(티커+시간 OOS 두 축·엄격 Bonferroni)로 검증했습니다.",
+    usesAi: true,
+  },
+  {
+    id: "line_defense",
+    label: "라인 방어",
+    shortLabel: "라인 방어",
+    description:
+      "밴드를 쓰지 않고 AI 라인만으로 위험 국면 진입을 막는 방어 전략입니다. 모멘텀 진입에 AI 라인 확인(이 종목 기준 p60 이상)을 더했습니다. 옛 AI 라인 임계가 잘못 설정돼 '라인은 쓸모없다'고 판단했던 것을, 상대 분위 기준으로 바로잡아 라인이 방어에 쓸모 있음을 보인 '라인 부활' 전략입니다. 수익 개선용은 아닙니다.",
+    ruleRows: [
+      ["전략 단위", "각 티커별 100% 보유 또는 100% 현금"],
+      ["사용 AI", "1D 라인만 사용 (밴드 미사용)"],
+      ["진입", "20일 수익률 +2% 이상 & MACD 가속 ≥ 0 & MA5 ≥ 0 & RSI 80 미만"],
+      ["AI 라인 확인", "AI 라인이 이 종목 기준 p60 이상(밴드 없이 라인 단독 게이트)"],
+      ["청산", "20일 수익률 음전 또는 추세·변동성 붕괴"],
+      ["확인일", "진입 2일 확인, 청산 3일 확인"],
+      ["성격", "라인 단독 방어 · '라인 부활' 쇼케이스 (수익 개선 아님)"],
+    ],
+    visibleFactors: ["conservative", "ma60Trend", "ma20Trend", "macd", "rsi", "atr"],
+    validationRows: [
+      ["AI 평가창", "~471티커, 2025-06~2026-06"],
+      ["전략 수익률", "8.6% (단순 보유 28.7%)"],
+      ["MDD 개선폭(보유 대비)", "+14.9%p"],
+      ["손실 회피율", "73.7%"],
+      ["시장 참여율", "25% (대부분 현금)"],
+      ["held-out OOS 검증", "ΔMaxDD +4.5%p, Bonferroni 통과 (n=255)"],
+    ],
+    scopeNote:
+      "밴드 없이 AI 라인만으로 위험 국면 노출을 줄이는 보수적 방어입니다. CP248~251에서 '라인은 죽었다'던 결론이 사실은 옛 절대임계(-2%, 진입 63% 차단)가 잘못된 탓이었고, CP252에서 상대 분위 게이트로 바꾸니 방어에 유효함을 OOS·Bonferroni로 확인했습니다. 단 수익에는 기여하지 못합니다(공격형 null).",
     usesAi: true,
   },
 ];
@@ -149,12 +180,19 @@ export function getStrategyDefinition(strategyId: StrategyId) {
   return STRATEGIES.find((strategy) => strategy.id === strategyId) ?? STRATEGIES[0];
 }
 
+const LINE_STRATEGIES = new Set<StrategyId>([
+  "lineband_risk_guard",
+  "lineband_defense",
+  "line_defense",
+]);
+const BAND_STRATEGIES = new Set<StrategyId>(["lineband_risk_guard", "lineband_defense"]);
+
 export function strategyNeedsLine(strategyId: StrategyId) {
-  return strategyId === "ai_balance_v2";
+  return LINE_STRATEGIES.has(strategyId); // CP253 — 발굴 방어 전략 3개 모두 AI 라인 사용.
 }
 
 export function strategyNeedsBand(strategyId: StrategyId) {
-  return strategyId === "ai_balance_v2" || strategyId === "ai_band_defense_v1";
+  return BAND_STRATEGIES.has(strategyId); // CP253 — A(리스크 가드)·B(라인밴드 방어)만 밴드 사용.
 }
 
 export function isBackendStrategy(strategyId: StrategyId) {
