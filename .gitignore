@@ -19,21 +19,7 @@ docs/refactoring_master_plan.md
 !docs/cp216_2_significance/
 !docs/cp216_2_significance/*.csv
 !docs/cp216_2_significance/*.json
-# CP221~237 리팩토링 런북·지시서·보고서 (검증 대상이라 추적 필요)
-# 패턴: cp221~cp229 / cp230~cp237 (cp220 이전은 별도 정책으로 미추적 유지)
-# .md(보고서·지시서) + .txt(freeze 등 산출물).
-!docs/cp22[1-9]*.md
-!docs/cp23[0-7]*.md
-!docs/cp22[1-9]*.txt
-!docs/cp23[0-7]*.txt
-# CP238~242 보안 트랙 (지시서·런북·보고서·산출물 추적)
-!docs/cp23[8-9]*.md
-!docs/cp24[0-2]*.md
-!docs/cp23[8-9]*.txt
-!docs/cp24[0-2]*.txt
-!docs/cp23[8-9]*.json
-!docs/cp24[0-2]*.json
-!docs/cp238_242*.md
+# CP221~237(리팩토링)·CP238~242(보안) 트랙은 git 미추적 — origin 에는 운영 모델/전략 CP 만 둔다.
 # CP252~253 백테스트 발굴·부착 트랙 (지시서·보고서). cp248~251(v1)은 CP253 §2.5 에서 제거됨.
 !docs/cp25[2-9]*.md
 # CP252 발굴 raw rows(대용량·재현가능 중간물)는 제외. 고정입력(ticker_split/v2_cuts/v2_candidates)
