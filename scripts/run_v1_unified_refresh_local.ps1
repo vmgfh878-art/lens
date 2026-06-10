@@ -311,18 +311,31 @@ if ($Apply -and $FailedSteps.Count -gt 0) {
     Write-Log "CRITICAL: 단계 실패로 production push 차단 (failed: $FailedNames). 운영 데이터 불일치(예측 정체) 방지를 위해 commit/push 를 건너뛴다. 각 단계 stderr 확인 후 재실행하라. working tree 변경 폐기는 git checkout -- backend/data/v1 ."
 } elseif ($Apply) {
     Write-Log "production git push 시작"
+    # PowerShell 5.1 quirk 회피: native git 의 stderr(pre-commit 훅 출력 등)를 2>&1 로 머지하면
+    # NativeCommandError 로 감싸지고 ErrorActionPreference=Stop 이 이를 종료 오류로 승격시켜,
+    # commit 은 됐는데 push 가 건너뛰어지는 사고가 났다(2026-06-10, push=WARN_PUSH_ERROR 인데
+    # 데이터는 로컬 커밋만 됨). 그래서 (1) 이 블록만 ErrorActionPreference=Continue 로 낮춰
+    # native stderr 가 throw 하지 않게 하고, (2) 2>&1 머지를 제거해 git stderr 는 그대로 흘리며,
+    # (3) 성공/실패는 PowerShell 예외가 아니라 git 의 $LASTEXITCODE 로만 판정한다.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
-        git add backend/data/v1/*.parquet backend/data/v1/*.json 2>&1 | Out-Null
+        git add backend/data/v1/*.parquet backend/data/v1/*.json | Out-Null
         git diff --cached --quiet
         if ($LASTEXITCODE -ne 0) {
-            git commit -m "data: daily refresh $RunDate" 2>&1 | Out-Null
-            git push origin main 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                $PushStatus = "PASS"
-                Write-Log "production git push 완료"
+            git commit -m "data: daily refresh $RunDate" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $PushStatus = "WARN_COMMIT_FAILED"
+                Write-Log "production git commit 실패 (pre-commit 훅/충돌 확인)"
             } else {
-                $PushStatus = "WARN_PUSH_FAILED"
-                Write-Log "production git push 실패 (네트워크/인증 확인)"
+                git push origin main | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $PushStatus = "PASS"
+                    Write-Log "production git push 완료"
+                } else {
+                    $PushStatus = "WARN_PUSH_FAILED"
+                    Write-Log "production git push 실패 (네트워크/인증 확인)"
+                }
             }
         } else {
             $PushStatus = "NO_CHANGES"
@@ -331,6 +344,8 @@ if ($Apply -and $FailedSteps.Count -gt 0) {
     } catch {
         $PushStatus = "WARN_PUSH_ERROR"
         Write-Log "git push 오류: $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
 }
 
