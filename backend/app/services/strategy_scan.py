@@ -157,14 +157,11 @@ def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
     line = _align_date_dtype(line)
     assert pd.api.types.is_datetime64_any_dtype(line["date"]), "line.date not datetime before merge"
     # CP245 — scan/backtest 는 line_score 만 쓴다 (safe_line_score / rank 미사용 → 메모리 절감).
-    merged = frame.merge(
+    return frame.merge(
         line[["ticker", "date", "line_score"]],
         on=["ticker", "date"],
         how="left",
     )
-    # CP253 — 발굴 전략 line.momentum 파생 (line_score 5일 변화, 당일까지 = 누수 0). v2 와 동일.
-    merged["line_mom"] = merged.groupby("ticker")["line_score"].transform(lambda s: s - s.shift(5))
-    return merged
 
 
 def _merge_band(frame: pd.DataFrame) -> pd.DataFrame:

@@ -89,25 +89,8 @@ STRATEGIES: dict[str, StrategyRule] = {
             "추세·변동성 붕괴. 위험하면 현금 — 보수적 방어(낙폭 −6%, 수익 비용 작음)."
         ),
     ),
-    "lineband_defense": StrategyRule(
-        id="lineband_defense",
-        label="라인밴드 방어",
-        short_label="라인밴드 방어",
-        uses_ai=True,
-        uses_line=True,
-        uses_band=True,
-        entry_confirm_days=2,
-        exit_confirm_days=3,
-        entry_desc=(
-            "눌림목 진입(MA60 ≥ +2% & BB위치 ≤ 0.30 & RSI < 50) & AI 라인 모멘텀(라인 상승) & "
-            "밴드 위험-상태 아님."
-        ),
-        exit_desc="MA60 ≤ -5% 또는 MA20 ≤ -6% 또는 (ATR > 10% & MA20 < 0) 또는 밴드 위험-상태.",
-        risk_desc=(
-            "밴드 위험-상태(하단 p10 이하 / 폭 p90 이상) 또는 추세·변동성 붕괴. 선별적·보수적 "
-            "방어(가장 강한 낙폭 −8%, 진입 빈도 낮음)."
-        ),
-    ),
+    # CP253 후속 — lineband_defense(눌림목+라인모멘텀+밴드)는 참여율 6%로 너무 선별적이라
+    # 화면에서 볼 게 없어 제거(사용자 결정). 나머지 둘은 ~23-25% 참여.
     "line_defense": StrategyRule(
         id="line_defense",
         label="라인 방어",

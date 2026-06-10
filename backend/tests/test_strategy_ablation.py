@@ -37,12 +37,6 @@ LIVE_TO_V2 = {
         line={"kind": "gate", "q": 0.5},
         band={"q": 0.10, "mode": "both"},
     ),
-    "lineband_defense": V2Config(
-        "pullback",
-        {"bb": 0.30, "rsi": 50.0},
-        line={"kind": "momentum"},
-        band={"q": 0.10, "mode": "both"},
-    ),
     "line_defense": V2Config(
         "momentum",
         {"roc": 0.02, "ma5": 0.0},
@@ -80,11 +74,10 @@ def test_live_reproduces_v2(frame, live_id):
 
 
 def test_strategies_registry():
-    # CP253 — 대조군 1 + 발굴 방어 3 = 4. 구 약전략 제거됨.
+    # CP253(+후속) — 대조군 1 + 발굴 방어 2 = 3. lineband_defense 는 참여 6%로 제거됨.
     assert set(STRATEGIES) == {
         "indicator_balance_v2",
         "lineband_risk_guard",
-        "lineband_defense",
         "line_defense",
     }
 

@@ -1,7 +1,6 @@
 export type StrategyId =
   | "indicator_balance_v2"
   | "lineband_risk_guard"
-  | "lineband_defense"
   | "line_defense"
   | "indicator_baseline_v1"
   | "lens_balance_v1";

@@ -15,7 +15,6 @@ export const SIGNAL_SCAN_TICKERS = [
 export const BACKEND_STRATEGY_IDS = new Set<StrategyId>([
   "indicator_balance_v2",
   "lineband_risk_guard",
-  "lineband_defense",
   "line_defense",
 ]);
 
@@ -118,35 +117,6 @@ export const STRATEGIES: StrategyDefinition[] = [
     usesAi: true,
   },
   {
-    id: "lineband_defense",
-    label: "라인밴드 방어",
-    shortLabel: "라인밴드 방어",
-    description:
-      "눌림목(60일 추세 살아 있고 Bollinger 하단·RSI 낮음)에서, AI 라인이 상승 전환하고 AI 밴드가 위험-상태가 아닐 때만 선별 진입하는 가장 보수적인 방어 전략입니다. 진입 빈도가 매우 낮은(참여율 ~6%) 대신 낙폭 방어가 가장 강합니다. 수익 개선용이 아닙니다.",
-    ruleRows: [
-      ["전략 단위", "각 티커별 100% 보유 또는 100% 현금"],
-      ["사용 AI", "1D 라인 + 1D 밴드"],
-      ["진입", "60일 추세 +2% 이상 & Bollinger 위치 ≤ 0.30 & RSI 50 미만"],
-      ["AI 라인 확인", "AI 라인이 상승 중(5일 모멘텀 > 0)"],
-      ["밴드 위험-상태 veto", "하방 밴드 p10 이하 또는 밴드 폭 p90 이상이면 진입 차단·청산"],
-      ["청산", "추세·변동성 붕괴 또는 밴드 위험-상태"],
-      ["확인일", "진입 2일 확인, 청산 3일 확인"],
-      ["성격", "선별적·최강 방어 · 진입 드묾 (수익 개선 아님)"],
-    ],
-    visibleFactors: ["conservative", "lowerBand", "bandWidth", "bandExpansion", "ma60Trend", "ma20Trend", "rsi", "atr"],
-    validationRows: [
-      ["AI 평가창", "~471티커, 2025-06~2026-06"],
-      ["전략 수익률", "1.6% (단순 보유 28.7%)"],
-      ["MDD 개선폭(보유 대비)", "+23.1%p"],
-      ["손실 회피율", "93.8%"],
-      ["시장 참여율", "6% (대부분 현금)"],
-      ["held-out OOS 검증", "ΔMaxDD +7.8%p, Bonferroni 통과 (n=98)"],
-    ],
-    scopeNote:
-      "AI는 수익엔 기여하지 못합니다(공격형 OOS null). 위험·약세 국면을 피해 매우 선별적으로만 보유해 낙폭·대형손실을 줄이는 보수적 방어입니다(커버리지 98/271로 선별적). CP252 통제 발굴(티커+시간 OOS 두 축·엄격 Bonferroni)로 검증했습니다.",
-    usesAi: true,
-  },
-  {
     id: "line_defense",
     label: "라인 방어",
     shortLabel: "라인 방어",
@@ -180,19 +150,14 @@ export function getStrategyDefinition(strategyId: StrategyId) {
   return STRATEGIES.find((strategy) => strategy.id === strategyId) ?? STRATEGIES[0];
 }
 
-const LINE_STRATEGIES = new Set<StrategyId>([
-  "lineband_risk_guard",
-  "lineband_defense",
-  "line_defense",
-]);
-const BAND_STRATEGIES = new Set<StrategyId>(["lineband_risk_guard", "lineband_defense"]);
+const LINE_STRATEGIES = new Set<StrategyId>(["lineband_risk_guard", "line_defense"]);
 
 export function strategyNeedsLine(strategyId: StrategyId) {
-  return LINE_STRATEGIES.has(strategyId); // CP253 — 발굴 방어 전략 3개 모두 AI 라인 사용.
+  return LINE_STRATEGIES.has(strategyId); // CP253 — 발굴 방어 전략 2개 모두 AI 라인 사용.
 }
 
 export function strategyNeedsBand(strategyId: StrategyId) {
-  return BAND_STRATEGIES.has(strategyId); // CP253 — A(리스크 가드)·B(라인밴드 방어)만 밴드 사용.
+  return strategyId === "lineband_risk_guard"; // CP253 — 리스크 가드만 밴드 사용.
 }
 
 export function isBackendStrategy(strategyId: StrategyId) {

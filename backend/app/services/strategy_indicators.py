@@ -90,7 +90,6 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
     # CP253 — 발굴 전략(A/B/C)용 파생 피처. strategy_scan 로더가 frame 에 채운다(누수 없는
     # 당일까지 rolling/shift). v2 와 동일 컬럼·로직 → 동일 프레임 byte-identical 재현.
     line = _safe_col(frame, "line_score")
-    line_mom = _safe_col(frame, "line_mom", 0.0)
     roc20 = _safe_col(frame, "roc_20", 0.0)
     macd_accel = _safe_col(frame, "macd_accel", 0.0)
     ma5 = _safe_col(frame, "ma_5_ratio", 0.0)
@@ -114,11 +113,6 @@ def _raw_target(frame: pd.DataFrame, rule: StrategyRule) -> tuple[pd.Series, pd.
     if rule.id == "lineband_risk_guard":  # A: momentum + line.gate(p50) + band.both
         entry = momentum_entry & (line >= LINE_GATE_Q50) & ~band_risk
         exit_signal = momentum_exit | band_risk
-        return entry, exit_signal, exit_signal
-
-    if rule.id == "lineband_defense":  # B: pullback + line.momentum + band.both
-        entry = (ma60 >= 0.02) & (bb <= 0.30) & (rsi < 50.0) & (line_mom > 0.0) & ~band_risk
-        exit_signal = common_exit | band_risk
         return entry, exit_signal, exit_signal
 
     if rule.id == "line_defense":  # C: momentum + line.gate(p60), 밴드 미사용
