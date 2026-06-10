@@ -23,8 +23,8 @@ docs/refactoring_master_plan.md
 !docs/cp216_2_significance/*.csv
 !docs/cp216_2_significance/*.json
 # CP221~237(리팩토링)·CP238~242(보안) 트랙은 git 미추적 — origin 에는 운영 모델/전략 CP 만 둔다.
-# CP252~253 백테스트 발굴·부착 트랙 (지시서·보고서). cp248~251(v1)은 CP253 §2.5 에서 제거됨.
-!docs/cp25[2-9]*.md
+# CP252~253 백테스트 발굴·부착 트랙(지시서·보고서)만 origin. cp254+ 신규 CP 는 로컬 유지(내부 문서, 번호만 이어감).
+!docs/cp25[23]*.md
 # CP252 발굴 raw rows(대용량·재현가능 중간물)는 제외. 고정입력(ticker_split/v2_cuts/v2_candidates)
 # + 요약(*.agg.parquet/*.json)만 커밋.
 backend/data/ablation/*.rows.parquet
