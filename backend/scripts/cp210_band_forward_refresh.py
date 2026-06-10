@@ -94,7 +94,10 @@ def clean_json(value: Any) -> Any:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(clean_json(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(clean_json(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -168,7 +171,10 @@ def load_cp153_spec() -> RefreshSpec:
 def load_cp178_specs() -> list[RefreshSpec]:
     summary = pd.read_csv(CP178_SUMMARY)
     mask = (
-        (summary.get("candidate_id", pd.Series(dtype=object)).astype(str) == "tide_s104_q10q90_param")
+        (
+            summary.get("candidate_id", pd.Series(dtype=object)).astype(str)
+            == "tide_s104_q10q90_param"
+        )
         & (summary.get("model", pd.Series(dtype=object)).astype(str) == "tide")
         & summary.get("checkpoint_path", pd.Series(dtype=object)).notna()
     )
@@ -188,7 +194,10 @@ def load_cp178_specs() -> list[RefreshSpec]:
                 checkpoint_path=checkpoint_path,
                 model_id=str(row.get("candidate_id") or "tide_s104_q10q90_param"),
                 source_cp="CP178-WFLOCK",
-                calibration=calibration_payload(str(row.get("calibration_method") or "raw"), parse_params(row.get("calibration_params"))),
+                calibration=calibration_payload(
+                    str(row.get("calibration_method") or "raw"),
+                    parse_params(row.get("calibration_params")),
+                ),
                 ticker_registry_path=config.get("ticker_registry_path"),
                 use_future_covariate=bool(config.get("use_future_covariate", False)),
                 future_cov_dim=int(config.get("future_cov_dim") or 0),
@@ -226,7 +235,11 @@ def weekly_close_frame(prices: pd.DataFrame) -> pd.DataFrame:
         )
         weekly["ticker"] = ticker
         rows.append(weekly[["ticker", "date", "close"]])
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["ticker", "date", "close"])
+    return (
+        pd.concat(rows, ignore_index=True)
+        if rows
+        else pd.DataFrame(columns=["ticker", "date", "close"])
+    )
 
 
 def frame_summary(frame: pd.DataFrame, date_column: str) -> dict[str, Any]:
@@ -245,7 +258,9 @@ def cutoff_date(latest_date: pd.Timestamp, days: int) -> pd.Timestamp:
     return latest_date.normalize() - pd.Timedelta(days=days)
 
 
-def future_dates(dates: list[pd.Timestamp], index: int, horizon: int, timeframe: str) -> list[pd.Timestamp]:
+def future_dates(
+    dates: list[pd.Timestamp], index: int, horizon: int, timeframe: str
+) -> list[pd.Timestamp]:
     resolved: list[pd.Timestamp] = []
     asof = dates[index]
     if timeframe == "1D":
@@ -270,7 +285,9 @@ def build_samples(
 ) -> tuple[list[dict[str, Any]], list[np.ndarray], list[np.ndarray], list[int]]:
     registry = load_registry(spec.ticker_registry_path)
     allowed_tickers = set(registry.keys()) if registry else set(indicators["ticker"].unique())
-    missing_features = [column for column in spec.feature_columns if column not in indicators.columns]
+    missing_features = [
+        column for column in spec.feature_columns if column not in indicators.columns
+    ]
     if missing_features:
         raise ValueError(f"{spec.slot} feature column 누락: {missing_features}")
 
@@ -286,7 +303,11 @@ def build_samples(
     feature_rows: list[np.ndarray] = []
     future_rows: list[np.ndarray] = []
     ticker_ids: list[int] = []
-    for ticker, group in indicators[indicators["ticker"].isin(allowed_tickers)].sort_values(["ticker", "date"]).groupby("ticker", sort=True):
+    for ticker, group in (
+        indicators[indicators["ticker"].isin(allowed_tickers)]
+        .sort_values(["ticker", "date"])
+        .groupby("ticker", sort=True)
+    ):
         group = group.sort_values("date").reset_index(drop=True)
         values = group[spec.feature_columns].astype("float32").to_numpy()
         finite_mask = np.isfinite(values).all(axis=1)
@@ -310,7 +331,11 @@ def build_samples(
                 else:
                     actual_returns.append((future_close / anchor_close) - 1.0)
             feature_rows.append(values[window_start : index + 1])
-            future_calendar = build_calendar_feature_frame(fdates)[CALENDAR_FEATURE_COLUMNS].astype("float32").to_numpy()
+            future_calendar = (
+                build_calendar_feature_frame(fdates)[CALENDAR_FEATURE_COLUMNS]
+                .astype("float32")
+                .to_numpy()
+            )
             future_rows.append(future_calendar)
             ticker_ids.append(int(registry.get(ticker, 0)))
             metadata.append(
@@ -343,8 +368,12 @@ def run_spec_inference(
             features = torch.tensor(np.stack(feature_rows[start:end]), dtype=torch.float32)
             ticker_tensor = torch.tensor(ticker_ids[start:end], dtype=torch.long)
             if spec.use_future_covariate and spec.future_cov_dim > 0:
-                future_covariates = torch.tensor(np.stack(future_rows[start:end]), dtype=torch.float32)
-                output = model(features, ticker_id=ticker_tensor, future_covariate=future_covariates)
+                future_covariates = torch.tensor(
+                    np.stack(future_rows[start:end]), dtype=torch.float32
+                )
+                output = model(
+                    features, ticker_id=ticker_tensor, future_covariate=future_covariates
+                )
             else:
                 output = model(features, ticker_id=ticker_tensor)
             lower_returns, upper_returns = apply_product_band_calibration(
@@ -370,7 +399,9 @@ def run_spec_inference(
                             "horizon_step": int(horizon_index + 1),
                             "band_lower": min(lower_value, upper_value),
                             "band_upper": max(lower_value, upper_value),
-                            "actual_return": actual_return if math.isfinite(actual_return) else np.nan,
+                            "actual_return": actual_return
+                            if math.isfinite(actual_return)
+                            else np.nan,
                             "actual_return_available": bool(math.isfinite(actual_return)),
                             "model_id": spec.model_id,
                             "source_cp": spec.source_cp,
@@ -422,11 +453,20 @@ def validate_band_frame(frame: pd.DataFrame, *, timeframe: str) -> dict[str, Any
     }
 
 
-def rebuild_history_with_new_band(band_1d: pd.DataFrame, *, apply: bool, run_stamp: str) -> dict[str, Any]:
+def rebuild_history_with_new_band(
+    band_1d: pd.DataFrame, *, apply: bool, run_stamp: str
+) -> dict[str, Any]:
     now = utc_now()
     if HISTORY_OUT.exists():
         old_history = pd.read_parquet(HISTORY_OUT)
         line_rows = old_history[old_history["role"].astype(str).str.lower() == "line"].copy()
+        # CP246 재인코딩으로 history 의 asof_date(datetime64)·display_date(category) 가 아래
+        # band_rows 의 strftime 문자열과 dtype 불일치 → concat 시 str/Timestamp 혼합으로
+        # asof_date.max() 가 죽는다(CP246 잠복 회귀). band_rows 와 동일 "%Y-%m-%d" 문자열로 정규화.
+        line_rows["asof_date"] = pd.to_datetime(line_rows["asof_date"]).dt.strftime("%Y-%m-%d")
+        line_rows["display_date"] = pd.to_datetime(line_rows["display_date"]).dt.strftime(
+            "%Y-%m-%d"
+        )
     else:
         line = pd.read_parquet(LINE_1D)
         line_rows = pd.DataFrame(
@@ -464,7 +504,9 @@ def rebuild_history_with_new_band(band_1d: pd.DataFrame, *, apply: bool, run_sta
         }
     )
     unified = pd.concat([line_rows, band_rows], ignore_index=True)
-    unified = unified.sort_values(["ticker", "role", "asof_date", "display_horizon"]).reset_index(drop=True)
+    unified = unified.sort_values(["ticker", "role", "asof_date", "display_horizon"]).reset_index(
+        drop=True
+    )
     if apply:
         backup_file(HISTORY_OUT, run_stamp)
         atomic_write_parquet(unified, HISTORY_OUT, apply=True)
@@ -480,7 +522,9 @@ def rebuild_history_with_new_band(band_1d: pd.DataFrame, *, apply: bool, run_sta
             "line_policy": "existing_line_rows_preserved",
             "band_policy": "cp153_1d_band_rows_replaced",
         }
-        HISTORY_MANIFEST_OUT.write_text(json.dumps(clean_json(manifest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        HISTORY_MANIFEST_OUT.write_text(
+            json.dumps(clean_json(manifest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
     return {
         "rows": int(len(unified)),
         "line_rows": int(len(line_rows)),
@@ -527,9 +571,15 @@ def refresh(args: argparse.Namespace) -> dict[str, Any]:
     frames = read_input_frames()
     weekly_closes = weekly_close_frame(frames["prices"])
     before = {
-        "band_1d": frame_summary(pd.read_parquet(BAND_1D_OUT), "asof_date") if BAND_1D_OUT.exists() else {},
-        "band_1w": frame_summary(pd.read_parquet(BAND_1W_OUT), "asof_date") if BAND_1W_OUT.exists() else {},
-        "history_1d": frame_summary(pd.read_parquet(HISTORY_OUT), "asof_date") if HISTORY_OUT.exists() else {},
+        "band_1d": frame_summary(pd.read_parquet(BAND_1D_OUT), "asof_date")
+        if BAND_1D_OUT.exists()
+        else {},
+        "band_1w": frame_summary(pd.read_parquet(BAND_1W_OUT), "asof_date")
+        if BAND_1W_OUT.exists()
+        else {},
+        "history_1d": frame_summary(pd.read_parquet(HISTORY_OUT), "asof_date")
+        if HISTORY_OUT.exists()
+        else {},
     }
     inputs = {
         "price": frame_summary(frames["prices"], "date"),
@@ -556,7 +606,9 @@ def refresh(args: argparse.Namespace) -> dict[str, Any]:
         cp153,
         history_days=args.history_days_1d,
     )
-    band_1d = run_spec_inference(cp153, metadata_1d, features_1d, future_1d, ids_1d, batch_size=args.batch_size)
+    band_1d = run_spec_inference(
+        cp153, metadata_1d, features_1d, future_1d, ids_1d, batch_size=args.batch_size
+    )
     band_1d = band_1d.sort_values(["ticker", "asof_date", "horizon_step"]).reset_index(drop=True)
     atomic_write_parquet(band_1d, BAND_1D_OUT, apply=args.apply)
 
@@ -568,7 +620,9 @@ def refresh(args: argparse.Namespace) -> dict[str, Any]:
     )
     ensemble_parts = []
     for spec in cp178_specs:
-        part = run_spec_inference(spec, metadata_1w, features_1w, future_1w, ids_1w, batch_size=args.batch_size)
+        part = run_spec_inference(
+            spec, metadata_1w, features_1w, future_1w, ids_1w, batch_size=args.batch_size
+        )
         ensemble_parts.append(part)
     cp178_all = pd.concat(ensemble_parts, ignore_index=True)
     aggregate_columns = {
@@ -584,8 +638,21 @@ def refresh(args: argparse.Namespace) -> dict[str, Any]:
         .sort_values(["ticker", "asof_date", "horizon_step"])
         .reset_index(drop=True)
     )
-    band_1w["actual_return_available"] = band_1w["actual_return"].map(lambda value: bool(math.isfinite(float(value))) if pd.notna(value) else False)
-    band_1w = band_1w[["ticker", "asof_date", "horizon_step", "band_lower", "band_upper", "actual_return", "model_id", "source_cp"]]
+    band_1w["actual_return_available"] = band_1w["actual_return"].map(
+        lambda value: bool(math.isfinite(float(value))) if pd.notna(value) else False
+    )
+    band_1w = band_1w[
+        [
+            "ticker",
+            "asof_date",
+            "horizon_step",
+            "band_lower",
+            "band_upper",
+            "actual_return",
+            "model_id",
+            "source_cp",
+        ]
+    ]
     atomic_write_parquet(band_1w, BAND_1W_OUT, apply=args.apply)
 
     history = rebuild_history_with_new_band(band_1d, apply=args.apply, run_stamp=run_stamp)
@@ -594,8 +661,14 @@ def refresh(args: argparse.Namespace) -> dict[str, Any]:
         "band_1w": validate_band_frame(band_1w, timeframe="1W"),
     }
     aapl = {
-        "band_1d": band_1d[band_1d["ticker"] == "AAPL"].sort_values(["asof_date", "horizon_step"]).tail(cp153.horizon).to_dict(orient="records"),
-        "band_1w": band_1w[band_1w["ticker"] == "AAPL"].sort_values(["asof_date", "horizon_step"]).tail(cp178_specs[0].horizon).to_dict(orient="records"),
+        "band_1d": band_1d[band_1d["ticker"] == "AAPL"]
+        .sort_values(["asof_date", "horizon_step"])
+        .tail(cp153.horizon)
+        .to_dict(orient="records"),
+        "band_1w": band_1w[band_1w["ticker"] == "AAPL"]
+        .sort_values(["asof_date", "horizon_step"])
+        .tail(cp178_specs[0].horizon)
+        .to_dict(orient="records"),
     }
     final_status = "PASS_BAND_FORWARD_REFRESH_DRY_RUN"
     if args.apply:
@@ -634,7 +707,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CP210 1D/1W band serving parquet forward refresh")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true", help="serving parquet을 실제 갱신합니다.")
-    mode.add_argument("--dry-run", action="store_true", help="산출물 계산만 검증하고 parquet은 쓰지 않습니다.")
+    mode.add_argument(
+        "--dry-run", action="store_true", help="산출물 계산만 검증하고 parquet은 쓰지 않습니다."
+    )
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--history-days-1d", type=int, default=365)
     parser.add_argument("--history-days-1w", type=int, default=730)
@@ -650,7 +725,12 @@ def main() -> None:
     metrics = refresh(args)
     write_json(Path(args.metrics_path), metrics)
     write_report(Path(args.report_path), metrics)
-    print(json.dumps({"status": metrics["final_status"], "elapsed_seconds": metrics["elapsed_seconds"]}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"status": metrics["final_status"], "elapsed_seconds": metrics["elapsed_seconds"]},
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":
