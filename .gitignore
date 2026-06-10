@@ -4,8 +4,11 @@
 
 # CP 원본 실험 파일은 정리 전까지 GitHub에 올리지 않는다.
 # 공개할 필요가 있는 판단/제품/확정 모델 문서는 별도 선별 후 docs 하위에 정리한다.
-docs/cp*
-docs/cp*/
+docs/*
+!docs/img/
+!docs/lens_overview_report.html
+!docs/v1_operating_models_reproducibility.md
+!docs/lens_v2_master_plan.md
 
 # 리팩토링 작업 문서(로컬 실행용, git 미포함). 런북/지시서는 docs/cp* 로 이미 제외됨.
 docs/refactoring_master_plan.md
