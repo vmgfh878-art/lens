@@ -307,13 +307,25 @@ def _filter_stock_rows(rows: list[dict], *, search: str | None, limit: int) -> l
     return normalized[:limit]
 
 
-def _fetch_stock_info_rows(client, *, search: str | None, limit: int) -> list[dict]:
+def _query_stock_table(client, table: str, *, search: str | None, limit: int) -> list[dict]:
     # CP254 — prefix 검색을 서버사이드 ilike 로 (limit*50 클라이언트 스캔 제거).
     # 로컬 모드(fetch_stocks_local)의 startswith 와 동일 의미.
-    query = client.table("stock_info").select(STOCK_COLUMNS).order("ticker")
+    query = client.table(table).select(STOCK_COLUMNS).order("ticker")
     if search:
         query = query.ilike("ticker", f"{search.strip().upper()}%")
-    rows = query.limit(limit).execute().data or []
+    return query.limit(limit).execute().data or []
+
+
+def _fetch_stock_info_rows(client, *, search: str | None, limit: int) -> list[dict]:
+    # CP254 — 1순위 serving_stocks (큐레이션 100, /stocks 목록 정본). 테이블이
+    # 없는 legacy DB 에서만 stock_info 로 폴백 (stock_info 는 FK placeholder 포함
+    # 유니버스라 sector NULL 행이 섞일 수 있음).
+    try:
+        rows = _query_stock_table(client, "serving_stocks", search=search, limit=limit)
+        return _filter_stock_rows(rows, search=search, limit=limit)
+    except Exception as exc:  # noqa: BLE001 — 테이블 부재(legacy)면 stock_info 로
+        logger.debug("serving_stocks 조회 실패, stock_info 폴백", exc_info=exc)
+    rows = _query_stock_table(client, "stock_info", search=search, limit=limit)
     return _filter_stock_rows(rows, search=search, limit=limit)
 
 
@@ -483,12 +495,17 @@ def fetch_indicator_frame_for_scan(*, source: str = "eodhd") -> pd.DataFrame:
 
 
 def fetch_sector_frame() -> pd.DataFrame:
-    """전략 scan sector map 입력 — stock_info (ticker, sector) 만."""
+    """전략 scan sector map 입력 — serving_stocks (ticker, sector) 만.
+
+    stock_info 가 아니라 serving_stocks 인 이유: stock_info 는 FK placeholder
+    (sector NULL ~400행) 포함 유니버스라 sector map 이 'Unknown' 으로 오염된다.
+    로컬 모드(market_stock_info.parquet 100행)와 동일 결과를 위해 큐레이션 테이블 사용.
+    """
     try:
         client = get_supabase()
 
         def build_query():
-            return client.table("stock_info").select("ticker, sector").order("ticker")
+            return client.table("serving_stocks").select("ticker, sector").order("ticker")
 
         rows = paged_select(build_query)
     except ConfigError:

@@ -159,9 +159,11 @@ def fetch_band_1w(ticker: str, *, days: int, horizon: int | None = None) -> pd.D
 
 
 def list_tickers(*, search: str | None = None, limit: int = 500) -> list[str]:
-    """가용 ticker 목록 — REST 모드는 stock_info 기준 (서빙 유니버스 동일, 100~500행).
+    """가용 ticker 목록 — REST 모드는 stock_info(가격 유니버스 ~500) 기준.
 
-    parquet 모드의 "line_1d 캐시 기준"과의 동치성은 리허설 parity 로 검증한다.
+    parquet 모드는 line_1d 캐시 ticker(~500) 기준이라 양쪽이 근사 동치 (정확 동치는
+    line 테이블 전 스캔이 필요해 thin 위반 — 프론트 미사용 엔드포인트라 허용,
+    리허설 parity 에서 차이를 기록한다).
     """
     try:
         client = get_supabase()

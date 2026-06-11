@@ -31,6 +31,12 @@ TABLE_SPECS = [
     ("backtest_results", "run_id"),
     ("predictions", "ticker"),
     ("job_runs", "run_id"),
+    # CP254 — 서빙 컷오버 테이블 (import_v1_serving_to_supabase.py 적재 대상)
+    ("serving_stocks", "ticker"),
+    ("predictions_line_1d", "ticker"),
+    ("predictions_band_1d", "ticker"),
+    ("predictions_band_1w", "ticker"),
+    ("product_prediction_history_1d", "ticker"),
 ]
 
 
@@ -68,7 +74,9 @@ def test_postgres_direct() -> None:
     try:
         import psycopg2
     except Exception:
-        print("[Skip] psycopg2가 설치되지 않았습니다. `pip install -r db/requirements-crawler.txt` 후 다시 시도하세요.")
+        print(
+            "[Skip] psycopg2가 설치되지 않았습니다. `pip install -r db/requirements-crawler.txt` 후 다시 시도하세요."
+        )
         return
 
     conn = psycopg2.connect(

@@ -212,6 +212,12 @@ def _fake_tables() -> dict[str, list[dict]]:
     stock_info = [
         {"ticker": "AAPL", "sector": "Technology", "industry": "CE", "market_cap": 1.0},
         {"ticker": "MSFT", "sector": "Technology", "industry": "SW", "market_cap": 2.0},
+        # FK placeholder (서빙 목록에 나오면 안 됨 — serving_stocks 분리 검증용)
+        {"ticker": "ZZZZ", "sector": None, "industry": "Unknown", "market_cap": None},
+    ]
+    serving_stocks = [
+        {"ticker": "AAPL", "sector": "Technology", "industry": "CE", "market_cap": 1.0},
+        {"ticker": "MSFT", "sector": "Technology", "industry": "SW", "market_cap": 2.0},
     ]
     price_data = [
         {
@@ -252,6 +258,7 @@ def _fake_tables() -> dict[str, list[dict]]:
         "predictions_band_1w": band_1w,
         "product_prediction_history_1d": history,
         "stock_info": stock_info,
+        "serving_stocks": serving_stocks,
         "price_data": price_data,
         "indicators": indicators,
     }
@@ -420,7 +427,8 @@ class PredictionRepoTestCase(unittest.TestCase):
         from app.repositories import prediction_repo
 
         self.assertEqual(prediction_repo.list_tickers(search="AA"), ["AAPL"])
-        self.assertEqual(prediction_repo.list_tickers(), ["AAPL", "MSFT"])
+        # tickers 는 가격 유니버스(stock_info, placeholder 포함) 기준 — 큐레이션 아님.
+        self.assertEqual(prediction_repo.list_tickers(), ["AAPL", "MSFT", "ZZZZ"])
 
     def test_scan_frames_thin_columns(self):
         from app.repositories import prediction_repo
@@ -536,6 +544,16 @@ class RestModeEndpointTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         rows = resp.json()["data"]
         self.assertEqual([r["ticker"] for r in rows], ["MSFT"])
+
+    def test_stocks_endpoint_rest_excludes_fk_placeholder(self):
+        # /stocks 목록은 serving_stocks(큐레이션) 기준 — stock_info 의 FK
+        # placeholder(ZZZZ, sector NULL)가 목록에 새면 안 된다.
+        p1, p2, p3 = self._rest()
+        with p1, p2, p3:
+            resp = self.client.get("/api/v1/stocks", params={"limit": 50})
+        tickers = [r["ticker"] for r in resp.json()["data"]]
+        self.assertEqual(tickers, ["AAPL", "MSFT"])
+        self.assertNotIn("ZZZZ", tickers)
 
     def test_prices_endpoint_rest(self):
         p1, p2, p3 = self._rest()
@@ -669,6 +687,26 @@ class StrategyScanRestTestCase(unittest.TestCase):
 
 
 class ImportBuildersTestCase(unittest.TestCase):
+    def test_serving_stocks_frame_preserves_nulls(self):
+        # /stocks parity: serving_stocks 는 parquet 의 null 을 그대로 — fillna 금지.
+        from backend.scripts import import_v1_serving_to_supabase as imp
+
+        raw = pd.DataFrame(
+            {
+                "ticker": ["aapl", "msft"],
+                "sector": ["Technology", None],
+                "industry": [None, "SW"],
+                "market_cap": [1.0, np.nan],
+            }
+        )
+        frame, columns, on_conflict = imp.build_serving_stocks_frame(raw)
+        records = imp._records(frame, columns)
+        self.assertEqual(on_conflict, "ticker")
+        self.assertEqual(records[0]["ticker"], "AAPL")
+        self.assertIsNone(records[0]["industry"])  # 'Unknown' 으로 채우면 안 됨
+        self.assertIsNone(records[1]["sector"])
+        self.assertIsNone(records[1]["market_cap"])
+
     def test_price_frame_whitelist_and_source(self):
         from backend.scripts import import_v1_serving_to_supabase as imp
 

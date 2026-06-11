@@ -148,6 +148,24 @@ def build_stock_info_frame(raw: pd.DataFrame) -> tuple[pd.DataFrame, list[str], 
     return frame, ["ticker", "sector", "industry", "market_cap"], "ticker"
 
 
+def build_serving_stocks_frame(raw: pd.DataFrame) -> tuple[pd.DataFrame, list[str], str]:
+    """serving_stocks 는 /stocks 응답 정본 — parquet 값을 그대로 보존 (fillna 금지).
+
+    stock_info 의 industry 'Unknown' 채움은 bootstrap(소스 적재) 관례라 유지하지만,
+    여기에 적용하면 로컬 모드(parquet null 그대로)와 /stocks 응답 parity 가 깨진다.
+    """
+    frame = raw.copy()
+    frame["ticker"] = _plain_str(frame["ticker"]).str.upper()
+    for column in ("sector", "industry"):
+        if column in frame.columns:
+            frame[column] = _plain_str(frame[column])
+        else:
+            frame[column] = None
+    if "market_cap" not in frame.columns:
+        frame["market_cap"] = None
+    return frame, ["ticker", "sector", "industry", "market_cap"], "ticker"
+
+
 def build_price_frame(raw: pd.DataFrame) -> tuple[pd.DataFrame, list[str], str]:
     frame = raw.copy()
     frame["ticker"] = _plain_str(frame["ticker"]).str.upper()
@@ -313,6 +331,9 @@ def build_product_history_frame(raw: pd.DataFrame) -> tuple[pd.DataFrame, list[s
 # 적재 순서 = FK 의존 순서 (price/indicators 가 stock_info.ticker 참조).
 TABLE_STEPS: list[tuple[str, str, str | None]] = [
     # (테이블, 소스 parquet, since 필터 기준 컬럼)
+    # serving_stocks = /stocks 목록·sector map 전용 큐레이션 100종목.
+    # stock_info 는 FK 유니버스(placeholder 포함)라 목록용으로 쓰면 오염된다.
+    ("serving_stocks", "market_stock_info.parquet", None),
     ("stock_info", "market_stock_info.parquet", None),
     ("price_data", "market_prices_1d.parquet", "date"),
     ("indicators", "market_indicators_1d.parquet", "date"),
@@ -323,6 +344,7 @@ TABLE_STEPS: list[tuple[str, str, str | None]] = [
 ]
 
 BUILDERS = {
+    "serving_stocks": build_serving_stocks_frame,
     "stock_info": build_stock_info_frame,
     "price_data": build_price_frame,
     "predictions_line_1d": build_line_1d_frame,

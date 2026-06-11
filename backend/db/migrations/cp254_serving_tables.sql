@@ -34,5 +34,17 @@ CREATE INDEX IF NOT EXISTS idx_product_history_lookup
 -- (없으면 market_repo 가 price_data 에서 2차 쿼리로 merge — egress 2배).
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS volume BIGINT;
 
+-- 서빙 /stocks 목록 전용 큐레이션 테이블 (market_stock_info.parquet = 100종목).
+-- stock_info 는 FK 보호용 placeholder(~500 ticker, sector NULL)까지 품는 소스
+-- 유니버스라 /stocks 목록·sector map 으로 쓰면 placeholder 가 섞인다 (parity 깨짐).
+CREATE TABLE IF NOT EXISTS public.serving_stocks (
+    ticker      VARCHAR(20) PRIMARY KEY,
+    sector      VARCHAR(100),
+    industry    VARCHAR(100),
+    market_cap  DOUBLE PRECISION,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- RLS disable (학교 데모 — anon key 로 read 허용. v1_predictions_tables.sql 과 동일 정책)
 ALTER TABLE public.product_prediction_history_1d DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.serving_stocks DISABLE ROW LEVEL SECURITY;
