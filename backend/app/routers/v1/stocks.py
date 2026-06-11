@@ -35,6 +35,27 @@ def _build_price_etag(payload: dict) -> str:
     return f'W/"{digest}"'
 
 
+def _build_indicator_etag(payload: dict, *, limit: int) -> str:
+    # CP254 P4 — indicators 도 ETag 304 (prices 와 동일 패턴). 최신 date + 행수 기준.
+    rows = payload.get("data") or []
+    latest_date = rows[-1].get("date") if rows else "empty"
+    raw = f"{payload['ticker']}|{payload['timeframe']}|{limit}|{latest_date}|{len(rows)}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f'W/"{digest}"'
+
+
+def _build_product_history_etag(payload: dict, *, params: dict) -> str:
+    # CP254 P4 — product-history ETag. 최신 asof + role별 행수 + 쿼리 파라미터 기준.
+    param_text = "|".join(f"{key}={params[key]}" for key in sorted(params))
+    raw = (
+        f"{payload['ticker']}|{payload['timeframe']}|{payload.get('latest_asof_date')}"
+        f"|{len(payload.get('line_history') or [])}|{len(payload.get('band_history') or [])}"
+        f"|{param_text}"
+    )
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f'W/"{digest}"'
+
+
 @router.get(
     "",
     response_model=ApiResponse[list[StockSummary]],
@@ -91,7 +112,11 @@ def get_indicators(
     limit: int = Query(default=300, ge=1, le=1000, description="반환할 최대 포인트 수"),
 ):
     data = get_indicator_response_data(ticker, timeframe=timeframe, limit=limit)
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    etag = _build_indicator_etag(data, limit=limit)
+    headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
     return success_response(request, data)
 
 
@@ -112,7 +137,12 @@ def get_product_prediction_history(
     limit: int | None = Query(
         default=None, ge=1, le=1500, description="role별 최근 history row 수"
     ),
-    lookback_days: int | None = Query(default=None, ge=1, le=1500, description="최근 N일 history"),
+    # CP254 P4 — 기본 lookback 370일 강제 (프론트 상수 PRODUCT_HISTORY_LOOKBACK_DAYS
+    # 와 정합). 미지정 호출이 종목 전체 rolling history(최대 수천 행)를 dump 하던
+    # egress 1순위 구멍을 막는다. 전체가 필요하면 lookback_days=1500 명시.
+    lookback_days: int | None = Query(
+        default=370, ge=1, le=1500, description="최근 N일 history (기본 370)"
+    ),
 ):
     data = get_product_prediction_history_data(
         ticker,
@@ -122,6 +152,18 @@ def get_product_prediction_history(
         limit=limit,
         lookback_days=lookback_days,
     )
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    etag = _build_product_history_etag(
+        data,
+        params={
+            "roles": roles,
+            "run_id": run_id,
+            "limit": limit,
+            "lookback_days": lookback_days,
+        },
+    )
+    headers = {"Cache-Control": "public, max-age=3600", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
     total = len(data["line_history"]) + len(data["band_history"])
     return success_response(request, data, total=total)
