@@ -29,3 +29,8 @@ paths = [
     '''frontend/src/lib/training/.*\.(ts|tsx)$''',
     '''ai/.*\.py$''',
 ]
+
+# CP239 ci-gate 검증 테스트 잔재(test_cigate.txt, 가짜 PAT ghp_...)는 커밋
+# 16f6652 한 곳에만 존재(작업 파일은 308c7ec 에서 삭제). 히스토리 재작성 없이
+# 이 테스트 커밋 하나만 좁게 흡수 — 진짜 secret 탐지엔 영향 0.
+commits = ["16f6652699957e92ad69dab55bcb488760a9d38f"]
