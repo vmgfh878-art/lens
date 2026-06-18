@@ -270,10 +270,13 @@ def _fake_tables() -> dict[str, list[dict]]:
 
 
 class DataBackendToggleTestCase(unittest.TestCase):
+    """순수 env 우선순위 진리표 — 자동 폴백은 꺼서(AUTOFALLBACK=0) 도달성과 분리."""
+
     def _call(self, env: dict[str, str]) -> bool:
         from app.services import data_backend
 
-        with patch.dict(os.environ, env, clear=True):
+        merged = {"LENS_SUPABASE_AUTOFALLBACK": "0", **env}
+        with patch.dict(os.environ, merged, clear=True):
             return data_backend.use_supabase()
 
     def test_unconfigured_is_local(self):
@@ -316,6 +319,66 @@ class DataBackendToggleTestCase(unittest.TestCase):
                 }
             )
         )
+
+
+class AutoFallbackTestCase(unittest.TestCase):
+    """CP255 — Supabase 도달성 자동 폴백 (복구되면 DB, 죽으면 parquet, 자유 전환)."""
+
+    def setUp(self):
+        from app.services import data_backend
+
+        data_backend.reset_reachable_cache()
+        self.addCleanup(data_backend.reset_reachable_cache)
+
+    def _use(self, *, reachable: bool, extra_env: dict | None = None):
+        from app.services import data_backend
+
+        env = {"SUPABASE_URL": "http://x", "SUPABASE_KEY": "k", **(extra_env or {})}
+        if reachable:
+            client = FakeSupabase({"stock_info": [{"ticker": "AAPL"}]})
+            gs = patch("app.services.data_backend.get_supabase", return_value=client)
+        else:
+            gs = patch(
+                "app.services.data_backend.get_supabase",
+                side_effect=OSError("getaddrinfo failed"),
+            )
+        with patch.dict(os.environ, env, clear=True), gs as mock_gs:
+            result = data_backend.use_supabase()
+        return result, mock_gs
+
+    def test_reachable_uses_supabase(self):
+        result, _ = self._use(reachable=True)
+        self.assertTrue(result)
+
+    def test_unreachable_falls_back_to_local(self):
+        # configured 지만 Supabase 死 → 자동 parquet (Render env 안 건드려도)
+        result, _ = self._use(reachable=False)
+        self.assertFalse(result)
+
+    def test_force_local_overrides_even_if_reachable(self):
+        result, mock_gs = self._use(reachable=True, extra_env={"LENS_FORCE_LOCAL": "1"})
+        self.assertFalse(result)
+        mock_gs.assert_not_called()  # 강제 로컬이면 ping 도 안 함
+
+    def test_autofallback_disabled_skips_ping(self):
+        # AUTOFALLBACK=0 이면 (구) 동작: configured 면 ping 없이 True
+        result, mock_gs = self._use(reachable=False, extra_env={"LENS_SUPABASE_AUTOFALLBACK": "0"})
+        self.assertTrue(result)
+        mock_gs.assert_not_called()
+
+    def test_reachability_is_cached(self):
+        from app.services import data_backend
+
+        client = FakeSupabase({"stock_info": [{"ticker": "AAPL"}]})
+        env = {"SUPABASE_URL": "http://x", "SUPABASE_KEY": "k"}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("app.services.data_backend.get_supabase", return_value=client) as mock_gs,
+        ):
+            data_backend.use_supabase()
+            data_backend.use_supabase()
+            data_backend.use_supabase()
+        self.assertEqual(mock_gs.call_count, 1)  # 3회 호출, ping 은 1회(캐시)
 
 
 # ---------------------------------------------------------------------------

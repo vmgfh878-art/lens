@@ -162,8 +162,10 @@ def debug_state(request: Request):
             "base_dir_exists": base_dir.exists(),
             "parquet_files": parquet_files,
             "supabase_is_configured": supabase_is_configured(),
-            # CP254 — 서빙 read 가 실제로 타는 백엔드 (컷오버/롤백 즉시 확인용).
+            # CP254/255 — 서빙 read 가 실제로 타는 백엔드 + 자동 폴백이 보는 도달성
+            # (전환 상태 즉시 확인용). reachable=None 이면 미구성(=항상 로컬).
             "data_backend": "supabase" if data_backend.use_supabase() else "local",
+            "supabase_reachable": data_backend.supabase_reachable_now(),
             "interesting_env": interesting_env,
             "memory": memory,
             "market_probes": market_probes,
