@@ -353,6 +353,12 @@ BUILDERS = {
     "product_prediction_history_1d": build_product_history_frame,
 }
 
+# CP255 Phase 4a — product_history(78만행, ~174MB)는 프론트 어느 화면도 호출하지 않는다
+# (fetchProductPredictionHistory caller 0). 기본 적재에서 제외해 무료 DB 를 470→258MB 로
+# 낮춘다. 필요 시 --include-product-history 로만 포함. 빌더/스키마는 보존(되살릴 때 대비).
+HISTORY_TABLE = "product_prediction_history_1d"
+DEFAULT_TABLES = [name for name, _, _ in TABLE_STEPS if name != HISTORY_TABLE]
+
 
 def ensure_stock_info_covers(client, frame: pd.DataFrame, *, dry_run: bool) -> None:
     """price/indicators FK 보호 — stock_info 에 없는 ticker 를 placeholder 로 보충.
@@ -404,8 +410,15 @@ def run_import(
     tickers: list[str] | None = None,
     since: str | None = None,
     dry_run: bool = False,
+    include_product_history: bool = False,
 ) -> dict[str, int]:
-    selected = [step for step in TABLE_STEPS if not tables or step[0] in tables]
+    if tables:
+        wanted = set(tables)
+    else:
+        wanted = set(DEFAULT_TABLES)
+        if include_product_history:
+            wanted.add(HISTORY_TABLE)
+    selected = [step for step in TABLE_STEPS if step[0] in wanted]
     if not selected:
         print(f"[Error] 알 수 없는 --tables 값. 가능: {[s[0] for s in TABLE_STEPS]}")
         sys.exit(1)
@@ -452,14 +465,27 @@ def run_import(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CP254 v1 serving → Supabase thin 적재")
-    parser.add_argument("--tables", nargs="*", help="일부 테이블만 적재 (기본 전체)")
+    parser = argparse.ArgumentParser(description="CP254/255 v1 serving → Supabase thin 적재")
+    parser.add_argument(
+        "--tables", nargs="*", help="일부 테이블만 적재 (기본 = product_history 제외 7테이블)"
+    )
     parser.add_argument("--tickers", nargs="*", help="샘플 적재 종목 (기본 전체)")
-    parser.add_argument("--since", help="YYYY-MM-DD — 이 날짜 이후만 적재 (thin retention)")
+    parser.add_argument("--since", help="YYYY-MM-DD — 이 날짜 이후만 적재 (증분/윈도우)")
+    parser.add_argument(
+        "--include-product-history",
+        action="store_true",
+        help="product_history(프론트 미사용, 기본 제외)도 적재",
+    )
     parser.add_argument("--dry-run", action="store_true", help="네트워크 없이 변환/행수만 출력")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run_import(tables=args.tables, tickers=args.tickers, since=args.since, dry_run=args.dry_run)
+    run_import(
+        tables=args.tables,
+        tickers=args.tickers,
+        since=args.since,
+        dry_run=args.dry_run,
+        include_product_history=args.include_product_history,
+    )

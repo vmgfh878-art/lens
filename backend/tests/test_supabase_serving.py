@@ -827,5 +827,55 @@ class ImportBuildersTestCase(unittest.TestCase):
         self.assertEqual(captured[0]["kwargs"]["on_conflict"], "ticker")
 
 
+class Phase4aTestCase(unittest.TestCase):
+    """CP255 Phase 4a — product_history 제외, retention 불변식, publish 윈도우."""
+
+    def test_default_tables_excludes_product_history(self):
+        from backend.scripts import import_v1_serving_to_supabase as imp
+
+        self.assertNotIn("product_prediction_history_1d", imp.DEFAULT_TABLES)
+        self.assertEqual(len(imp.DEFAULT_TABLES), 7)
+        # 화면이 쓰는 6개 + serving_stocks 는 들어 있어야
+        for table in ("price_data", "indicators", "predictions_band_1d", "serving_stocks"):
+            self.assertIn(table, imp.DEFAULT_TABLES)
+
+    def test_run_import_default_skips_history(self):
+        from backend.scripts import import_v1_serving_to_supabase as imp
+
+        # dry_run 은 네트워크 0. 기본 호출이 product_history 를 selected 에서 빼는지.
+        counts = imp.run_import(tickers=["AAPL"], dry_run=True)
+        self.assertNotIn("product_prediction_history_1d", counts)
+        self.assertIn("predictions_band_1d", counts)
+
+    def test_run_import_opt_in_history(self):
+        from backend.scripts import import_v1_serving_to_supabase as imp
+
+        counts = imp.run_import(tickers=["AAPL"], dry_run=True, include_product_history=True)
+        self.assertIn("product_prediction_history_1d", counts)
+
+    def test_retention_invariant_rejects_short_window(self):
+        from backend.scripts import supabase_retention as ret
+
+        # 윈도우(100d) < 화면 요청(730d) → 데모 빈 구간 위험 → 즉시 예외
+        with self.assertRaises(ValueError):
+            ret._validate_invariants([("predictions_band_1w", "asof_date", 100, 730)])
+
+    def test_retention_specs_satisfy_invariant(self):
+        from backend.scripts import supabase_retention as ret
+
+        ret._validate_invariants(ret.RETENTION_SPECS)  # 예외 없어야 통과
+        bw = next(s for s in ret.RETENTION_SPECS if s[0] == "predictions_band_1w")
+        self.assertGreaterEqual(bw[2], 730)  # band_1w 윈도우 ≥ 화면 730d 요청
+
+    def test_publish_full_window_covers_retention(self):
+        from backend.scripts import publish_serving_to_supabase as pub
+        from backend.scripts import supabase_retention as ret
+
+        max_window = max(s[2] for s in ret.RETENTION_SPECS)
+        # 전체 재동기화 윈도우는 최장 retention 보관분을 덮어야 (빈 구간 방지)
+        self.assertGreaterEqual(pub.FULL_WINDOW_DAYS, max_window)
+        self.assertLess(pub.INCREMENTAL_LOOKBACK_DAYS, pub.FULL_WINDOW_DAYS)
+
+
 if __name__ == "__main__":
     unittest.main()
