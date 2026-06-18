@@ -85,7 +85,8 @@ class FakeQuery:
         if op == "in":
             return actual in value
         if op == "ilike":
-            prefix = str(value).rstrip("%").upper()
+            # PostgREST 와일드카드 * (및 legacy %) 둘 다 prefix 로 처리
+            prefix = str(value).rstrip("%*").upper()
             return actual is not None and str(actual).upper().startswith(prefix)
         raise AssertionError(f"unsupported op {op}")
 

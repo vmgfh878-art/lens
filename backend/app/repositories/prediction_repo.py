@@ -169,7 +169,8 @@ def list_tickers(*, search: str | None = None, limit: int = 500) -> list[str]:
         client = get_supabase()
         query = client.table("stock_info").select("ticker")
         if search:
-            query = query.ilike("ticker", f"{search.strip().upper()}%")
+            # PostgREST 와일드카드 = * (% 는 클라우드 500). market_repo 와 동일.
+            query = query.ilike("ticker", f"{search.strip().upper()}*")
         rows = query.order("ticker").limit(limit).execute().data or []
     except ConfigError:
         raise

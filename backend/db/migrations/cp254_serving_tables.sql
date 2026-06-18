@@ -45,6 +45,26 @@ CREATE TABLE IF NOT EXISTS public.serving_stocks (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- RLS disable (학교 데모 — anon key 로 read 허용. v1_predictions_tables.sql 과 동일 정책)
-ALTER TABLE public.product_prediction_history_1d DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.serving_stocks DISABLE ROW LEVEL SECURITY;
+-- 보안 정책 = CP177-S (security_rls_grants.sql) 일관: service_role 만 GRANT,
+-- anon/authenticated 차단, RLS enable. 백엔드는 service_role key 로 read 하므로 anon 불필요.
+-- (CP254 의 "RLS disable + anon read" 는 정책 위배였다 — 2026-06-18 정정. 서빙 6테이블
+--  전부 적용: serving 신규 5 + v1_predictions_tables.sql 의 predictions_* 의 DISABLE 을 덮음.)
+DO $$
+DECLARE
+    t text;
+    serving_tables text[] := array[
+        'serving_stocks',
+        'predictions_line_1d',
+        'predictions_band_1d',
+        'predictions_band_1w',
+        'product_prediction_history_1d'
+    ];
+BEGIN
+    FOREACH t IN ARRAY serving_tables LOOP
+        IF to_regclass(format('public.%I', t)) IS NOT NULL THEN
+            EXECUTE format('alter table public.%I enable row level security', t);
+            EXECUTE format('revoke all privileges on table public.%I from anon, authenticated', t);
+            EXECUTE format('grant select, insert, update, delete on table public.%I to service_role', t);
+        END IF;
+    END LOOP;
+END $$;

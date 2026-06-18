@@ -33,15 +33,40 @@ function Get-SupabaseHost {
     try { return ([System.Uri]$url).Host } catch { return $null }
 }
 
+function Get-SupabaseKey {
+    $envFile = Join-Path $Root ".env"
+    if (-not (Test-Path $envFile)) { return $null }
+    $line = Get-Content $envFile | Select-String '^SUPABASE_KEY='
+    if (-not $line) { return $null }
+    return ($line[0].ToString() -split '=', 2)[1].Trim()
+}
+
 function Test-SupabaseReachable {
-    # DNS 해석으로 도달성 판정. paused/삭제면 REST 호스트 DNS 가 사라진다(실측 근거).
+    # 2단계 판정 — DNS 만으론 부족하다(2026-06-18 실측: DNS 복구됐는데 컴퓨트는 521 다운).
+    #   1) DNS 해석: paused/삭제면 호스트 DNS 가 사라진다.
+    #   2) REST 실 ping: /rest/v1/ 에 apikey 로 GET. 401/200/404 = 서버 살아있음,
+    #      5xx(521 등)/타임아웃 = 컴퓨트 다운(unpause 워밍업 중일 수 있음).
+    # 자유전환 자동폴백(data_backend)은 실제 SELECT ping 이라 이 판정과 같은 의미.
     $h = Get-SupabaseHost
     if (-not $h) { return @{ host = $null; reachable = $false; reason = "SUPABASE_URL 미설정" } }
     try {
         Resolve-DnsName $h -ErrorAction Stop | Out-Null
-        return @{ host = $h; reachable = $true; reason = "DNS OK" }
     } catch {
         return @{ host = $h; reachable = $false; reason = "DNS 없음 (paused/삭제/장애)" }
+    }
+    $key = Get-SupabaseKey
+    try {
+        $resp = Invoke-WebRequest -Uri "https://$h/rest/v1/" -Headers @{ apikey = $key } `
+            -TimeoutSec 8 -UseBasicParsing
+        return @{ host = $h; reachable = $true; reason = "REST $($resp.StatusCode)" }
+    } catch {
+        $code = $null
+        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+        if ($code -and $code -ge 200 -and $code -lt 500) {
+            return @{ host = $h; reachable = $true; reason = "REST $code (서버 정상)" }
+        }
+        $detail = if ($code) { "REST $code" } else { "연결 실패/타임아웃" }
+        return @{ host = $h; reachable = $false; reason = "$detail (컴퓨트 다운/워밍업)" }
     }
 }
 

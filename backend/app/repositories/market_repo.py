@@ -312,7 +312,9 @@ def _query_stock_table(client, table: str, *, search: str | None, limit: int) ->
     # 로컬 모드(fetch_stocks_local)의 startswith 와 동일 의미.
     query = client.table(table).select(STOCK_COLUMNS).order("ticker")
     if search:
-        query = query.ilike("ticker", f"{search.strip().upper()}%")
+        # PostgREST 와일드카드는 * (% 는 클라우드에서 500 — supabase-py 가 % 를 인코딩 않고
+        # 그대로 보내 PostgREST 가 거부. 로컬은 우연히 관대했음, 2026-06-18 컷오버서 발견).
+        query = query.ilike("ticker", f"{search.strip().upper()}*")
     return query.limit(limit).execute().data or []
 
 
@@ -383,7 +385,9 @@ def _fetch_price_ticker_fallback(
         client.table("price_data").select(PRICE_TICKER_COLUMNS).order("ticker").limit(scan_limit)
     )
     if search:
-        query = query.ilike("ticker", f"{search.strip().upper()}%")
+        # PostgREST 와일드카드는 * (% 는 클라우드에서 500 — supabase-py 가 % 를 인코딩 않고
+        # 그대로 보내 PostgREST 가 거부. 로컬은 우연히 관대했음, 2026-06-18 컷오버서 발견).
+        query = query.ilike("ticker", f"{search.strip().upper()}*")
     query = _apply_source_filter(query, provider)
     rows = query.execute().data or []
     return _filter_stock_rows(rows, search=search, limit=limit)
