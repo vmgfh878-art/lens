@@ -20,6 +20,11 @@ if (-not $DryRun -and -not $Apply) {
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+# CP255 — production push 로직(브랜치 견고화 포함)은 별도 헬퍼로 분리한다.
+# 어느 브랜치에서 실행되든 서빙 데이터를 항상 origin/main 으로 보내며, 헬퍼는
+# self-contained 라 샌드박스에서 단독 검증할 수 있다(CP255 §4).
+. (Join-Path $PSScriptRoot "v1_refresh_push.ps1")
+
 $RunStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $SafeDate = $RunDate.Replace("-", "")
 $RunDirPath = Join-Path $Root $RunDir
@@ -300,54 +305,17 @@ $ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
 # Render/Vercel 은 git push 를 받아야 production 이 갱신된다. 윈도우 자동화가
 # 여기까지 해야 "PC 켜지면 production 까지 최신"이 된다.
 # 임시방편: DB(Supabase) 전환 시 이 git push 는 DB write 로 대체 예정 (lens_v2_master_plan §9).
-$PushStatus = "SKIPPED_DRY_RUN"
-# CP238 — 단계 실패 시 production push 차단 (자동화의 핵심 구조 결함 수정).
-# 이전엔 band/line refresh 가 죽어도 Invoke-PythonStep 이 throw 하지 않아
-# market/product 만 갱신된 채 push 가 진행됐다 → 예측이 옛 날짜에 정체된 데이터가
-# 운영에 배포되는 사고(2026-06-05). 핵심 단계가 하나라도 FAIL 이면 push 를 막는다.
-if ($Apply -and $FailedSteps.Count -gt 0) {
-    $PushStatus = "BLOCKED_STEP_FAILURE"
-    $FailedNames = ($FailedSteps | ForEach-Object { $_.name }) -join ", "
-    Write-Log "CRITICAL: 단계 실패로 production push 차단 (failed: $FailedNames). 운영 데이터 불일치(예측 정체) 방지를 위해 commit/push 를 건너뛴다. 각 단계 stderr 확인 후 재실행하라. working tree 변경 폐기는 git checkout -- backend/data/v1 ."
-} elseif ($Apply) {
-    Write-Log "production git push 시작"
-    # PowerShell 5.1 quirk 회피: native git 의 stderr(pre-commit 훅 출력 등)를 2>&1 로 머지하면
-    # NativeCommandError 로 감싸지고 ErrorActionPreference=Stop 이 이를 종료 오류로 승격시켜,
-    # commit 은 됐는데 push 가 건너뛰어지는 사고가 났다(2026-06-10, push=WARN_PUSH_ERROR 인데
-    # 데이터는 로컬 커밋만 됨). 그래서 (1) 이 블록만 ErrorActionPreference=Continue 로 낮춰
-    # native stderr 가 throw 하지 않게 하고, (2) 2>&1 머지를 제거해 git stderr 는 그대로 흘리며,
-    # (3) 성공/실패는 PowerShell 예외가 아니라 git 의 $LASTEXITCODE 로만 판정한다.
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        git add backend/data/v1/*.parquet backend/data/v1/*.json | Out-Null
-        git diff --cached --quiet
-        if ($LASTEXITCODE -ne 0) {
-            git commit -m "data: daily refresh $RunDate" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                $PushStatus = "WARN_COMMIT_FAILED"
-                Write-Log "production git commit 실패 (pre-commit 훅/충돌 확인)"
-            } else {
-                git push origin main | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    $PushStatus = "PASS"
-                    Write-Log "production git push 완료"
-                } else {
-                    $PushStatus = "WARN_PUSH_FAILED"
-                    Write-Log "production git push 실패 (네트워크/인증 확인)"
-                }
-            }
-        } else {
-            $PushStatus = "NO_CHANGES"
-            Write-Log "serving parquet 변경 없음, push 생략"
-        }
-    } catch {
-        $PushStatus = "WARN_PUSH_ERROR"
-        Write-Log "git push 오류: $($_.Exception.Message)"
-    } finally {
-        $ErrorActionPreference = $prevEAP
-    }
-}
+#
+# CP255 — push 를 브랜치 견고화: 현재 체크아웃이 어느 브랜치든 서빙 데이터는 항상 origin/main 으로
+# 간다(non-main 이면 전용 worktree 로 main 에 직접 커밋). CP238(단계실패 push 차단) +
+# PS5.1 native stderr quirk 회피는 헬퍼(scripts/v1_refresh_push.ps1) 안에 그대로 유지된다.
+$PushStatus = Invoke-V1ProductionPush `
+    -Root $Root `
+    -RunDate $RunDate `
+    -Apply ([bool]$Apply) `
+    -AnyStepFailed ($FailedSteps.Count -gt 0) `
+    -FailedNames (($FailedSteps | ForEach-Object { $_.name }) -join ", ") `
+    -LogPath $PipelineLogPath
 
 Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus"
 Write-Host "status=$FinalStatus"

@@ -101,3 +101,7 @@ TiDE는 미래 horizon H일치 캘린더를 `future_covariate: [B, H, 7]`로 추
 - 타인 추천 알림 — 유사투자자문업 등록 필요 (자본금 1억).
 - 타인 계좌 자동매매 — 투자일임업 (자본금 15억, 사실상 불가).
 - 알림 표현은 사실 기술만 ("밴드 하단 돌파"), 추천 단어 ("매수/매도/지금") 금지.
+
+## 운영 자동화 — 일일 refresh (CP255)
+- 메인 체크아웃은 항상 main 에 유지하고, 기능 작업(CP254 등)은 git worktree(`.claude/worktrees/`)에서 한다.
+- 위 컨벤션 위 방어선: `scripts/run_v1_unified_refresh_local.ps1` 의 서빙 데이터 push 는 현재 체크아웃 브랜치와 무관하게 항상 origin/main 으로 간다. non-main 체크아웃이면 전용 worktree(`.git-refresh-main`)로 main 에 직접 커밋·push (로직은 `scripts/v1_refresh_push.ps1`). CP238 단계실패 push 차단 + PS5.1 native stderr quirk 회피는 그대로 유지.
