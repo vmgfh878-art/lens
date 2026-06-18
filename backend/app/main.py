@@ -1,19 +1,19 @@
 from pathlib import Path
 
 import structlog
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from starlette.middleware.gzip import GZipMiddleware
-
 from app.config import get_cache_config, get_cors_config
 from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.core.logging import configure_logging
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import request_id_middleware
-from app.routers.v1 import admin, ai, health, stocks, predictions as v1_predictions, strategies
+from app.routers.v1 import admin, ai, health, stocks, strategies
+from app.routers.v1 import predictions as v1_predictions
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 
 configure_logging()
 logger = structlog.get_logger("lens.api")

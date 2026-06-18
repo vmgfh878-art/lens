@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
-
 from app.core.http import success_response
 from app.db import check_supabase_ready
 from app.schemas.common import ApiResponse, ErrorResponse
 from app.schemas.health import LiveHealthData, ReadyHealthData
+from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/health", tags=["health"])
 

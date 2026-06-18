@@ -22,7 +22,8 @@ session factory는 lazy (모듈 로드 시 즉시 생성 X). 호출자가 결제
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 # CP236b — sqlalchemy 미설치 환경에서도 `import app.session`이 죽지 않도록 가드.
 try:
@@ -38,10 +39,13 @@ except ImportError:
     _SQLALCHEMY_AVAILABLE = False
     # 타입 힌트만 보여주기 위한 placeholder. 런타임에는 사용되지 않음.
     if TYPE_CHECKING:
-        from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession  # type: ignore[import-not-found]
+        from sqlalchemy.ext.asyncio import (  # type: ignore[import-not-found]
+            AsyncEngine,
+            AsyncSession,
+        )
 
 
-_engine: "AsyncEngine | None" = None
+_engine: AsyncEngine | None = None
 _session_factory = None
 
 
@@ -50,7 +54,7 @@ def _database_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
 
-def get_engine() -> "AsyncEngine":
+def get_engine() -> AsyncEngine:
     """Lazy async engine. 호출 시점에 최초 1회 생성.
 
     미설치 / DATABASE_URL 미설정 환경에서는 RuntimeError. 호출되지 않는 한 무해.
@@ -107,7 +111,7 @@ def get_session_factory():
 SessionLocal = None  # type: ignore[assignment]  # CP236b 골격 — 결제 후 get_session_factory() 사용.
 
 
-async def get_db() -> "AsyncIterator[AsyncSession]":
+async def get_db() -> AsyncIterator[AsyncSession]:
     """FastAPI Depends(get_db) 용. **아직 어느 라우터에도 부착 안 함**.
 
     안전 패턴:

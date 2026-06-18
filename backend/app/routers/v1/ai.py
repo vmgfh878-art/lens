@@ -3,8 +3,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
-
 from app.core.exceptions import ResourceNotFoundError
 from app.core.http import success_response
 from app.repositories.ai_repo import (
@@ -16,6 +14,7 @@ from app.repositories.ai_repo import (
 )
 from app.schemas.ai import BacktestSummary, EvaluationSummary, RunDetail, RunSummary
 from app.schemas.common import ApiResponse, ErrorResponse
+from fastapi import APIRouter, Query, Request
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -111,14 +110,18 @@ def _build_run_summary(row: dict[str, Any]) -> dict[str, Any]:
         "band_mode": _first_value(row, "band_mode", config),
         "checkpoint_path": _first_value(row, "checkpoint_path", config),
         "best_epoch": _first_value(row, "best_epoch", val_metrics, test_metrics, config),
-        "best_val_total": best_val_total if best_val_total is not None else _first_value(row, "best_val_loss", config),
+        "best_val_total": best_val_total
+        if best_val_total is not None
+        else _first_value(row, "best_val_loss", config),
         "line_target_type": _first_value(row, "line_target_type", config),
         "band_target_type": _first_value(row, "band_target_type", config),
         "role": _first_value(row, "role", config) or _first_value(row, "model_role", config),
         "feature_set": _first_value(row, "feature_set", config),
         "checkpoint_selection": _first_value(row, "checkpoint_selection", config),
         "wandb_status": _normalize_wandb_status(_first_value(row, "wandb_status", config)),
-        "deprecated_for_phase1_product_contract": _first_value(row, "deprecated_for_phase1_product_contract", config),
+        "deprecated_for_phase1_product_contract": _first_value(
+            row, "deprecated_for_phase1_product_contract", config
+        ),
         "indicator_layer_replacement": _first_value(row, "indicator_layer_replacement", config),
         "is_legacy": is_legacy_composite_run(row),
     }
@@ -183,9 +186,13 @@ def _build_backtest_summary(row: dict[str, Any]) -> dict[str, Any]:
         "profit_factor": _first_value(row, "profit_factor", meta),
         "num_trades": _first_value(row, "num_trades", meta),
         "fee_adjusted_return_pct": (
-            fee_adjusted_return_pct if fee_adjusted_return_pct is not None else _first_value(row, "return_pct", meta)
+            fee_adjusted_return_pct
+            if fee_adjusted_return_pct is not None
+            else _first_value(row, "return_pct", meta)
         ),
-        "fee_adjusted_sharpe": fee_adjusted_sharpe if fee_adjusted_sharpe is not None else _first_value(row, "sharpe", meta),
+        "fee_adjusted_sharpe": fee_adjusted_sharpe
+        if fee_adjusted_sharpe is not None
+        else _first_value(row, "sharpe", meta),
         "avg_turnover": _first_value(row, "avg_turnover", meta),
         "meta": _json_safe(meta),
         "created_at": _first_value(row, "created_at", meta),
@@ -249,7 +256,9 @@ def list_run_evaluations(
     limit: int = Query(default=100, ge=1, le=1000, description="반환할 최대 평가 수"),
 ):
     rows = fetch_run_evaluations(run_id, ticker=ticker, timeframe=timeframe, limit=limit)
-    return success_response(request, [_build_evaluation_summary(row) for row in rows], total=len(rows))
+    return success_response(
+        request, [_build_evaluation_summary(row) for row in rows], total=len(rows)
+    )
 
 
 @router.get(
@@ -264,5 +273,9 @@ def list_run_backtests(
     timeframe: str | None = Query(default=None, description="타임프레임"),
     limit: int = Query(default=50, ge=1, le=200, description="반환할 최대 백테스트 수"),
 ):
-    rows = fetch_run_backtests(run_id, strategy_name=strategy_name, timeframe=timeframe, limit=limit)
-    return success_response(request, [_build_backtest_summary(row) for row in rows], total=len(rows))
+    rows = fetch_run_backtests(
+        run_id, strategy_name=strategy_name, timeframe=timeframe, limit=limit
+    )
+    return success_response(
+        request, [_build_backtest_summary(row) for row in rows], total=len(rows)
+    )

@@ -177,7 +177,7 @@ def _points(signal_frame: pd.DataFrame) -> list[dict[str, Any]]:
     strategy_equity = np.cumprod(1.0 + np.nan_to_num(strategy_returns, nan=0.0))
     buy_hold_equity = np.cumprod(1.0 + np.nan_to_num(returns, nan=0.0))
     result = []
-    for index, row in frame.iterrows():
+    for _index, row in frame.iterrows():
         offset = len(result)
         result.append(
             {

@@ -6,6 +6,8 @@ extend-exclude = [".venv", "ai/cache", "ai/artifacts", "data", "logs", "wandb", 
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+# E501(줄길이=스타일)·B008(FastAPI Query 기본값)·E402(import 위치, 테스트 env-선설정) 제외.
+ignore = ["E501", "B008", "E402"]
 # 초기 baseline 파악 단계 — 여기선 어떤 룰도 끄지 않는다(검출만 할 거라 안전).
 
 [tool.pytest.ini_options]

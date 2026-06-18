@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request, Response
-
 from app.core.http import success_response
 from app.services.strategy_backtest_svc import (
     STRATEGIES,
     get_strategy_backtest,
     get_strategy_scan,
 )
+from fastapi import APIRouter, Query, Request, Response
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 

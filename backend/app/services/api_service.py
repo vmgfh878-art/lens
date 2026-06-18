@@ -3,15 +3,14 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
-
 from app.core.exceptions import ResourceNotFoundError
+from app.services.feature_svc import drop_incomplete_resampled_periods
 from app.services.local_market_svc import (
     fetch_indicator_rows_local,
     fetch_price_rows_local,
     fetch_stocks_local,
 )
 from app.services.model_svc import normalize_display_timeframe
-from app.services.feature_svc import drop_incomplete_resampled_periods
 
 # Supabase 경로는 v1 에서 비활성. 모든 market/stocks 조회는 local parquet 직접 읽음.
 # legacy prediction normalization (get_latest_prediction_data 등) 도 같이 제거됨.
@@ -56,7 +55,11 @@ def aggregate_prices(rows: list[dict], timeframe: str) -> list[dict]:
 
 def resolve_price_window(start: str | None, end: str | None) -> tuple[str, str]:
     resolved_end = pd.to_datetime(end).date() if end else date.today()
-    resolved_start = pd.to_datetime(start).date() if start else resolved_end - timedelta(days=DEFAULT_PRICE_WINDOW_DAYS)
+    resolved_start = (
+        pd.to_datetime(start).date()
+        if start
+        else resolved_end - timedelta(days=DEFAULT_PRICE_WINDOW_DAYS)
+    )
     if resolved_start > resolved_end:
         raise ValueError("조회 시작일은 종료일보다 늦을 수 없습니다.")
     return resolved_start.isoformat(), resolved_end.isoformat()

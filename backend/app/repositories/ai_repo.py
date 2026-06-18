@@ -4,13 +4,13 @@ v1 에서는 Supabase 가 비활성이라 mock parquet/JSON 만 사용한다.
 mock 데이터는 backend/data/v1/ai_runs_mock.json 에서 로드.
 Supabase 부활 필요 시 이전 git 이력 참조.
 """
+
 from __future__ import annotations
 
 import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
 
 _MOCK_PATH = Path(__file__).resolve().parents[2] / "data" / "v1" / "ai_runs_mock.json"
 LEGACY_COMPOSITE_MODEL_NAMES = {"line_band_composite"}
@@ -53,16 +53,19 @@ def _truthy(value) -> bool:
 def is_legacy_composite_run(row: dict) -> bool:
     config = _as_dict(row.get("config"))
     model_name = str(row.get("model_name") or "").strip().lower()
-    role = str(row.get("role") or config.get("role") or config.get("model_role") or "").strip().lower()
+    role = (
+        str(row.get("role") or config.get("role") or config.get("model_role") or "").strip().lower()
+    )
     if model_name in LEGACY_COMPOSITE_MODEL_NAMES:
         return True
     if role == "composite_model":
         return True
     if _truthy(config.get("deprecated_for_phase1_product_contract")):
         return True
-    if config.get("indicator_layer_replacement") is not None and model_name in LEGACY_COMPOSITE_MODEL_NAMES:
-        return True
-    return False
+    return bool(
+        config.get("indicator_layer_replacement") is not None
+        and model_name in LEGACY_COMPOSITE_MODEL_NAMES
+    )
 
 
 def fetch_model_runs(

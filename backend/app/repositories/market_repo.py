@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import structlog
-
 from app.config import get_market_config
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase

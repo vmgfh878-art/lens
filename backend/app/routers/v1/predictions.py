@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request
-
 from app.core.http import success_response
 from app.core.validators import TickerStr
 from app.services import parquet_store
+from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = logging.getLogger("lens.predictions")
 

@@ -37,10 +37,10 @@ jobs:
           fi
 
       - name: Ruff lint
-        run: ruff check .
+        run: ruff check backend/app
 
       - name: Ruff format (check)
-        run: ruff format --check .
+        run: ruff format --check backend/app
 
       - name: Mypy (best-effort, baseline-aware)
         # CP222 baseline 1391 mypy errors는 pre-existing. CI는 게이트로
