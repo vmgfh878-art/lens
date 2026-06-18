@@ -31,9 +31,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover — 배포 rootDir(backend) 차이 흡수
     from backend.collector.repositories.local_snapshots import local_snapshots_required
 
-# v1 서빙 데이터 출처 (EODHD 파이프라인, Plan v3 결정). REST source 필터 정본 —
-# MARKET_DATA_PROVIDER 기본값(yfinance)에 서빙 경로가 휘둘리지 않게 명시 고정.
-SERVING_SOURCE = "eodhd"
+# v1 서빙 데이터 실제 출처 = yfinance (cp151 일일 append). EODHD 는 한 달+ 미수집
+# 죽은 출처라 안 쓴다 (2026-06-18 정정 — 직전 eodhd 라벨은 낡은 Plan v3 메모리를 따른
+# 오류였고 지시서 지시 아님). REST source 필터 + import 라벨의 단일 정본.
+# collector(4b) 기본 MARKET_DATA_PROVIDER 도 yfinance 라 source 라벨이 자동 일치한다.
+SERVING_SOURCE = "yfinance"
 
 _TRUTHY = {"1", "true", "yes", "on"}  # collector local_snapshots 와 동일 집합
 

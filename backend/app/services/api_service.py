@@ -18,8 +18,8 @@ from app.services.feature_svc import drop_incomplete_resampled_periods
 # CP254 — market/stocks read 는 data_backend.use_supabase() 토글:
 #   로컬 모드(기본): backend/data/v1 parquet (local_market_svc) — 기존 v1 경로 그대로.
 #   REST 모드: market_repo (price_data/indicators/stock_info, 컬럼 화이트리스트).
-# source 는 SERVING_SOURCE='eodhd' 고정 — MARKET_DATA_PROVIDER 기본값(yfinance)에
-# 서빙이 휘둘리면 REST 모드에서 빈 응답이 난다.
+# source 는 SERVING_SOURCE='yfinance' 고정 (서빙 실제 출처, 2026-06-18 정정). collector
+# 기본 provider 도 yfinance 라 라벨 자동 일치 — read/import/크론 source 가 한 값으로 통일.
 # legacy prediction normalization (get_latest_prediction_data 등) 은 v1 에서 제거됨.
 # 새 v1 endpoint (/api/v1/predictions/line, /predictions/band/1d, /predictions/band/1w,
 # /stocks/{ticker}/predictions/product-history) 가 모든 prediction 조회를 담당한다.

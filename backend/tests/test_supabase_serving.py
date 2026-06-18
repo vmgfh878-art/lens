@@ -229,7 +229,7 @@ def _fake_tables() -> dict[str, list[dict]]:
             "close": 1.5,
             "adjusted_close": 1.4,
             "volume": 100,
-            "source": "eodhd",
+            "source": "yfinance",
         }
         for d in ("2026-06-09", "2026-06-10")
     ]
@@ -248,7 +248,7 @@ def _fake_tables() -> dict[str, list[dict]]:
             "volume": 100,
             "atr_ratio": None,
             "regime_label": "neutral",
-            "source": "eodhd",
+            "source": "yfinance",
         }
         for d in ("2026-06-09", "2026-06-10")
     ]
@@ -807,7 +807,7 @@ class ImportBuildersTestCase(unittest.TestCase):
         self.assertEqual(records[0]["ticker"], "AAPL")
         self.assertEqual(records[0]["date"], "2026-06-10")
         self.assertIsNone(records[0]["adjusted_close"])
-        self.assertEqual(records[0]["source"], "eodhd")
+        self.assertEqual(records[0]["source"], "yfinance")
         self.assertIsInstance(records[0]["volume"], int)
 
     def test_indicator_frame_joins_price_volume(self):

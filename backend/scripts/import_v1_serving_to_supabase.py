@@ -2,7 +2,7 @@
 
 대상 7테이블 (컬럼 = 서빙 화이트리스트, 전 컬럼 dump 금지):
   stock_info                      ← market_stock_info.parquet
-  price_data                      ← market_prices_1d.parquet (source='eodhd')
+  price_data                      ← market_prices_1d.parquet (source='yfinance')
   indicators                      ← market_indicators_1d.parquet (+ price volume join)
   predictions_line_1d             ← predictions_line_1d.parquet
   predictions_band_1d             ← predictions_band_1d.parquet
@@ -38,7 +38,8 @@ if str(ROOT) not in sys.path:
 from backend.db.bootstrap import CHUNK_SIZE, _upsert_chunk_with_retry, get_client  # noqa: E402
 
 V1_DIR = ROOT / "backend" / "data" / "v1"
-SERVING_SOURCE = "eodhd"
+# 서빙 실제 출처 = yfinance (cp151). EODHD 미수집 죽은 출처라 안 씀 (2026-06-18 정정).
+SERVING_SOURCE = "yfinance"
 # bootstrap.step_price_data 와 동일 정책 문자열 유지.
 PROVIDER_ADJUSTMENT_POLICY = "eodhd_raw_ohlc_adjusted_close_factor_v3_adjusted_ohlc"
 # 한 번에 records 로 변환하는 행 수 (782k 전체를 dict 로 들지 않기 위한 슬라이스).
