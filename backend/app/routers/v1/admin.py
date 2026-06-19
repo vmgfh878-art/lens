@@ -153,6 +153,33 @@ def debug_state(request: Request):
             logger.warning("[%s] debug-state market probe '%s' 실패", rid, slot, exc_info=exc)
             market_probes[slot] = {"status": "error"}
 
+    # CP256 컷오버 진단 — 어느 프로젝트(host)·키 role·실패 원인(예외)을 노출. 키 값은 안 보인다.
+    supabase_probe: dict[str, object] = {}
+    try:
+        import base64 as _b64
+        import json as _json
+        from urllib.parse import urlparse as _urlparse
+
+        from app.config import get_database_config as _get_db_cfg
+        from app.db import get_supabase as _get_supabase
+
+        _cfg = _get_db_cfg()
+        supabase_probe["url_host"] = _urlparse(_cfg.supabase_url or "").netloc or None
+        try:
+            _seg = (_cfg.supabase_key or "").split(".")[1]
+            _seg += "=" * (-len(_seg) % 4)
+            supabase_probe["key_role"] = _json.loads(_b64.urlsafe_b64decode(_seg)).get("role")
+        except Exception:  # noqa: BLE001
+            supabase_probe["key_role"] = "unparseable"
+        try:
+            _get_supabase().table("stock_info").select("ticker").limit(1).execute()
+            supabase_probe["probe"] = "ok"
+        except Exception as _exc:  # noqa: BLE001
+            supabase_probe["probe"] = "error"
+            supabase_probe["error"] = f"{type(_exc).__name__}: {str(_exc)[:300]}"
+    except Exception as _outer:  # noqa: BLE001
+        supabase_probe["meta_error"] = str(_outer)[:200]
+
     return success_response(
         request,
         {
@@ -164,6 +191,7 @@ def debug_state(request: Request):
             # (전환 상태 즉시 확인용). reachable=None 이면 미구성(=항상 로컬).
             "data_backend": "supabase" if data_backend.use_supabase() else "local",
             "supabase_reachable": data_backend.supabase_reachable_now(),
+            "supabase_probe": supabase_probe,
             "interesting_env": interesting_env,
             "memory": memory,
             "market_probes": market_probes,
