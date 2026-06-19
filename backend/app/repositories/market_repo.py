@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pandas as pd
 import structlog
 from app.config import get_market_config
 from app.core.exceptions import ConfigError, UpstreamUnavailableError
 from app.db import get_supabase
+from app.repositories.rest_paging import paged_select
 
 try:
     from collector.repositories.local_snapshots import local_snapshots_required, read_snapshot_frame
@@ -217,7 +219,12 @@ def fetch_indicator_rows(
         for column in missing_columns:
             for row in rows:
                 row[column] = None
-        _merge_indicator_volume(ticker=ticker, timeframe=timeframe, rows=rows, provider=provider)
+        # CP254 — indicators.volume 컬럼이 채워져 있으면(서빙 thin 적재) 2차
+        # price_data 쿼리를 생략 (egress 절반). 전부 None(legacy 스키마)일 때만 merge.
+        if rows and all(row.get("volume") is None for row in rows):
+            _merge_indicator_volume(
+                ticker=ticker, timeframe=timeframe, rows=rows, provider=provider
+            )
         for row in rows:
             for column in INDICATOR_COLUMN_NAMES:
                 row.setdefault(column, None)
@@ -299,17 +306,27 @@ def _filter_stock_rows(rows: list[dict], *, search: str | None, limit: int) -> l
     return normalized[:limit]
 
 
+def _query_stock_table(client, table: str, *, search: str | None, limit: int) -> list[dict]:
+    # CP254 — prefix 검색을 서버사이드 ilike 로 (limit*50 클라이언트 스캔 제거).
+    # 로컬 모드(fetch_stocks_local)의 startswith 와 동일 의미.
+    query = client.table(table).select(STOCK_COLUMNS).order("ticker")
+    if search:
+        # PostgREST 와일드카드는 * (% 는 클라우드에서 500 — supabase-py 가 % 를 인코딩 않고
+        # 그대로 보내 PostgREST 가 거부. 로컬은 우연히 관대했음, 2026-06-18 컷오버서 발견).
+        query = query.ilike("ticker", f"{search.strip().upper()}*")
+    return query.limit(limit).execute().data or []
+
+
 def _fetch_stock_info_rows(client, *, search: str | None, limit: int) -> list[dict]:
-    scan_limit = max(limit * 50, 1000) if search else limit
-    rows = (
-        client.table("stock_info")
-        .select(STOCK_COLUMNS)
-        .order("ticker")
-        .limit(scan_limit)
-        .execute()
-        .data
-        or []
-    )
+    # CP254 — 1순위 serving_stocks (큐레이션 100, /stocks 목록 정본). 테이블이
+    # 없는 legacy DB 에서만 stock_info 로 폴백 (stock_info 는 FK placeholder 포함
+    # 유니버스라 sector NULL 행이 섞일 수 있음).
+    try:
+        rows = _query_stock_table(client, "serving_stocks", search=search, limit=limit)
+        return _filter_stock_rows(rows, search=search, limit=limit)
+    except Exception as exc:  # noqa: BLE001 — 테이블 부재(legacy)면 stock_info 로
+        logger.debug("serving_stocks 조회 실패, stock_info 폴백", exc_info=exc)
+    rows = _query_stock_table(client, "stock_info", search=search, limit=limit)
     return _filter_stock_rows(rows, search=search, limit=limit)
 
 
@@ -359,10 +376,17 @@ def _fetch_price_ticker_fallback(
         if exact_matches:
             return exact_matches[:limit]
 
-    scan_limit = max(limit * 50, 1000)
+    # CP254 — limit*50 증식 제거: 고정 1000행 캡 + prefix 서버 필터.
+    # (price_data 는 ticker 당 수백 행이라 distinct 가 안 되는 degraded 폴백 —
+    # stock_info 적재 후에는 사실상 미사용 경로.)
+    scan_limit = 1000
     query = (
         client.table("price_data").select(PRICE_TICKER_COLUMNS).order("ticker").limit(scan_limit)
     )
+    if search:
+        # PostgREST 와일드카드는 * (% 는 클라우드에서 500 — supabase-py 가 % 를 인코딩 않고
+        # 그대로 보내 PostgREST 가 거부. 로컬은 우연히 관대했음, 2026-06-18 컷오버서 발견).
+        query = query.ilike("ticker", f"{search.strip().upper()}*")
     query = _apply_source_filter(query, provider)
     rows = query.execute().data or []
     return _filter_stock_rows(rows, search=search, limit=limit)
@@ -407,3 +431,89 @@ def fetch_stocks(
     except Exception as exc:
         logger.warning("fetch_stocks search='%s' 실패", search, exc_info=exc)
         raise UpstreamUnavailableError("종목 목록을 조회할 수 없습니다.") from exc
+
+
+# ---------------- 전략 scan 용 cross-sectional 입력 (CP254 P3) ----------------
+# 전종목 × 필요 컬럼만 SELECT (전 컬럼 dump 금지). PostgREST max_rows=1000 을
+# rest_paging 으로 이어 붙인다. 호출 빈도는 strategy_scan 의 lru_cache 가 억제.
+
+SCAN_PRICE_COLUMNS = ["ticker", "date", "open", "high", "low", "close", "adjusted_close", "volume"]
+SCAN_INDICATOR_COLUMNS = [
+    "ticker",
+    "date",
+    "rsi",
+    "macd_ratio",
+    "ma_5_ratio",
+    "ma_20_ratio",
+    "ma_60_ratio",
+    "bb_position",
+]
+
+
+def fetch_price_frame_for_scan(*, source: str = "eodhd") -> pd.DataFrame:
+    """전략 scan base 입력 — price_data 전종목 (OHLCV + adjusted_close)."""
+    try:
+        client = get_supabase()
+
+        def build_query():
+            query = (
+                client.table("price_data")
+                .select(", ".join(SCAN_PRICE_COLUMNS))
+                .order("ticker")
+                .order("date")
+            )
+            return _apply_source_filter(query, _normalize_provider_name(source))
+
+        rows = paged_select(build_query)
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_price_frame_for_scan 실패", exc_info=exc)
+        raise UpstreamUnavailableError("전략 scan 가격 데이터를 조회할 수 없습니다.") from exc
+    return pd.DataFrame(rows, columns=SCAN_PRICE_COLUMNS)
+
+
+def fetch_indicator_frame_for_scan(*, source: str = "eodhd") -> pd.DataFrame:
+    """전략 scan base 입력 — indicators 1D 전종목 (필요 6지표 + rsi)."""
+    try:
+        client = get_supabase()
+
+        def build_query():
+            query = (
+                client.table("indicators")
+                .select(", ".join(SCAN_INDICATOR_COLUMNS))
+                .eq("timeframe", "1D")
+                .order("ticker")
+                .order("date")
+            )
+            return _apply_source_filter(query, _normalize_provider_name(source))
+
+        rows = paged_select(build_query)
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_indicator_frame_for_scan 실패", exc_info=exc)
+        raise UpstreamUnavailableError("전략 scan 지표 데이터를 조회할 수 없습니다.") from exc
+    return pd.DataFrame(rows, columns=SCAN_INDICATOR_COLUMNS)
+
+
+def fetch_sector_frame() -> pd.DataFrame:
+    """전략 scan sector map 입력 — serving_stocks (ticker, sector) 만.
+
+    stock_info 가 아니라 serving_stocks 인 이유: stock_info 는 FK placeholder
+    (sector NULL ~400행) 포함 유니버스라 sector map 이 'Unknown' 으로 오염된다.
+    로컬 모드(market_stock_info.parquet 100행)와 동일 결과를 위해 큐레이션 테이블 사용.
+    """
+    try:
+        client = get_supabase()
+
+        def build_query():
+            return client.table("serving_stocks").select("ticker, sector").order("ticker")
+
+        rows = paged_select(build_query)
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_sector_frame 실패", exc_info=exc)
+        raise UpstreamUnavailableError("전략 scan 섹터 데이터를 조회할 수 없습니다.") from exc
+    return pd.DataFrame(rows, columns=["ticker", "sector"])

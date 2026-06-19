@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 from app.config import get_market_config
 from app.core.exceptions import UpstreamUnavailableError
+from app.repositories import prediction_repo
+from app.services import data_backend
 from pandas.api import types as pdt
 
 # Render free tier (512MB) 에서 매 요청마다 11MB parquet 을 메모리에 로드하면
@@ -303,15 +305,27 @@ def get_product_prediction_history_data(
             reason="unsupported_timeframe",
         )
 
-    frame = _load_history_frame(parquet_path)
-    frame = frame[
-        (frame["ticker"] == normalized_ticker)
-        & (frame["timeframe"] == normalized_timeframe)
-        & (frame["role"].isin(requested_roles))
-    ]
-    if run_id:
-        frame = frame[frame["run_id"].astype(str) == run_id]
-    frame = _apply_window(frame, limit=limit, lookback_days=lookback_days)
+    if data_backend.use_supabase():
+        # CP254 — REST 모드: ticker/timeframe/role/run_id 스코프 + lookback/limit 을
+        # SQL 로 (782k 행 전량 로드 금지). 이하 role 분리/직렬화는 parquet 모드와 공유.
+        frame = prediction_repo.fetch_product_history(
+            normalized_ticker,
+            timeframe=normalized_timeframe,
+            roles=requested_roles,
+            run_id=run_id,
+            limit=limit,
+            lookback_days=lookback_days,
+        )
+    else:
+        frame = _load_history_frame(parquet_path)
+        frame = frame[
+            (frame["ticker"] == normalized_ticker)
+            & (frame["timeframe"] == normalized_timeframe)
+            & (frame["role"].isin(requested_roles))
+        ]
+        if run_id:
+            frame = frame[frame["run_id"].astype(str) == run_id]
+        frame = _apply_window(frame, limit=limit, lookback_days=lookback_days)
 
     if frame.empty:
         return _empty_response(

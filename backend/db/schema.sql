@@ -221,6 +221,8 @@ ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS debt_ratio DOUBLE PRECISI
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_macro BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_breadth BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS has_fundamentals BOOLEAN NOT NULL DEFAULT FALSE;
+-- CP254 — 서빙 IndicatorPoint.volume 단일 SELECT 충족용 (2차 price_data merge 제거).
+ALTER TABLE public.indicators ADD COLUMN IF NOT EXISTS volume BIGINT;
 
 CREATE TABLE IF NOT EXISTS public.predictions (
     id                  BIGSERIAL PRIMARY KEY,

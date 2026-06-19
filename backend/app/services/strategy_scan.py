@@ -21,7 +21,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from app.services import parquet_store
+from app.repositories import market_repo, prediction_repo
+from app.services import data_backend, parquet_store
 from app.services.strategy_backtest_engine import _ticker_metrics
 from app.services.strategy_indicators import (
     _align_date_dtype,
@@ -44,9 +45,25 @@ def _load_base_frame() -> pd.DataFrame:
 
     band/line 은 _load_frame(needs_line, needs_band) 에서 전략이 실제로 필요로 할
     때만 머지한다 — band 를 안 쓰는 전략이 band parquet(97MB)을 로드하지 않게.
+
+    CP254 P3 — cross-sectional 이라 thin per-ticker 가 불가능한 유일 경로.
+    REST 모드는 전종목 × 필요 컬럼만 paged SELECT 로 받아 (전 컬럼 dump 금지)
+    이하 변환은 parquet 모드와 동일 코드를 공유한다. 호출 빈도는 본 함수의
+    lru_cache + 라우터 Cache-Control 300 이 억제. egress 실측은 P5, 한도 위협이면
+    materialized 테이블(v2 후속)로 전환 판단.
     """
+    if data_backend.use_supabase():
+        price = market_repo.fetch_price_frame_for_scan(source=data_backend.SERVING_SOURCE)
+        indicators = market_repo.fetch_indicator_frame_for_scan(source=data_backend.SERVING_SOURCE)
+        return _build_base_frame(price, indicators)
     base = _data_dir()
     price = pd.read_parquet(base / "market_prices_1d.parquet")
+    indicators = pd.read_parquet(base / "market_indicators_1d.parquet")
+    return _build_base_frame(price, indicators)
+
+
+def _build_base_frame(price: pd.DataFrame, indicators: pd.DataFrame) -> pd.DataFrame:
+    """가격+지표 → 공통 base frame 변환 (입력 출처 무관 — parquet/REST 공유)."""
     close_column = "adjusted_close" if "adjusted_close" in price.columns else "close"
     price = price[["ticker", "date", "open", "high", "low", close_column, "volume"]].rename(
         columns={close_column: "close"}
@@ -74,7 +91,7 @@ def _load_base_frame() -> pd.DataFrame:
         / price["close"]
     )
 
-    indicators = pd.read_parquet(base / "market_indicators_1d.parquet")
+    indicators = indicators.copy()
     indicators["ticker"] = indicators["ticker"].astype(str).str.upper()
     indicators["date"] = pd.to_datetime(indicators["date"])
     indicators = indicators.sort_values(["ticker", "date"]).drop_duplicates(
@@ -144,9 +161,13 @@ def _load_base_frame() -> pd.DataFrame:
 
 
 def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
-    raw_line = parquet_store.get_raw("line_1d")
-    if raw_line is None:
-        raise FileNotFoundError("predictions_line_1d.parquet not found in parquet_store")
+    if data_backend.use_supabase():
+        # CP254 P3 — scan 은 line_score 만 쓴다: 3컬럼 thin SELECT.
+        raw_line = prediction_repo.fetch_line_frame_for_scan()
+    else:
+        raw_line = parquet_store.get_raw("line_1d")
+        if raw_line is None:
+            raise FileNotFoundError("predictions_line_1d.parquet not found in parquet_store")
     line = raw_line.copy()
     line["ticker"] = line["ticker"].astype(str).str.upper()
     line["date"] = pd.to_datetime(line["asof_date"])
@@ -165,9 +186,13 @@ def _merge_line(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _merge_band(frame: pd.DataFrame) -> pd.DataFrame:
-    raw_band = parquet_store.get_raw("band_1d")
-    if raw_band is None:
-        raise FileNotFoundError("predictions_band_1d.parquet not found in parquet_store")
+    if data_backend.use_supabase():
+        # CP254 P3 — horizon_step=5 를 서버사이드 필터로 (597k → ~1/5 thin).
+        raw_band = prediction_repo.fetch_band_frame_for_scan(horizon=5)
+    else:
+        raw_band = parquet_store.get_raw("band_1d")
+        if raw_band is None:
+            raise FileNotFoundError("predictions_band_1d.parquet not found in parquet_store")
     band = raw_band[pd.to_numeric(raw_band["horizon_step"], errors="coerce") == 5].copy()
     band["ticker"] = band["ticker"].astype(str).str.upper()
     band["date"] = pd.to_datetime(band["asof_date"])
@@ -215,8 +240,13 @@ def _load_frame(needs_line: bool = True, needs_band: bool = True) -> pd.DataFram
 @lru_cache(maxsize=1)
 def _sector_map() -> dict[str, str]:
     try:
-        stock_info = pd.read_parquet(_data_dir() / "market_stock_info.parquet")
+        if data_backend.use_supabase():
+            # CP254 P3 — SELECT ticker, sector 만 (100~500행).
+            stock_info = market_repo.fetch_sector_frame()
+        else:
+            stock_info = pd.read_parquet(_data_dir() / "market_stock_info.parquet")
     except Exception:
+        # 로컬 parquet 부재/REST 실패 모두 동일하게 sector 없음으로 강등 (기존 동작).
         return {}
     stock_info["ticker"] = stock_info["ticker"].astype(str).str.upper()
     return {

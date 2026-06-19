@@ -10,7 +10,7 @@ from app.core.http import success_response
 from app.db import supabase_is_configured
 from app.repositories.ai_repo import _load_mock
 from app.routers.v1 import predictions as v1_predictions
-from app.services import local_market_svc, parquet_store
+from app.services import data_backend, local_market_svc, parquet_store
 from app.services.product_prediction_history_svc import clear_product_history_cache
 from app.services.strategy_backtest_svc import clear_strategy_cache
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -160,6 +160,10 @@ def debug_state(request: Request):
             "base_dir_exists": base_dir.exists(),
             "parquet_files": parquet_files,
             "supabase_is_configured": supabase_is_configured(),
+            # CP254/255 — 서빙 read 가 실제로 타는 백엔드 + 자동 폴백이 보는 도달성
+            # (전환 상태 즉시 확인용). reachable=None 이면 미구성(=항상 로컬).
+            "data_backend": "supabase" if data_backend.use_supabase() else "local",
+            "supabase_reachable": data_backend.supabase_reachable_now(),
             "interesting_env": interesting_env,
             "memory": memory,
             "market_probes": market_probes,

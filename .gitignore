@@ -124,3 +124,9 @@ docs/daily_yfinance_append_gate_runs/
 # 로컬 yfinance 데이터셋/수집 상태 메타
 data/parquet/*yfinance*.manifest.json
 data/parquet/yfinance*_state.json
+
+# CP254 로컬 Supabase 리허설 스택 (포터블 PG + PostgREST) — 로컬 전용
+.lens_local_db/
+
+# 딥러닝실습 최종 제출물 워크스페이스 (보고서·발표·코드·데이터 빌드 산출물 + node_modules/PDF/PNG) — 로컬 전용
+submission/
