@@ -47,6 +47,15 @@ class DatabaseConfig(BaseSettings):
     supabase_key: str | None = Field(default=None, alias="SUPABASE_KEY")
     force_local_raw: str = Field(default="0", alias="LENS_FORCE_LOCAL")
 
+    @field_validator("supabase_url", "supabase_key", mode="before")
+    @classmethod
+    def _clean_secret(cls, v: str | None) -> str | None:
+        # 붙여넣기 때 딸려온 공백·줄바꿈·비인쇄 제어문자 제거 (httpx InvalidURL / Invalid API key 방지).
+        if v is None:
+            return v
+        cleaned = "".join(ch for ch in str(v).strip() if ch.isprintable())
+        return cleaned or None
+
     @property
     def force_local(self) -> bool:
         return _truthy(self.force_local_raw)
