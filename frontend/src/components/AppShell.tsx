@@ -202,6 +202,16 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
         </nav>
 
         <div className="nav-footer">
+          <a
+            className="nav-collapse"
+            href="https://github.com/vmgfh878-art/lens"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="소스코드 (GitHub)"
+          >
+            <Icon name="doc" />
+            <span>소스코드 (GitHub)</span>
+          </a>
           <button
             className="nav-collapse"
             type="button"

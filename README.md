@@ -11,6 +11,8 @@
 
 **프로젝트 종합 보고서**: [브라우저에서 바로 보기](https://vmgfh878-art.github.io/lens/lens_overview_report.html) — 시스템 아키텍처 · 딥러닝 실험 · 통계검정 · v2 로드맵을 그림과 함께 한 페이지로
 
+**데이터 & 재현**: [Google Drive](https://drive.google.com/drive/folders/15Y_wLokJP_Y8uOK6WXYgXX-3JqAnw1Q9) — 학습 데이터셋 · 운영 모델 체크포인트(.pt) · 모델별 재현 절차. 환경/seed/fold 매니페스트는 [docs/v1_operating_models_reproducibility.md](docs/v1_operating_models_reproducibility.md)
+
 ![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -154,7 +156,7 @@ Lens 는 두 가지 보조지표를 제시합니다.
 | Baselines | Bollinger · Historical Quantile · GARCH(1,1) · Linear Regression |
 | Data | yfinance local parquet (501 ticker × 11 년) |
 | Deploy | Vercel (frontend) · Render (backend) |
-| DB | 없음 (v1 은 로컬 parquet 서빙). Supabase 는 optional. |
+| DB | Supabase (Postgres + REST) 서빙 + 로컬 parquet 자동 폴백 (얇은 7테이블, 1년 retention) |
 
 ---
 
