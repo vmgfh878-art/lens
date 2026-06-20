@@ -1,0 +1,97 @@
+{
+  "band_mode": "param",
+  "band_target_type": "raw_future_return",
+  "calibration": {
+    "fit_split": "validation",
+    "method": "lower_focused",
+    "params": {
+      "lower_scale": 1.05,
+      "upper_scale": 1.0
+    },
+    "test_or_latest_used_for_fit": false
+  },
+  "candidate": {
+    "band_mode": "param",
+    "batch_size": 256,
+    "calibration_policy": "lower_focused",
+    "candidate_id": "tide_s60_q15_param",
+    "epochs": 3,
+    "family": "tide",
+    "model": "tide",
+    "q_high": 0.85,
+    "q_low": 0.15,
+    "seed": 42,
+    "seq_len": 60
+  },
+  "checkpoint_path": "ai\\artifacts\\checkpoints\\tide_1D_tide-1D-ea54dcae654d.pt",
+  "checkpoint_selection": "band_gate",
+  "dataset": {
+    "eligible_ticker_count": 474,
+    "excluded_ticker_count": 27,
+    "horizon": 5,
+    "test_samples": 184925,
+    "timeframe": "1D",
+    "train_samples": 861496,
+    "val_samples": 184437
+  },
+  "db_attach": false,
+  "db_attach_not_before": "2026-05-16",
+  "feature_columns": [
+    "log_return",
+    "open_ratio",
+    "high_ratio",
+    "low_ratio",
+    "vol_change",
+    "ma_5_ratio",
+    "ma_20_ratio",
+    "ma_60_ratio",
+    "rsi",
+    "macd_ratio",
+    "bb_position"
+  ],
+  "feature_set": "price_volatility_volume",
+  "feature_version": "v3_adjusted_ohlc",
+  "lambda_band": 2.0,
+  "latest_artifact": {
+    "asof_date": "2026-05-08",
+    "jsonl_path": "C:\\Users\\user\\lens\\docs\\cp153_bm_1d_band_primary_product_candidate_latest_predictions.jsonl",
+    "path": "C:\\Users\\user\\lens\\docs\\cp153_bm_1d_band_primary_product_candidate_latest_predictions.json",
+    "prediction_count": 474
+  },
+  "line_target_type": "raw_future_return",
+  "local_save_run": true,
+  "model_name": "tide_s60_q15_param_lower_focused",
+  "model_role": "band",
+  "n_features": 11,
+  "output_role": "band",
+  "product_gate": {
+    "pass": true,
+    "reasons": [],
+    "thresholds": {
+      "band_width_ic_min": 0.15,
+      "coverage_abs_error_max": 0.07544000000000001,
+      "downside_width_ic_min": 0.0,
+      "lower_breach_rate_max": 0.2
+    }
+  },
+  "provider": "yfinance",
+  "q_high": 0.85,
+  "q_low": 0.15,
+  "requires_user_approval_for_db_attach": true,
+  "role": "band_model",
+  "run_id": "tide-1D-ea54dcae654d",
+  "source": "yfinance",
+  "source_data_hash": "90666b44cbfb8e5c",
+  "storage_contract_validation": {
+    "annotated_sample_has_storage_contract": true,
+    "composite_payload_absent": true,
+    "db_write_performed": false,
+    "errors": [],
+    "line_payload_absent": true,
+    "record_count": 474,
+    "single_asof_date": "2026-05-08",
+    "status": "PASS",
+    "storage_contract": "product_latest_only"
+  },
+  "target": "raw_future_return"
+}
