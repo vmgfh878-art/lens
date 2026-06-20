@@ -25,6 +25,11 @@ docs/refactoring_master_plan.md
 # CP221~237(리팩토링)·CP238~242(보안) 트랙은 git 미추적 — origin 에는 운영 모델/전략 CP 만 둔다.
 # CP252~253 백테스트 발굴·부착 트랙(지시서·보고서)만 origin. cp254+ 신규 CP 는 로컬 유지(내부 문서, 번호만 이어감).
 !docs/cp25[23]*.md
+# Path B 재학습 재현 입력 — docs/* 로 무시되지만 재학습 필수라 명시 예외로 추적한다.
+# cp63 feature set plan 은 train.py 의 feature 컬럼 해석에 쓰여 라인·1D 밴드 재학습 필수.
+# cp178 rescue expansion metrics 는 cp178_wflock 1W 밴드 재학습의 target rows.
+!docs/cp63_bm_feature_set_plan.json
+!docs/cp178_bm_1w_band_500_rescue_expansion_metrics.json
 # CP252 발굴 raw rows(대용량·재현가능 중간물)는 제외. 고정입력(ticker_split/v2_cuts/v2_candidates)
 # + 요약(*.agg.parquet/*.json)만 커밋.
 backend/data/ablation/*.rows.parquet

@@ -1,0 +1,354 @@
+{
+  "cp": "CP63-BM",
+  "generated_from": "ai\\cache\\features_1D_1e47425bbc16_0c1d7f52.pt",
+  "contract": {
+    "role": "band_model",
+    "feature_version": "v3_adjusted_ohlc",
+    "target": "raw_future_return",
+    "band_target_type": "raw_future_return",
+    "line_target_type_used_for_band_eval": false,
+    "checkpoint_selection": "band_gate",
+    "deprecated_gates": [
+      "coverage_gate",
+      "combined_gate"
+    ],
+    "composite_overlay_metrics_used": false,
+    "statistical_baseline_usage": "비교 기준 전용"
+  },
+  "data_scope": {
+    "timeframe": "1D",
+    "seq_len": 60,
+    "horizon": 5,
+    "h_max": 20,
+    "input_ticker_count": 188,
+    "eligible_ticker_count": 188,
+    "excluded_reasons": {},
+    "scopes": {
+      "eligible50": {
+        "eligible_ticker_count": 50,
+        "first_ticker": "A",
+        "last_ticker": "BA"
+      },
+      "eligible100": {
+        "eligible_ticker_count": 100,
+        "first_ticker": "A",
+        "last_ticker": "COIN"
+      },
+      "eligible188": {
+        "eligible_ticker_count": 188,
+        "first_ticker": "A",
+        "last_ticker": "FTNT"
+      }
+    }
+  },
+  "feature_sets": {
+    "price_return_only": {
+      "label": "A. price_return_only",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth",
+        "fundamentals",
+        "volume/liquidity"
+      ],
+      "keep_missingness_flags": false,
+      "requires_contract_change": false,
+      "priority": "비교용",
+      "note": "가격/수익률/ratio 중심 최소 세트다."
+    },
+    "price_volatility": {
+      "label": "B. price_volatility",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth",
+        "fundamentals",
+        "volume/liquidity"
+      ],
+      "keep_missingness_flags": false,
+      "requires_contract_change": false,
+      "priority": "BM 1순위",
+      "note": "CNN-LSTM band의 1순위 smoke feature_set이다. 현재 계약 안에서는 ATR 대신 high/low/bb_position을 쓴다."
+    },
+    "price_volatility_volume": {
+      "label": "C. price_volatility_volume",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth",
+        "fundamentals"
+      ],
+      "keep_missingness_flags": false,
+      "requires_contract_change": false,
+      "priority": "BM 2순위 보조",
+      "note": "거래량 충격이 band breach proxy를 보강하는지 확인한다."
+    },
+    "technical_only": {
+      "label": "D. technical_only",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth",
+        "fundamentals",
+        "calendar/future covariate",
+        "missingness flag"
+      ],
+      "keep_missingness_flags": false,
+      "requires_contract_change": false,
+      "priority": "TiDE 비교용",
+      "note": "종목 자체 기술 패턴만으로 direct/param band가 살아나는지 본다."
+    },
+    "no_fundamentals": {
+      "label": "E. no_fundamentals",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position",
+        "us10y",
+        "yield_spread",
+        "vix_close",
+        "credit_spread_hy",
+        "nh_nl_index",
+        "ma200_pct",
+        "regime_calm",
+        "regime_neutral",
+        "regime_stress",
+        "has_macro",
+        "has_breadth",
+        "has_fundamentals",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "month_sin",
+        "month_cos",
+        "is_month_end",
+        "is_quarter_end",
+        "is_opex_friday"
+      ],
+      "excluded_groups": [
+        "fundamentals"
+      ],
+      "keep_missingness_flags": true,
+      "missingness_variant": "has_fundamentals 제거 variant를 별도 태그로 남긴다.",
+      "requires_contract_change": false,
+      "priority": "노이즈 제거",
+      "note": "재무 원시값의 0 대체와 size 편향을 제거한다."
+    },
+    "no_market_context": {
+      "label": "F. no_market_context",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position",
+        "revenue",
+        "net_income",
+        "equity",
+        "eps",
+        "roe",
+        "debt_ratio",
+        "has_fundamentals",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "month_sin",
+        "month_cos",
+        "is_month_end",
+        "is_quarter_end",
+        "is_opex_friday"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth"
+      ],
+      "keep_missingness_flags": "has_fundamentals만 유지",
+      "requires_contract_change": false,
+      "priority": "ablation",
+      "note": "market/common-date context 없이 종목 자체 패턴만 확인한다."
+    },
+    "full_features": {
+      "label": "G. full_features",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position",
+        "us10y",
+        "yield_spread",
+        "vix_close",
+        "credit_spread_hy",
+        "nh_nl_index",
+        "ma200_pct",
+        "regime_calm",
+        "regime_neutral",
+        "regime_stress",
+        "revenue",
+        "net_income",
+        "equity",
+        "eps",
+        "roe",
+        "debt_ratio",
+        "has_macro",
+        "has_breadth",
+        "has_fundamentals",
+        "day_of_week_sin",
+        "day_of_week_cos",
+        "month_sin",
+        "month_cos",
+        "is_month_end",
+        "is_quarter_end",
+        "is_opex_friday"
+      ],
+      "excluded_groups": [],
+      "keep_missingness_flags": true,
+      "requires_contract_change": false,
+      "priority": "기준선",
+      "note": "현 36개 전체 입력이며 기존 기준선이다."
+    },
+    "candidate_indicator_expanded": {
+      "label": "H. candidate_indicator_expanded",
+      "columns": [
+        "log_return",
+        "open_ratio",
+        "high_ratio",
+        "low_ratio",
+        "vol_change",
+        "ma_5_ratio",
+        "ma_20_ratio",
+        "ma_60_ratio",
+        "rsi",
+        "macd_ratio",
+        "bb_position"
+      ],
+      "indicator_only_candidates": [
+        "atr_ratio",
+        "intraday_range_ratio"
+      ],
+      "excluded_groups": [
+        "market/sector/breadth",
+        "fundamentals"
+      ],
+      "keep_missingness_flags": false,
+      "requires_contract_change": true,
+      "contract_change_plan": [
+        "backend.app.services.feature_svc.FEATURE_COLUMNS에는 이번 CP에서 추가하지 않는다.",
+        "다음 CP에서 추가한다면 MODEL_FEATURE_COLUMNS, cache digest, feature_version을 명시적으로 올린다.",
+        "기존 checkpoint와 feature contract가 섞이지 않도록 candidate_indicator_expanded 전용 preset 이름을 쓴다."
+      ],
+      "priority": "Phase 1 이후 후보",
+      "note": "이번 CP에서는 설계와 proxy만 남기고 실제 모델 feature 추가는 하지 않는다."
+    }
+  },
+  "smoke_matrix_next_cp": [
+    {
+      "experiment": "CNN-LSTM seq60 q15-b2 direct",
+      "candidate_priority": "BM 1순위",
+      "feature_set": "price_volatility",
+      "epochs": 3,
+      "limit_tickers": 50,
+      "checkpoint_selection": "band_gate",
+      "wandb": "off 권장",
+      "save_run": false,
+      "why": "기존 s60 q15-b2 direct가 dynamic width는 있으나 baseline을 못 이겨, market/fundamental 노이즈 제거 효과를 확인한다."
+    },
+    {
+      "experiment": "CNN-LSTM seq60 q20-b2 direct",
+      "candidate_priority": "BM 1순위 보조",
+      "feature_set": "price_volatility",
+      "epochs": 3,
+      "limit_tickers": 50,
+      "checkpoint_selection": "band_gate",
+      "wandb": "off 권장",
+      "save_run": false,
+      "why": "q15보다 nominal coverage가 낮은 설정에서 width/interval trade-off가 개선되는지 본다."
+    },
+    {
+      "experiment": "TiDE q10-b2 param",
+      "candidate_priority": "BM 2순위",
+      "feature_set": "technical_only",
+      "epochs": 3,
+      "limit_tickers": 50,
+      "checkpoint_selection": "band_gate",
+      "wandb": "off 권장",
+      "save_run": false,
+      "why": "param width 방식은 watch 가능성이 있으나 interval_score가 약해 feature noise 제거 효과를 확인한다."
+    },
+    {
+      "experiment": "TiDE q10-b2 direct",
+      "candidate_priority": "BM 2순위 하한 검증",
+      "feature_set": "price_volatility",
+      "epochs": 3,
+      "limit_tickers": 50,
+      "checkpoint_selection": "band_gate",
+      "wandb": "off 권장",
+      "save_run": false,
+      "why": "현재 fail에 가까운 direct 구조가 feature pruning으로도 살아나지 못하면 후순위로 낮춘다."
+    }
+  ],
+  "baseline_position": {
+    "comparison_only": [
+      "constant_width_train_quantile",
+      "rolling_historical_quantile_band",
+      "rolling_bollinger_return_band",
+      "volatility_scaled_constant_band"
+    ],
+    "excluded_from_phase1_bm_mainline": "AI residual/scale 보정 모델",
+    "phase1_5_candidate_note": "baseline-aware 보정은 Phase 1.5 후보"
+  }
+}

@@ -88,7 +88,10 @@ def clean_json(value: Any) -> Any:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(clean_json(payload), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(
+        json.dumps(clean_json(payload), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -171,9 +174,9 @@ def checkpoint_paths(candidate: cp209.VerificationCandidate) -> dict[int, Path]:
     }
 
 
-def verify_checkpoints() -> list[dict[str, Any]]:
+def verify_checkpoints(candidates: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for candidate in cp209.CANDIDATES:
+    for candidate in candidates:
         for seed, path in checkpoint_paths(candidate).items():
             rows.append(
                 {
@@ -231,7 +234,9 @@ def collect_seed_predictions(
     return np.vstack(line_scores), first_prediction
 
 
-def ensemble_prediction(seed_scores: np.ndarray, base_prediction: dict[str, Any], mode: str) -> dict[str, Any]:
+def ensemble_prediction(
+    seed_scores: np.ndarray, base_prediction: dict[str, Any], mode: str
+) -> dict[str, Any]:
     if mode == "mean":
         score = np.mean(seed_scores, axis=0)
     elif mode == "median":
@@ -254,7 +259,9 @@ def evaluate_ensemble(
     device: torch.device,
     batch_size: int,
 ) -> dict[str, Any]:
-    seed_scores, base_prediction = collect_seed_predictions(candidate=candidate, bundle=bundle, device=device, batch_size=batch_size)
+    seed_scores, base_prediction = collect_seed_predictions(
+        candidate=candidate, bundle=bundle, device=device, batch_size=batch_size
+    )
     mean_prediction = ensemble_prediction(seed_scores, base_prediction, "mean")
     median_prediction = ensemble_prediction(seed_scores, base_prediction, "median")
     mean_metrics = cp175.evaluate_prediction(
@@ -304,7 +311,9 @@ def latest_ensemble_rows(
                     .unsqueeze(0)
                     .to(device)
                 )
-                ticker_id = torch.tensor([int(arrays.get("ticker_id", 0))], dtype=torch.long, device=device)
+                ticker_id = torch.tensor(
+                    [int(arrays.get("ticker_id", 0))], dtype=torch.long, device=device
+                )
                 with torch.no_grad():
                     with cp175._amp_context(device):
                         output = model(window, ticker_id=ticker_id)
@@ -328,7 +337,11 @@ def latest_ensemble_rows(
         model = model.to(device)
         model.eval()
         frame = _recent_rows(model, f"cp210_{candidate.key}_seed{seed}")
-        frames.append(frame[["ticker", "asof_date", "line_score"]].rename(columns={"line_score": f"seed_{seed}"}))
+        frames.append(
+            frame[["ticker", "asof_date", "line_score"]].rename(
+                columns={"line_score": f"seed_{seed}"}
+            )
+        )
         del model
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -342,7 +355,19 @@ def latest_ensemble_rows(
     merged["actual_h5_return"] = np.nan
     merged["model_id"] = f"cp210_{candidate.key}_ensemble_mean"
     merged["source_cp"] = "CP210"
-    return cp208z.add_rank_columns(merged[["ticker", "asof_date", "line_score", "safe_line_score", "actual_h5_return", "model_id", "source_cp"]])
+    return cp208z.add_rank_columns(
+        merged[
+            [
+                "ticker",
+                "asof_date",
+                "line_score",
+                "safe_line_score",
+                "actual_h5_return",
+                "model_id",
+                "source_cp",
+            ]
+        ]
+    )
 
 
 def export_ensemble(
@@ -352,9 +377,13 @@ def export_ensemble(
     bundle: Any,
     device: torch.device,
 ) -> dict[str, Any]:
-    historical = cp208z.prediction_to_frame(test_result["mean_prediction"], f"cp210_{candidate.key}_ensemble_mean")
+    historical = cp208z.prediction_to_frame(
+        test_result["mean_prediction"], f"cp210_{candidate.key}_ensemble_mean"
+    )
     latest = latest_ensemble_rows(candidate=candidate, bundle=bundle, device=device)
-    combined = pd.concat([historical, latest], ignore_index=True).drop_duplicates(["ticker", "asof_date"], keep="last")
+    combined = pd.concat([historical, latest], ignore_index=True).drop_duplicates(
+        ["ticker", "asof_date"], keep="last"
+    )
     combined = combined.sort_values(["ticker", "asof_date"]).reset_index(drop=True)
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     label = "F4b4" if candidate.key == "F4_b4" else "F6b7"
@@ -395,8 +424,8 @@ def pass_status(test_metrics: dict[str, Any], wf_rows: list[dict[str, Any]]) -> 
 
 
 def final_label(candidate_eval: dict[str, dict[str, Any]]) -> str:
-    f4 = bool(candidate_eval["F4_b4"]["ship"]["pass"])
-    f6 = bool(candidate_eval["F6_b7"]["ship"]["pass"])
+    f4 = bool(candidate_eval.get("F4_b4", {}).get("ship", {}).get("pass"))
+    f6 = bool(candidate_eval.get("F6_b7", {}).get("ship", {}).get("pass"))
     if f4 and f6:
         return "SHIP_BOTH"
     if f4:
@@ -437,7 +466,15 @@ def write_report(payload: dict[str, Any]) -> None:
             f"{metrics['severe_downside_recall_line_negative']:.6f} | {metrics['long_short_spread']:.6f} | "
             f"{metrics['fee_adjusted_return']:.6f} | {result['ship']['pass']} |"
         )
-    lines.extend(["", "## Walk-Forward Ensemble Mean", "", "| 후보 | fold | IC | false-safe | severe recall | spread |", "|---|---|---:|---:|---:|---:|"])
+    lines.extend(
+        [
+            "",
+            "## Walk-Forward Ensemble Mean",
+            "",
+            "| 후보 | fold | IC | false-safe | severe recall | spread |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+    )
     for row in payload["fold_rows"]:
         if row["mode"] != "mean":
             continue
@@ -460,10 +497,20 @@ def write_report(payload: dict[str, Any]) -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    update_progress("started", total_candidates=10, next_stage="checkpoint_verify", eta="1~2시간 예상")
-    checkpoint_rows = verify_checkpoints()
+    candidates = [c for c in cp209.CANDIDATES if c.key in args.candidates]
+    if not candidates:
+        raise ValueError(
+            f"선택된 후보가 없습니다: {args.candidates}. 가능: {[c.key for c in cp209.CANDIDATES]}"
+        )
+    total = len(candidates) * len(SEEDS)
+    update_progress(
+        "started", total_candidates=total, next_stage="checkpoint_verify", eta="1~2시간 예상"
+    )
+    checkpoint_rows = verify_checkpoints(candidates)
     write_csv(DOCS_DIR / "cp210_checkpoint_audit.csv", checkpoint_rows)
-    update_progress("checkpoint_verified", total_candidates=10, next_stage="payload_load", eta="데이터 로딩")
+    update_progress(
+        "checkpoint_verified", total_candidates=total, next_stage="payload_load", eta="데이터 로딩"
+    )
 
     device = cp209.cp208z.device_from_arg(args.device)
     update_progress("runtime_locked", current_candidate=str(device), next_stage="payload_load")
@@ -472,9 +519,12 @@ def run(args: argparse.Namespace) -> None:
     train_q10 = prepared["train_q10"]
     update_progress(
         "payload_loaded",
-        total_candidates=10,
+        total_candidates=total,
         next_stage="test_ensemble",
-        last_metric_snapshot={"source_hash": prepared["payload"].get("source_hash"), **prepared["base_counts"]},
+        last_metric_snapshot={
+            "source_hash": prepared["payload"].get("source_hash"),
+            **prepared["base_counts"],
+        },
     )
 
     candidate_eval: dict[str, dict[str, Any]] = {}
@@ -483,9 +533,15 @@ def run(args: argparse.Namespace) -> None:
     export_rows: list[dict[str, Any]] = []
     completed = 0
 
-    for candidate in cp209.CANDIDATES:
+    for candidate in candidates:
         cache = split_cache[candidate.key]
-        update_progress("test_ensemble_start", current_candidate=candidate.key, completed_candidates=completed, total_candidates=10, eta="test ensemble forward")
+        update_progress(
+            "test_ensemble_start",
+            current_candidate=candidate.key,
+            completed_candidates=completed,
+            total_candidates=total,
+            eta="test ensemble forward",
+        )
         test_result = evaluate_ensemble(
             candidate=candidate,
             bundle=cache["test"],
@@ -495,14 +551,30 @@ def run(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
         )
         completed += 5
-        export_rows.append(export_ensemble(candidate=candidate, test_result=test_result, bundle=cache["test"], device=device))
-        summary_rows.append({"candidate_key": candidate.key, "mode": "mean", **metric_snapshot(test_result["mean_metrics"])})
-        summary_rows.append({"candidate_key": candidate.key, "mode": "median", **metric_snapshot(test_result["median_metrics"])})
+        export_rows.append(
+            export_ensemble(
+                candidate=candidate, test_result=test_result, bundle=cache["test"], device=device
+            )
+        )
+        summary_rows.append(
+            {
+                "candidate_key": candidate.key,
+                "mode": "mean",
+                **metric_snapshot(test_result["mean_metrics"]),
+            }
+        )
+        summary_rows.append(
+            {
+                "candidate_key": candidate.key,
+                "mode": "median",
+                **metric_snapshot(test_result["median_metrics"]),
+            }
+        )
         update_progress(
             "test_ensemble_done",
             current_candidate=candidate.key,
             completed_candidates=completed,
-            total_candidates=10,
+            total_candidates=total,
             last_metric_snapshot=metric_snapshot(test_result["mean_metrics"]),
             next_stage="wf_ensemble",
             eta="fold 4개 forward",
@@ -541,8 +613,11 @@ def run(args: argparse.Namespace) -> None:
                 "wf_fold_done",
                 current_candidate=f"{candidate.key}_{fold}",
                 completed_candidates=len([row for row in fold_rows if row["mode"] == "mean"]),
-                total_candidates=8,
-                last_metric_snapshot={key: candidate_fold_rows[-1][key] for key in ["ic", "false_safe", "severe_recall", "spread"]},
+                total_candidates=len(candidates) * len(cp209.FOLDS),
+                last_metric_snapshot={
+                    key: candidate_fold_rows[-1][key]
+                    for key in ["ic", "false_safe", "severe_recall", "spread"]
+                },
                 next_stage="wf_or_next_candidate",
             )
         candidate_eval[candidate.key] = {
@@ -552,6 +627,7 @@ def run(args: argparse.Namespace) -> None:
         }
 
     label = final_label(candidate_eval)
+    evaluated = list(candidate_eval.keys())
     if label == "SHIP_BOTH":
         recommendation = "둘 다 완화 기준 통과. IC 우선이면 F4 beta=4 권장."
     elif label == "SHIP_F4":
@@ -559,7 +635,9 @@ def run(args: argparse.Namespace) -> None:
     elif label == "SHIP_F6":
         recommendation = "F6 beta=7 ensemble ship 후보."
     else:
-        recommendation = "둘 다 완화 기준 미달. CP175 frozen 유지 또는 별도 hybrid/v2 재고."
+        recommendation = (
+            f"평가 후보 {evaluated} 완화 기준 미달. CP175 frozen 유지 또는 별도 hybrid/v2 재고."
+        )
     payload = {
         "created_at": now_utc(),
         "final_label": label,
@@ -583,13 +661,27 @@ def run(args: argparse.Namespace) -> None:
     write_json(METRICS_JSON, payload)
     write_csv(SUMMARY_CSV, summary_rows)
     write_report(payload)
-    update_progress("completed", completed_candidates=10, total_candidates=10, last_metric_snapshot={"final_label": label}, next_stage="done", eta="완료")
+    update_progress(
+        "completed",
+        completed_candidates=total,
+        total_candidates=total,
+        last_metric_snapshot={"final_label": label},
+        next_stage="done",
+        eta="완료",
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CP210 5-seed ensemble ship verification")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=1024)
+    parser.add_argument(
+        "--candidates",
+        nargs="+",
+        choices=[c.key for c in cp209.CANDIDATES],
+        default=["F4_b4"],
+        help="평가할 후보. 기본은 운영 모델 F4_b4 한 개라 F6_b7 체크포인트 없이도 실행됩니다. 둘 다 보려면 --candidates F4_b4 F6_b7.",
+    )
     return parser.parse_args()
 
 
@@ -597,7 +689,9 @@ def main() -> None:
     try:
         run(parse_args())
     except Exception as exc:
-        update_progress("failed", risk=f"{type(exc).__name__}: {exc}", next_stage="사용자 확인 필요")
+        update_progress(
+            "failed", risk=f"{type(exc).__name__}: {exc}", next_stage="사용자 확인 필요"
+        )
         raise
 
 
