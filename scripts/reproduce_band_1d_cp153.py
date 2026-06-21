@@ -12,6 +12,7 @@ Lens 운영 1D 밴드 (CP153 TiDE q15/q85 lower_focused) 재현 wrapper.
 
 흐름: 환경 검증 → 외부 패키지 점검 → 데이터/checkpoint 배치 → CP153 primary save-run → 결과 비교.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,9 @@ SERVING_PARQUET = REPO_ROOT / "backend" / "data" / "v1" / "predictions_band_1d.p
 def check_environment() -> None:
     py = sys.version_info
     if (py.major, py.minor) != EXPECTED_PYTHON:
-        sys.exit(f"[FAIL] Python {EXPECTED_PYTHON[0]}.{EXPECTED_PYTHON[1]}.x 필요. 현재 {py.major}.{py.minor}.{py.micro}")
+        sys.exit(
+            f"[FAIL] Python {EXPECTED_PYTHON[0]}.{EXPECTED_PYTHON[1]}.x 필요. 현재 {py.major}.{py.minor}.{py.micro}"
+        )
     try:
         import torch  # noqa: WPS433
     except ImportError:
@@ -51,13 +54,19 @@ def check_environment() -> None:
         sys.exit("[FAIL] CUDA 사용 불가. GPU 필요.")
     cap = torch.cuda.get_device_capability(0)
     if cap != EXPECTED_GPU_ARCH:
-        print(f"[WARN] sm_120 (RTX 5060 Ti) 권장. 현재 sm_{cap[0]}{cap[1]} ({torch.cuda.get_device_name(0)})")
-    print(f"[OK] 환경 — Python {py.major}.{py.minor}.{py.micro} / torch {torch.__version__} / GPU {torch.cuda.get_device_name(0)}")
+        print(
+            f"[WARN] sm_120 (RTX 5060 Ti) 권장. 현재 sm_{cap[0]}{cap[1]} ({torch.cuda.get_device_name(0)})"
+        )
+    print(
+        f"[OK] 환경 — Python {py.major}.{py.minor}.{py.micro} / torch {torch.__version__} / GPU {torch.cuda.get_device_name(0)}"
+    )
 
 
 def check_external(external: Path) -> None:
     if not external.exists():
-        sys.exit(f"[FAIL] 외부 패키지 폴더 없음: {external}\n  → 드롭박스에서 external_package.zip 다운로드 후 압축 풀기")
+        sys.exit(
+            f"[FAIL] 외부 패키지 폴더 없음: {external}\n  → Google Drive 재현 패키지에서 checkpoint + parquet 다운로드 후 이 폴더에 배치 (https://drive.google.com/drive/folders/15Y_wLokJP_Y8uOK6WXYgXX-3JqAnw1Q9)"
+        )
     missing = []
     for p in REQUIRED_PARQUETS:
         if not (external / "parquet" / p).exists():
@@ -70,7 +79,9 @@ def check_external(external: Path) -> None:
         for m in missing:
             print(f"  - {m}")
         sys.exit(1)
-    print(f"[OK] 외부 패키지 — parquet {len(REQUIRED_PARQUETS)} + checkpoint {len(REQUIRED_CHECKPOINTS)} 확인")
+    print(
+        f"[OK] 외부 패키지 — parquet {len(REQUIRED_PARQUETS)} + checkpoint {len(REQUIRED_CHECKPOINTS)} 확인"
+    )
 
 
 def stage_files(external: Path) -> None:
@@ -110,7 +121,9 @@ def compare_output(backup: Path) -> None:
 
     print("\n=== 재현 결과 비교 (statistical 허용 오차) ===")
     row_ok = repro.num_rows == ops.num_rows
-    print(f"  rows                : 운영 {ops.num_rows} vs 재현 {repro.num_rows}   {'PASS' if row_ok else 'FAIL'}")
+    print(
+        f"  rows                : 운영 {ops.num_rows} vs 재현 {repro.num_rows}   {'PASS' if row_ok else 'FAIL'}"
+    )
 
     for col in ("band_lower", "band_upper"):
         if col not in repro.column_names or col not in ops.column_names:
@@ -123,8 +136,12 @@ def compare_output(backup: Path) -> None:
         std_diff = abs(rs - os) / (abs(os) + 1e-9)
         m_ok = mean_diff < 0.05
         s_ok = std_diff < 0.10
-        print(f"  {col} 평균        : 운영 {om:.4f} vs 재현 {rm:.4f}   (상대 {mean_diff*100:.2f}%)  {'PASS' if m_ok else 'WARN'}")
-        print(f"  {col} 표준편차    : 운영 {os:.4f} vs 재현 {rs:.4f}   (상대 {std_diff*100:.2f}%)  {'PASS' if s_ok else 'WARN'}")
+        print(
+            f"  {col} 평균        : 운영 {om:.4f} vs 재현 {rm:.4f}   (상대 {mean_diff*100:.2f}%)  {'PASS' if m_ok else 'WARN'}"
+        )
+        print(
+            f"  {col} 표준편차    : 운영 {os:.4f} vs 재현 {rs:.4f}   (상대 {std_diff*100:.2f}%)  {'PASS' if s_ok else 'WARN'}"
+        )
 
     print(
         "\n학계 관행: bit-exact 일치는 GPU/CUDA 차이로 불가능. "
@@ -135,10 +152,10 @@ def compare_output(backup: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Lens 운영 1D 밴드 (CP153) 재현 wrapper")
     parser.add_argument("--external", type=Path, default=Path("./external_package"))
-    parser.add_argument("--verify-only", action="store_true",
-                        help="환경/외부 패키지만 점검 (학습 X)")
-    parser.add_argument("--force", action="store_true",
-                        help="기존 결과 덮어쓰기")
+    parser.add_argument(
+        "--verify-only", action="store_true", help="환경/외부 패키지만 점검 (학습 X)"
+    )
+    parser.add_argument("--force", action="store_true", help="기존 결과 덮어쓰기")
     args = parser.parse_args()
 
     print("Lens 1D 밴드 재현 wrapper — CP153 TiDE q15/q85 lower_focused\n")
@@ -157,7 +174,9 @@ def main() -> None:
         cmd.append("--force")
     run_step(cmd, "CP153 primary save-run (~ 수 시간 on RTX 5060 Ti)")
     compare_output(backup)
-    print("\n[DONE] 재현 완료. 결과 parquet: backend/data/v1/predictions_band_1d.parquet (운영 원본은 .ops_backup.parquet)")
+    print(
+        "\n[DONE] 재현 완료. 결과 parquet: backend/data/v1/predictions_band_1d.parquet (운영 원본은 .ops_backup.parquet)"
+    )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 /**
- * CP220 — 운영 3 모델 재현성 매니페스트 (env, fold, seeds, artifacts, repro steps, TODO).
+ * CP220 — 운영 3 모델 재현성 매니페스트 (env, fold, seeds, artifacts, 재현 경로 A/B).
  *
- * 단일 진리: `docs/v1_operating_models_reproducibility.md` 섹션0 (환경 공통) + 섹션1~3 (모델별).
+ * 단일 진리: `docs/v1_operating_models_reproducibility.md` 섹션0 (환경 공통) + 섹션1~3 (모델별)
+ * + Google Drive 재현 패키지의 모델별 `재현절차.md`.
  * v1 동안 정적. v2 manifest 자동 생성으로 transition 시 fetcher 로 교체.
  */
 import type { ProductSlotId } from "@/lib/productSlots";
@@ -43,13 +44,17 @@ export interface ReproducibilityBlock {
   gpuArch: string;
   cudaRuntime: string;
   gpuEnv: string[];
-  /** 깃 안 산출물 (외부에서 클론 후 바로 볼 수 있음). */
+  /** 깃 클론에 바로 포함된 산출물. */
   artifactsInGit: string[];
-  /** 외부 패키지 산출물 (드롭박스 등 — 학습 재현 위해 다운로드 필요). */
-  artifactsExternal: string[];
+  /** Google Drive 재현 패키지 동봉물 — 체크포인트·학습 데이터. */
+  drivePackage: string[];
+  /** Drive 재현 패키지 폴더 링크. */
+  driveUrl: string;
   servingParquetPath: string;
-  /** 학습 재현 명령 — 외부 패키지 다운로드 후 실행. GPU sm_120 필수. */
-  trainingSteps: string[];
+  /** 재현 경로 A — 체크포인트 추론. 빠르고 권장. */
+  pathASteps: string[];
+  /** 재현 경로 B — 재학습. statistical 재현, GPU sm_120 권장. */
+  pathBSteps: string[];
 }
 
 // 공통 환경 — `docs/v1_operating_models_reproducibility.md` 섹션0
@@ -58,9 +63,9 @@ const COMMON_TORCH = "2.11.0+cu128";
 const COMMON_PACKAGES: PackageVersion[] = [
   { name: "numpy", version: "1.26.4" },
   { name: "pandas", version: "2.2.2" },
-  { name: "pyarrow", version: "16.1.0" },
+  { name: "pyarrow", version: "17.0.0" },
   { name: "scipy", version: "1.15.3" },
-  { name: "fastapi", version: "0.111.0" },
+  { name: "fastapi", version: "0.115.6" },
   { name: "uvicorn", version: "0.30.1" },
   { name: "optuna", version: "4.8.0" },
 ];
@@ -72,6 +77,11 @@ const COMMON_GPU_ENV = [
   "TORCHDYNAMO_DISABLE=1",
   "DataLoader num_workers=0 (Windows + sm_120 폴백)",
 ];
+
+// 공통 — Google Drive 재현 패키지 폴더
+const DRIVE_URL = "https://drive.google.com/drive/folders/15Y_wLokJP_Y8uOK6WXYgXX-3JqAnw1Q9";
+const INSTALL_STEP =
+  "GitHub clone, Python 3.10 .venv 준비, pip install -r requirements.txt -r backend/requirements.txt -r backend/collector/requirements.txt";
 
 const LINE_REPRO: ReproducibilityBlock = {
   runId: "cp210_F4_b4_ensemble_mean",
@@ -93,23 +103,30 @@ const LINE_REPRO: ReproducibilityBlock = {
   cudaRuntime: COMMON_CUDA_RUNTIME,
   gpuEnv: COMMON_GPU_ENV,
   artifactsInGit: [
-    "scripts/reproduce_line_cp210.py (한 줄 재현 wrapper — 환경/패키지 점검 + 학습 실행)",
-    "docs/cp210_ensemble_report.md",
-    "docs/cp210_progress_latest.md",
-    "ai/cp209_lm_f4_f6_pre_ship_verification.py + ai/cp210_lm_ensemble_ship_verification.py (학습 entry)",
-    "ai/cp208z, cp164, cp175, cp160, cp171 (학습 의존 cascade — 자동 import 됨)",
+    "ai/cp209_lm_f4_f6_pre_ship_verification.py + ai/cp210_lm_ensemble_ship_verification.py (학습·앙상블 entry)",
+    "ai/cp208z, cp164, cp175, cp160, cp171 + line cascade (자동 import)",
+    "scripts/reproduce_line_cp210.py (한 줄 재현 wrapper)",
+    "docs/cp210_ensemble_report.md · docs/cp210_progress_latest.md · docs/cp63_bm_feature_set_plan.json",
   ],
-  artifactsExternal: [
-    "external_package/checkpoints/cp209/seed_{7,13,23,42,71}.pt (5 seed checkpoint, ~수 GB)",
-    "external_package/parquet/price_data_yfinance_500.parquet (학습 시점 스냅샷, source_data_hash 11bf3a4831d54815)",
-    "external_package/parquet/indicators_yfinance_1D_500.parquet (학습 시점 스냅샷)",
+  drivePackage: [
+    "20_per_model/line_CP210/checkpoints/ — cp209/seed_stability seed 7·13·23·71 + cp208z seed42 (운영 F4_b4 5-seed)",
+    "10_training_data/latest_full/1D/ — price_data_yfinance_500.parquet · indicators_yfinance_1D_500.parquet (+ .manifest.json)",
+    "00_serving_latest/predictions_line_1d.parquet — 대조용 운영 출력",
   ],
+  driveUrl: DRIVE_URL,
   servingParquetPath: "backend/data/v1/predictions_line_1d.parquet",
-  trainingSteps: [
-    "드롭박스에서 external_package_line.zip 다운로드 후 압축 풀기",
-    ".venv\\Scripts\\Activate.ps1; pip install -r requirements.txt",
-    "python scripts\\reproduce_line_cp210.py --external .\\external_package  (~12h on RTX 5060 Ti)",
-    "wrapper 가 환경/패키지/CP209 학습/CP210 ensemble forward 자동 수행 + 결과 검증",
+  pathASteps: [
+    INSTALL_STEP,
+    "Drive 20_per_model/line_CP210/checkpoints/ → ai/artifacts/checkpoints/ 같은 구조로 복사",
+    "Drive 10_training_data/latest_full/1D/ parquet → data/parquet/ 배치",
+    "python ai/cp210_lm_ensemble_ship_verification.py — 기본값이 운영 F4_b4 한 개라 추론만 실행 (F6 체크포인트 불필요)",
+    "출력이 00_serving_latest/predictions_line_1d.parquet 과 통계적으로 일치하는지 확인",
+  ],
+  pathBSteps: [
+    "training_cutoff/1D/ parquet 을 data/parquet/ 에 두면 학습 시간 윈도우",
+    "python ai/cp209_lm_f4_f6_pre_ship_verification.py — 5-seed 학습",
+    "python ai/cp210_lm_ensemble_ship_verification.py — 앙상블 forward",
+    "한 줄 wrapper: python scripts/reproduce_line_cp210.py --external <Drive 다운로드 폴더>  (~12h, RTX 5060 Ti)",
   ],
 };
 
@@ -133,28 +150,34 @@ const BAND_1D_REPRO: ReproducibilityBlock = {
   cudaRuntime: COMMON_CUDA_RUNTIME,
   gpuEnv: COMMON_GPU_ENV,
   artifactsInGit: [
+    "ai/cp153_bm_1d_band_primary_save_run.py + cp153 stage cascade (자동 import)",
+    "backend/scripts/cp210_band_forward_refresh.py (체크포인트 추론 entry)",
     "scripts/reproduce_band_1d_cp153.py (한 줄 재현 wrapper)",
-    "docs/cp153_bm_1d_band_primary_product_candidate_save_run_report.md",
-    "ai/cp153_bm_1d_band_primary_save_run.py (학습 entry)",
-    "ai/cp153_bm_1d_band_500_stage{0_1, 2, 2_5_to_5, 4r_5t} (학습 의존 cascade — 자동 import 됨)",
+    "docs/cp153_bm_1d_band_primary_product_candidate_run_meta.json (체크포인트·registry 경로 자동 참조) · save_run_report.md",
   ],
-  artifactsExternal: [
-    "external_package/checkpoints/cp153/tide-1D-ea54dcae654d-seed_{7,42,123}.pt (3 seed checkpoint, ~수 GB)",
-    "external_package/parquet/price_data_yfinance_500.parquet (학습 시점 스냅샷, source_data_hash 90666b44cbfb8e5c)",
-    "external_package/parquet/indicators_yfinance_1D_500.parquet",
-    "Stage별 보고서 묶음 (cp153_*_stage{0_1,2,2_5,3,4,5}_*.md) — 운영 핵심만 깃, 나머지는 외부",
+  drivePackage: [
+    "20_per_model/band1d_CP153/checkpoints/tide_1D-ea54dcae654d.pt — 운영 체크포인트",
+    "10_training_data/latest_full/{1D,1W}/ parquet (+ .manifest.json) — refresh 가 1D·1W 함께 읽음",
+    "00_serving_latest/predictions_band_1d.parquet — 대조용 운영 출력",
   ],
+  driveUrl: DRIVE_URL,
   servingParquetPath: "backend/data/v1/predictions_band_1d.parquet",
-  trainingSteps: [
-    "드롭박스에서 external_package_band_1d.zip 다운로드 후 압축 풀기",
-    ".venv\\Scripts\\Activate.ps1; pip install -r requirements.txt",
-    "python scripts\\reproduce_band_1d_cp153.py --external .\\external_package",
-    "wrapper 가 환경/패키지/CP153 primary save-run 자동 수행 + 결과 검증",
+  pathASteps: [
+    INSTALL_STEP,
+    "Drive 20_per_model/band1d_CP153/checkpoints/tide_1D-ea54dcae654d.pt → ai/artifacts/checkpoints/ 배치",
+    "Drive 10_training_data/latest_full/{1D,1W}/ parquet → data/parquet/ 배치",
+    "python backend/scripts/cp210_band_forward_refresh.py --apply — 1D·1W 밴드 함께 생성",
+    "출력이 00_serving_latest/predictions_band_1d.parquet 과 일치하는지 확인",
+  ],
+  pathBSteps: [
+    "training_cutoff/1D/ parquet 을 data/parquet/ 에 두면 학습 시간 윈도우",
+    "python ai/cp153_bm_1d_band_primary_save_run.py — 기본 3 epoch, 에폭 오버라이드 인자 없음",
+    "한 줄 wrapper: python scripts/reproduce_band_1d_cp153.py --external <Drive 다운로드 폴더>",
   ],
 };
 
 const BAND_1W_REPRO: ReproducibilityBlock = {
-  runId: "tide_s60_q10_q90_param",
+  runId: "tide_s104_q10q90_param",
   sourceCp: "CP178-WFLOCK",
   backbone: "TiDE (1D 와 동일 백본)",
   outputContract: "quantile pair (q_low 0.10 / q_high 0.90, target coverage 80%)",
@@ -173,22 +196,28 @@ const BAND_1W_REPRO: ReproducibilityBlock = {
   cudaRuntime: COMMON_CUDA_RUNTIME,
   gpuEnv: COMMON_GPU_ENV,
   artifactsInGit: [
+    "ai/cp178_wflock_1w_band_walk_forward_lower.py + cp178 cascade (cal/alt/diag/stage 자동 import)",
+    "backend/scripts/cp210_band_forward_refresh.py (체크포인트 추론 entry, 1D·1W 공용)",
     "scripts/reproduce_band_1w_cp178.py (한 줄 재현 wrapper)",
-    "docs/cp178_wflock_1w_band_walk_forward_lower_report.md",
-    "ai/cp178_wflock_1w_band_walk_forward_lower.py (WFLOCK 학습 entry — cascade 없음, 단독)",
+    "docs/cp178_bm_1w_band_500_stage5_true_walk_forward_summary.csv (운영 9개 선택·calibration 자동 참조) · cp178_wflock report.md",
   ],
-  artifactsExternal: [
-    "external_package/checkpoints/cp178/tide_s60_q10_q90_param-seed_{7,42,123}.pt (3 seed checkpoint, ~수 GB)",
-    "external_package/parquet/price_data_yfinance_500.parquet (1D 가격, weekly resample 입력)",
-    "external_package/parquet/indicators_yfinance_1W_500.parquet (1W 가공 feature)",
-    "Stage별 보고서 묶음 (cp178_*_stage{0,1,2,3,4,5}_*.md, cp178_cal_*, cp178_alt_*) — 운영 핵심만 깃, 나머지는 외부",
+  drivePackage: [
+    "20_per_model/band1w_CP178/checkpoints/ — tide_1W-*.pt 9개 (3-fold × 3-seed, 운영 tide_s104_q10q90_param)",
+    "10_training_data/latest_full/{1D,1W}/ parquet (+ .manifest.json)",
+    "00_serving_latest/predictions_band_1w.parquet — 대조용 운영 출력",
   ],
+  driveUrl: DRIVE_URL,
   servingParquetPath: "backend/data/v1/predictions_band_1w.parquet",
-  trainingSteps: [
-    "드롭박스에서 external_package_band_1w.zip 다운로드 후 압축 풀기",
-    ".venv\\Scripts\\Activate.ps1; pip install -r requirements.txt",
-    "python scripts\\reproduce_band_1w_cp178.py --external .\\external_package",
-    "wrapper 가 환경/패키지/CP178 WFLOCK walk-forward + lower calibration 자동 수행 + 결과 검증",
+  pathASteps: [
+    INSTALL_STEP,
+    "Drive 20_per_model/band1w_CP178/checkpoints/ 의 tide_1W-*.pt 9개 → ai/artifacts/checkpoints/ 배치",
+    "Drive 10_training_data/latest_full/{1D,1W}/ parquet → data/parquet/ 배치",
+    "python backend/scripts/cp210_band_forward_refresh.py --apply — summary.csv 가 운영 s104 9개 체크포인트·calibration 선택",
+    "출력이 00_serving_latest/predictions_band_1w.parquet 과 일치하는지 확인",
+  ],
+  pathBSteps: [
+    "운영 1W 밴드 tide_s104 재현은 경로 A 로 충분하다. 운영 체크포인트 9개가 패키지에 동봉돼 추론만으로 재현된다.",
+    "ai/cp178_wflock_1w_band_walk_forward_lower.py 는 운영 모델 재학습이 아니라 비운영 후보 tide_s60 의 walk-forward 하단 보정 분석이다. 그 후보 체크포인트는 용량상 미동봉.",
   ],
 };
 

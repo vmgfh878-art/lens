@@ -288,11 +288,12 @@ python backend/scripts/rebuild_product_history_parquet.py
 
 **준비**
 
-1. 드롭박스에서 외부 패키지 다운로드 (제출자에게 URL 문의):
-   - `external_package_line.zip` — CP209 5-seed checkpoint + 학습 시점 parquet
-   - `external_package_band_1d.zip` — CP153 3-seed checkpoint + parquet
-   - `external_package_band_1w.zip` — CP178 3-seed checkpoint + 1W parquet
-2. 압축 풀어 `lens/external_package/` 폴더에 배치.
+1. [Google Drive](https://drive.google.com/drive/folders/15Y_wLokJP_Y8uOK6WXYgXX-3JqAnw1Q9) 에서 재현 패키지 다운로드:
+   - `20_per_model/{line_CP210,band1d_CP153,band1w_CP178}/checkpoints/*.pt` — 모델별 운영 체크포인트
+   - `10_training_data/latest_full/{1D,1W}/*.parquet` (+ `.manifest.json`) — 학습·추론 데이터
+2. 다운로드한 checkpoint 와 parquet 를 `lens/external_package/` 폴더에 모아 배치 후 `--external` 로 지정.
+
+> 빠른 재현은 체크포인트 추론 (경로 A) 이며 화면 **AI 모델 → 모델 슬롯 → 재현 매니페스트** 또는 Drive 각 모델 `재현절차.md` 에 단계가 있습니다. 아래 wrapper 는 재학습 (경로 B) 한 줄 실행용입니다.
 
 **실행**
 
@@ -333,15 +334,15 @@ bit-exact 일치는 GPU / CUDA / kernel 구현 차이로 불가능하지만 stat
 | 운영 모델 관련 핵심 보고서 (CP210 / CP153 / CP178 / CP216.2) | **깃** | 결과 narrative + 통계 검정 |
 | v1 product signal parquet (`backend/data/v1/*.parquet`) | **깃** (~18 MB) | frontend 서빙용 (Render 배포 동봉) |
 | 학습 entry + cascade 의존 (`ai/cp{209,210,153,178}*.py` + 9 cascade) | **깃** (텍스트 작음) | 학습 재현 wrapper 가 호출 |
-| 모델 checkpoint (`data/artifacts/cp{210,153,178}/*.pt`) | **드롭박스** (~수 GB) | 학습 재현 시 필요 |
-| 학습 시점 parquet (`data/parquet/*.parquet`) | **드롭박스** (~1 GB) | 학습 재현 시 필요 |
-| 전체 CP 60+ 보고서 (운영 외) | **드롭박스** | 참고 자료 |
+| 모델 checkpoint (`20_per_model/*/checkpoints/*.pt`) | **Google Drive** (~수 GB) | 재현 시 필요 |
+| 학습·추론 parquet (`10_training_data/*.parquet`) | **Google Drive** (~1 GB) | 재현 시 필요 |
+| 전체 CP 60+ 보고서 (운영 외) | 로컬 (미배포) | 참고 자료 |
 | W&B logs / 학습 로그 | git/DB 제외 | 로컬만 |
 
 ### 원칙
 
 - **운영 모델 3개만** 깃에 핵심 보고서 + 학습 entry + cascade 의존 포함 (`.gitignore` 예외)
-- 대량 binary (checkpoint, parquet, W&B) 는 깃 제외 → 드롭박스 외부 패키지
+- 대량 binary (checkpoint, parquet, W&B) 는 깃 제외 → Google Drive 재현 패키지
 - v1 product signal parquet 만 깃 포함 (Render 배포 동봉)
 - provider / source / hash / asof_date 기록으로 재현성 확보
 - 모델 결과는 product slot 에 수동 승인 후 연결 (`build_v1_predictions_local.py` → `git push`)

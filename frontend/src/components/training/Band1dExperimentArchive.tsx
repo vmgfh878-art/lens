@@ -139,16 +139,28 @@ export default function Band1dExperimentArchive() {
             ))}
           </ul>
 
-          <div className="experiment-archive__block-title">산출물 — 외부 패키지 (드롭박스)</div>
+          <div className="experiment-archive__block-title">산출물 — Google Drive 재현 패키지</div>
           <ul className="experiment-archive__list experiment-archive__list--external">
-            {repro.artifactsExternal.map((p, i) => (
+            {repro.drivePackage.map((p, i) => (
               <li key={i}><code>{p}</code></li>
             ))}
           </ul>
+          <p className="experiment-archive__drive-link">
+            <a href={repro.driveUrl} target="_blank" rel="noopener noreferrer">
+              Google Drive 재현 패키지 열기 ↗
+            </a>
+          </p>
 
-          <div className="experiment-archive__block-title">학습 재현 — GPU sm_120 필수</div>
+          <div className="experiment-archive__block-title">재현 경로 A — 체크포인트 추론 (권장)</div>
           <ol className="experiment-archive__steps">
-            {repro.trainingSteps.map((s, i) => (
+            {repro.pathASteps.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+
+          <div className="experiment-archive__block-title">재현 경로 B — 재학습 (GPU sm_120 권장)</div>
+          <ol className="experiment-archive__steps">
+            {repro.pathBSteps.map((s, i) => (
               <li key={i}>{s}</li>
             ))}
           </ol>
