@@ -68,6 +68,18 @@ def raw_flatten(
 
 
 def collect_raw_frames(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    missing = [
+        str(row.get("checkpoint_path"))
+        for row in rows
+        if not (row.get("checkpoint_path") and Path(str(row["checkpoint_path"])).exists())
+    ]
+    if missing:
+        print(
+            f"[cp178 rescue] 비운영 후보 {TARGET_CANDIDATE_ID} 의 체크포인트 {len(missing)}개가 "
+            "패키지에 없어 walk-forward 하단 보정 분석을 건너뜁니다. "
+            "운영 1W 밴드 재현은 재현 경로 A 를 사용하세요."
+        )
+        raise SystemExit(0)
     candidate = build_candidate()
     context = diag.load_context()
     payloads: list[dict[str, Any]] = []
