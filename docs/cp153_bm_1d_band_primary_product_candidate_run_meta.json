@@ -54,8 +54,8 @@
   "lambda_band": 2.0,
   "latest_artifact": {
     "asof_date": "2026-05-08",
-    "jsonl_path": "C:\\Users\\user\\lens\\docs\\cp153_bm_1d_band_primary_product_candidate_latest_predictions.jsonl",
-    "path": "C:\\Users\\user\\lens\\docs\\cp153_bm_1d_band_primary_product_candidate_latest_predictions.json",
+    "jsonl_path": "docs/cp153_bm_1d_band_primary_product_candidate_latest_predictions.jsonl",
+    "path": "docs/cp153_bm_1d_band_primary_product_candidate_latest_predictions.json",
     "prediction_count": 474
   },
   "line_target_type": "raw_future_return",

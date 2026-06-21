@@ -132,7 +132,8 @@ def calibration_payload(method: str | None, params: dict[str, Any]) -> dict[str,
 def resolve_path(raw: str | Path | None) -> Path:
     if raw is None:
         raise ValueError("checkpoint path가 비어 있습니다.")
-    path = Path(str(raw))
+    # run_meta·summary 의 경로가 Windows 백슬래시라 비-Windows 에서 단일 컴포넌트로 깨진다. 정규화한다.
+    path = Path(str(raw).replace("\\", "/"))
     return path if path.is_absolute() else ROOT / path
 
 

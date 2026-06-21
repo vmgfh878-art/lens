@@ -222,12 +222,14 @@ product gate: PASS.
 
 | 항목 | 값 |
 |---|---|
-| run_id (parquet model_id) | `tide_s60_q10_q90_param` |
+| run_id (parquet model_id) | `tide_s104_q10q90_param` |
 | source_cp | `CP178-WFLOCK` |
 | 백본 | TiDE (1D와 동일) |
 | q_low / q_high | `0.10 / 0.90` (목표 coverage 80%) |
 | calibration | walk-forward lower calibration |
 | timeframe / horizon | 1W / h4 (주 4주) |
+
+비고: 서빙·재현은 운영 체크포인트 `tide_s104_q10q90_param` 9개를 사용한다. walk-forward lower calibration 분석은 비운영 후보 `tide_s60_q10_q90_param` 에서 수행했고, 인용 metric 은 그 분석 기준이다.
 
 ### 데이터
 
