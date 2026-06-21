@@ -226,7 +226,7 @@ product gate: PASS.
 | source_cp | `CP178-WFLOCK` |
 | 백본 | TiDE (1D와 동일) |
 | q_low / q_high | `0.10 / 0.90` (목표 coverage 80%) |
-| calibration | walk-forward lower calibration |
+| calibration | symmetric_expand, lower/upper_scale 1.05 (summary.csv 정의) |
 | timeframe / horizon | 1W / h4 (주 4주) |
 
 비고: 서빙·재현은 운영 체크포인트 `tide_s104_q10q90_param` 9개를 사용한다. walk-forward lower calibration 분석은 비운영 후보 `tide_s60_q10_q90_param` 에서 수행했고, 인용 metric 은 그 분석 기준이다.
@@ -250,7 +250,7 @@ CP153 1D 와 동일한 fold 정의 사용 (1W 표본 수 적음을 감안한 동
 | fold_2 | 2024-11-01 | 2025-05-01 | 2025-11-01 |
 | fold_3 | 2025-05-01 | 2025-11-01 | 2026-05-09 |
 
-운영 모델은 WFLOCK (`cp178_wflock_1w_band_walk_forward_lower`) 채택. lower calibration 별도 적용.
+운영 서빙은 위 9개 체크포인트(`tide_s104_q10q90_param`) 앙상블을 `backend/scripts/cp210_band_forward_refresh.py` 가 추론한다. `cp178_wflock_1w_band_walk_forward_lower` 는 비운영 후보 `tide_s60_q10_q90_param` 의 하단 보정 분석 스크립트이며 서빙 경로가 아니다.
 
 ### 성능 (운영 시점 기준 — TrainingView에 박힌 수치)
 
@@ -274,7 +274,7 @@ CP153 1D 와 동일한 fold 정의 사용 (1W 표본 수 적음을 감안한 동
 
 1. `.venv` 활성, 핵심 패키지 동일.
 2. 1W feature parquet 스냅샷 복원.
-3. Stage 1~5 순차 재현 + walk-forward lower calibration 적용 (WFLOCK).
+3. Stage 1~5 순차 재현은 재학습 경로다. 운영 서빙 재현은 9개 체크포인트 로드 추론 + summary.csv calibration(symmetric_expand, scale 1.05) — 드라이브 band1w 재현절차 경로 A.
 4. adaptive calibration 적용 시 별도 보고서 절차 참조.
 
 ---
