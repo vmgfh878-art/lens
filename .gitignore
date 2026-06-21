@@ -30,6 +30,9 @@ docs/refactoring_master_plan.md
 # cp178 rescue expansion metrics 는 cp178_wflock 1W 밴드 재학습의 target rows.
 !docs/cp63_bm_feature_set_plan.json
 !docs/cp178_bm_1w_band_500_rescue_expansion_metrics.json
+# cp153 stage0_1/stage2 metrics 는 cp153 1D 밴드 Path B 가 읽는 입력.
+!docs/cp153_bm_1d_band_500_stage0_1_baseline_metrics.json
+!docs/cp153_bm_1d_band_500_stage2_model_zoo_metrics.json
 # CP252 발굴 raw rows(대용량·재현가능 중간물)는 제외. 고정입력(ticker_split/v2_cuts/v2_candidates)
 # + 요약(*.agg.parquet/*.json)만 커밋.
 backend/data/ablation/*.rows.parquet

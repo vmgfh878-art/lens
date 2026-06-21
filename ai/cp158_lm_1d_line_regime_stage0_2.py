@@ -148,8 +148,10 @@ def _prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_source_frames() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any], dict[str, Any]]:
-    price_manifest = _read_json(PRICE_MANIFEST_PATH)
-    indicator_manifest = _read_json(INDICATOR_MANIFEST_PATH)
+    price_manifest = _read_json(PRICE_MANIFEST_PATH) if PRICE_MANIFEST_PATH.exists() else {}
+    indicator_manifest = (
+        _read_json(INDICATOR_MANIFEST_PATH) if INDICATOR_MANIFEST_PATH.exists() else {}
+    )
     price = _prepare_frame(pd.read_parquet(PRICE_PATH))
     indicators = _prepare_frame(pd.read_parquet(INDICATOR_PATH))
     indicators = indicators[indicators["timeframe"].astype(str).str.upper() == TIMEFRAME].copy()
@@ -173,6 +175,8 @@ def prepare_snapshot_overlay() -> dict[str, Any]:
     ]
     entries: list[dict[str, Any]] = []
     for source, target in links:
+        if not source.exists():
+            continue
         if target.exists():
             target.unlink()
         try:

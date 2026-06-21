@@ -50,10 +50,16 @@ from ai.preprocessing import (  # noqa: E402
     split_sequence_dataset_by_plan,
 )
 from ai.ticker_registry import load_registry  # noqa: E402
-from ai.train import MODEL_REGISTRY, autocast_context, forward_model, make_loader, resolve_device, resolve_feature_columns  # noqa: E402
+from ai.train import (
+    MODEL_REGISTRY,
+    autocast_context,
+    forward_model,
+    make_loader,
+    resolve_device,
+    resolve_feature_columns,
+)  # noqa: E402
 
 from ai.cp153_bm_1d_band_500_stage0_1_baseline import (  # noqa: E402
-    BACKFILL_STATE_PATH,
     INDICATOR_MANIFEST_PATH,
     INDICATOR_PATH,
     PRICE_MANIFEST_PATH,
@@ -68,7 +74,6 @@ from ai.cp153_bm_1d_band_500_stage0_1_baseline import (  # noqa: E402
     duplicate_summary,
     ensure_feature_set_plan_available,
     feature_quality_summary,
-    provider_spot_check,
     split_overlap_summary,
 )
 
@@ -83,7 +88,9 @@ SEED = 42
 DEFAULT_EPOCHS = 3
 
 STAGE0_METRICS_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_stage0_1_baseline_metrics.json"
-OHLC_AUDIT_METRICS_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_ohlc_ratio_audit_metrics.json"
+OHLC_AUDIT_METRICS_PATH = (
+    PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_ohlc_ratio_audit_metrics.json"
+)
 
 REPORT_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_stage2_model_zoo_report.md"
 METRICS_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_stage2_model_zoo_metrics.json"
@@ -276,6 +283,8 @@ def prepare_stage2_snapshot_overlay() -> dict[str, Any]:
     ]
     entries: list[dict[str, Any]] = []
     for source, target in links:
+        if not source.exists():
+            continue
         if target.exists():
             target.unlink()
         try:
@@ -322,7 +331,11 @@ def build_contract_payload(
         "val": _collect_targets(val),
         "test": _collect_targets(test),
     }
-    ohlc_audit = _read_json(OHLC_AUDIT_METRICS_PATH) if OHLC_AUDIT_METRICS_PATH.exists() else {"status": "missing"}
+    ohlc_audit = (
+        _read_json(OHLC_AUDIT_METRICS_PATH)
+        if OHLC_AUDIT_METRICS_PATH.exists()
+        else {"status": "missing"}
+    )
     stale_reasons = stage0_metrics.get("stage0", {}).get("contract_fail_reasons")
     return {
         "source_data_hash": SOURCE_DATA_HASH,
@@ -337,7 +350,9 @@ def build_contract_payload(
             "metrics_path": str(STAGE0_METRICS_PATH),
             "summary_csv_path": str(STAGE0_SUMMARY_CSV_PATH),
             "final_status": stage0_metrics.get("final_status"),
-            "timing_smoke_status": stage0_metrics.get("stage0", {}).get("timing_smoke", {}).get("status"),
+            "timing_smoke_status": stage0_metrics.get("stage0", {})
+            .get("timing_smoke", {})
+            .get("status"),
             "stale_contract_fail_reasons": stale_reasons,
             "stale_contract_correction": (
                 "Stage 0/1 stale field이며 timing smoke 실제 status는 PASS"
@@ -348,9 +363,12 @@ def build_contract_payload(
         "ohlc_ratio_audit": {
             "path": str(OHLC_AUDIT_METRICS_PATH),
             "status": ohlc_audit.get("status"),
-            "open_ratio": ohlc_audit.get("feature_contract", {}).get("open_ratio") or ohlc_audit.get("open_ratio"),
-            "high_ratio": ohlc_audit.get("feature_contract", {}).get("high_ratio") or ohlc_audit.get("high_ratio"),
-            "low_ratio": ohlc_audit.get("feature_contract", {}).get("low_ratio") or ohlc_audit.get("low_ratio"),
+            "open_ratio": ohlc_audit.get("feature_contract", {}).get("open_ratio")
+            or ohlc_audit.get("open_ratio"),
+            "high_ratio": ohlc_audit.get("feature_contract", {}).get("high_ratio")
+            or ohlc_audit.get("high_ratio"),
+            "low_ratio": ohlc_audit.get("feature_contract", {}).get("low_ratio")
+            or ohlc_audit.get("low_ratio"),
         },
         "dataset_contract": {
             "input_ticker_count": int(plan.input_ticker_count),
@@ -456,7 +474,11 @@ def run_candidate(candidate: Candidate, *, device: str, force: bool = False) -> 
     evaluation_path = candidate_dir / "evaluation.json"
     if not force and process_path.exists():
         existing = _read_json(process_path)
-        if existing.get("status") == "PASS" and existing.get("checkpoint_path") and Path(existing["checkpoint_path"]).exists():
+        if (
+            existing.get("status") == "PASS"
+            and existing.get("checkpoint_path")
+            and Path(existing["checkpoint_path"]).exists()
+        ):
             return existing
 
     cmd = command_for_candidate(candidate, device=device)
@@ -478,7 +500,12 @@ def run_candidate(candidate: Candidate, *, device: str, force: bool = False) -> 
     start = time.perf_counter()
     output_lines: list[str] = []
     run_id: str | None = None
-    print(json.dumps({"candidate": candidate.candidate_id, "event": "start", "time": start_ts}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"candidate": candidate.candidate_id, "event": "start", "time": start_ts},
+            ensure_ascii=False,
+        )
+    )
     with stdout_path.open("w", encoding="utf-8", newline="") as log_handle:
         proc = subprocess.Popen(
             cmd,
@@ -509,7 +536,9 @@ def run_candidate(candidate: Candidate, *, device: str, force: bool = False) -> 
     checkpoint_path = _resolve_checkpoint_path(local_summary)
     metrics_jsonl_path = str(TRAIN_LOG_BASE_DIR / run_id / "metrics.jsonl") if run_id else None
     epoch_logs = _read_epoch_logs(Path(metrics_jsonl_path)) if metrics_jsonl_path else []
-    status = "PASS" if exit_code == 0 and checkpoint_path and Path(checkpoint_path).exists() else "FAIL"
+    status = (
+        "PASS" if exit_code == 0 and checkpoint_path and Path(checkpoint_path).exists() else "FAIL"
+    )
     failure_reason = None
     if status != "PASS":
         failure_reason = classify_runtime_failure(output_lines)
@@ -539,7 +568,10 @@ def run_candidate(candidate: Candidate, *, device: str, force: bool = False) -> 
         "save_run": False,
         "wandb": False,
     }
-    process_path.write_text(json.dumps(_clean_json(process), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    process_path.write_text(
+        json.dumps(_clean_json(process), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     print(
         json.dumps(
             {
@@ -710,7 +742,9 @@ def select_bundle_features_with_checkpoint_stats(
     )
 
 
-def load_model_from_checkpoint(checkpoint_path: str | Path) -> tuple[Any, dict[str, Any], torch.Tensor, torch.Tensor]:
+def load_model_from_checkpoint(
+    checkpoint_path: str | Path,
+) -> tuple[Any, dict[str, Any], torch.Tensor, torch.Tensor]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     config = dict(checkpoint.get("config") or {})
     model_cls = MODEL_REGISTRY[config["model"]]
@@ -732,7 +766,9 @@ def load_model_from_checkpoint(checkpoint_path: str | Path) -> tuple[Any, dict[s
         model_kwargs["fp32_modules"] = str(config.get("fp32_modules", "none"))
     if config["model"] == "tide":
         use_future_covariate = bool(config.get("use_future_covariate", True))
-        model_kwargs["future_cov_dim"] = config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        model_kwargs["future_cov_dim"] = (
+            config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        )
     if config["model"] == "patchtst":
         model_kwargs["use_revin"] = bool(config.get("use_revin", True))
         model_kwargs["ci_aggregate"] = config.get("ci_aggregate", "target")
@@ -765,9 +801,15 @@ def evaluate_candidate_checkpoint(
         }
     checkpoint_path = process.get("checkpoint_path")
     if not checkpoint_path:
-        return {"candidate_id": candidate.candidate_id, "status": "failed", "reason": "checkpoint_path_missing"}
+        return {
+            "candidate_id": candidate.candidate_id,
+            "status": "failed",
+            "reason": "checkpoint_path_missing",
+        }
     model, config, feature_mean, feature_std = load_model_from_checkpoint(checkpoint_path)
-    train, val, test, plan = build_split_for_checkpoint(price=price, indicators=indicators, checkpoint_config=config)
+    train, val, test, plan = build_split_for_checkpoint(
+        price=price, indicators=indicators, checkpoint_config=config
+    )
     feature_columns = list(config.get("feature_columns") or resolve_feature_columns(FEATURE_SET))
     val_selected = select_bundle_features_with_checkpoint_stats(
         val,
@@ -840,7 +882,14 @@ def _evaluate_band_bundle(
     upper_predictions: list[torch.Tensor] = []
     actual_targets: list[torch.Tensor] = []
     with torch.no_grad():
-        for features, line_target, band_target, raw_future_returns, ticker_id, future_covariates in loader:
+        for (
+            features,
+            line_target,
+            band_target,
+            raw_future_returns,
+            ticker_id,
+            future_covariates,
+        ) in loader:
             del line_target, band_target
             features = features.to(device, non_blocking=True)
             ticker_id = ticker_id.to(device, non_blocking=True)
@@ -859,7 +908,9 @@ def _evaluate_band_bundle(
                 lower = torch.minimum(raw_lower, raw_upper)
                 upper = torch.maximum(raw_lower, raw_upper)
             else:
-                raise TypeError(f"band_model 평가에서 허용하지 않는 출력입니다: {type(output).__name__}")
+                raise TypeError(
+                    f"band_model 평가에서 허용하지 않는 출력입니다: {type(output).__name__}"
+                )
             lower_predictions.append(lower)
             upper_predictions.append(upper)
             actual_targets.append(raw_future_returns.detach().cpu().to(torch.float32))
@@ -1005,7 +1056,10 @@ def _gate_result(
             "failure_category": "runtime",
             "failure_reasons": [evaluation.get("reason") or "evaluation_failed"],
         }
-    if any(_safe_float(metrics.get(key)) is None for key in ["coverage_abs_error", "lower_breach_rate", "asymmetric_interval_score"]):
+    if any(
+        _safe_float(metrics.get(key)) is None
+        for key in ["coverage_abs_error", "lower_breach_rate", "asymmetric_interval_score"]
+    ):
         return {
             "decision": "fail",
             "hard_gate_pass": False,
@@ -1031,12 +1085,24 @@ def _gate_result(
         value = _safe_float(metrics.get(metric))
         threshold_value = _safe_float(threshold)
         if value is None or threshold_value is None:
-            failed.append({"metric": metric, "value": value, "threshold": threshold_value, "reason": "missing"})
+            failed.append(
+                {
+                    "metric": metric,
+                    "value": value,
+                    "threshold": threshold_value,
+                    "reason": "missing",
+                }
+            )
             continue
         ok = value <= threshold_value if direction == "max" else value >= threshold_value
         if ok:
             continue
-        fail_payload = {"metric": metric, "value": value, "threshold": threshold_value, "direction": direction}
+        fail_payload = {
+            "metric": metric,
+            "value": value,
+            "threshold": threshold_value,
+            "direction": direction,
+        }
         failed.append(fail_payload)
         if _is_near_miss(metric, value, threshold_value, direction):
             near_failed.append(fail_payload)
@@ -1044,7 +1110,11 @@ def _gate_result(
     fatal_reasons: list[str] = []
     coverage_abs_error = float(metrics.get("coverage_abs_error"))
     lower_breach_rate = float(metrics.get("lower_breach_rate"))
-    p90_width = float(metrics.get("p90_band_width")) if _safe_float(metrics.get("p90_band_width")) is not None else math.inf
+    p90_width = (
+        float(metrics.get("p90_band_width"))
+        if _safe_float(metrics.get("p90_band_width")) is not None
+        else math.inf
+    )
     p90_gate = _safe_float(gate.get("p90_band_width_overwide_threshold"))
     if coverage_abs_error > 0.15:
         fatal_reasons.append("coverage_collapse")
@@ -1208,7 +1278,9 @@ def _summary_table(rows: list[dict[str, Any]]) -> str:
         "|---|---|---|---:|---:|---:|---:|---|"
     )
     lines = [header]
-    for row in sorted(rows, key=lambda item: float(item.get("band_selection_score") or -1), reverse=True):
+    for row in sorted(
+        rows, key=lambda item: float(item.get("band_selection_score") or -1), reverse=True
+    ):
         lines.append(
             "| {candidate_id} | {family} | {q_label} | {eligible} | {epoch} | {vram} | {score} | {decision} |".format(
                 candidate_id=row.get("candidate_id"),
@@ -1265,7 +1337,9 @@ def _metric_table(rows: list[dict[str, Any]]) -> str:
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
     )
     lines = [header]
-    for row in sorted(rows, key=lambda item: (str(item.get("q_label")), str(item.get("candidate_id")))):
+    for row in sorted(
+        rows, key=lambda item: (str(item.get("q_label")), str(item.get("candidate_id")))
+    ):
         lines.append(
             "| {candidate_id} | {coverage_abs_error} | {lower_breach_rate} | {upper_breach_rate} | "
             "{lower_breach_abs_error} | {asymmetric_interval_score} | {band_width_ic} | {downside_width_ic} | "
@@ -1294,7 +1368,13 @@ def _fmt(value: Any) -> str:
 
 def write_metrics(metrics: dict[str, Any]) -> None:
     METRICS_PATH.write_text(
-        json.dumps(_clean_json(metrics), ensure_ascii=False, indent=2, sort_keys=True, default=_json_default),
+        json.dumps(
+            _clean_json(metrics),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=_json_default,
+        ),
         encoding="utf-8",
     )
 
@@ -1310,7 +1390,9 @@ def main() -> None:
     stage0_metrics = _read_json(STAGE0_METRICS_PATH)
     price, indicators = _read_parquet_frames()
     overlay = prepare_stage2_snapshot_overlay()
-    contract = build_contract_payload(price=price, indicators=indicators, stage0_metrics=stage0_metrics)
+    contract = build_contract_payload(
+        price=price, indicators=indicators, stage0_metrics=stage0_metrics
+    )
     selected_candidates = [
         candidate
         for candidate in CANDIDATES
@@ -1323,7 +1405,9 @@ def main() -> None:
         process = run_candidate(candidate, device=device, force=args.force)
         processes[candidate.candidate_id] = process
         evaluation_path = LOG_DIR / candidate.candidate_id / "evaluation.json"
-        existing_evaluation = _read_json(evaluation_path) if evaluation_path.exists() and not args.force else None
+        existing_evaluation = (
+            _read_json(evaluation_path) if evaluation_path.exists() and not args.force else None
+        )
         if (
             process.get("status") == "PASS"
             and existing_evaluation is not None

@@ -76,7 +76,9 @@ FEATURE_SET = "price_volatility_volume"
 PRICE_PATH = PROJECT_ROOT / "data" / "parquet" / "price_data_yfinance_500.parquet"
 PRICE_MANIFEST_PATH = PROJECT_ROOT / "data" / "parquet" / "price_data_yfinance_500.manifest.json"
 INDICATOR_PATH = PROJECT_ROOT / "data" / "parquet" / "indicators_yfinance_1D_500.parquet"
-INDICATOR_MANIFEST_PATH = PROJECT_ROOT / "data" / "parquet" / "indicators_yfinance_1D_500.manifest.json"
+INDICATOR_MANIFEST_PATH = (
+    PROJECT_ROOT / "data" / "parquet" / "indicators_yfinance_1D_500.manifest.json"
+)
 EODHD_PRICE_PATH = PROJECT_ROOT / "data" / "parquet" / "price_data_eodhd_500.parquet"
 BACKFILL_STATE_PATH = PROJECT_ROOT / "data" / "parquet" / "yfinance_500_backfill_state.json"
 CP72_METRICS_PATH = (
@@ -87,7 +89,9 @@ CP72_METRICS_PATH = (
     / "cp72_bm_1d_full_band_product_candidate_metrics.json"
 )
 FEATURE_SET_PLAN_PATH = PROJECT_ROOT / "docs" / "cp63_bm_feature_set_plan.json"
-ARCHIVED_FEATURE_SET_PLAN_PATH = PROJECT_ROOT / "docs" / "cp_archive" / "model_band" / "cp63_bm_feature_set_plan.json"
+ARCHIVED_FEATURE_SET_PLAN_PATH = (
+    PROJECT_ROOT / "docs" / "cp_archive" / "model_band" / "cp63_bm_feature_set_plan.json"
+)
 
 REPORT_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_stage0_1_baseline_report.md"
 METRICS_PATH = PROJECT_ROOT / "docs" / "cp153_bm_1d_band_500_stage0_1_baseline_metrics.json"
@@ -213,8 +217,10 @@ def _prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_source_frames() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any], dict[str, Any]]:
-    price_manifest = _read_json(PRICE_MANIFEST_PATH)
-    indicator_manifest = _read_json(INDICATOR_MANIFEST_PATH)
+    price_manifest = _read_json(PRICE_MANIFEST_PATH) if PRICE_MANIFEST_PATH.exists() else {}
+    indicator_manifest = (
+        _read_json(INDICATOR_MANIFEST_PATH) if INDICATOR_MANIFEST_PATH.exists() else {}
+    )
     price = _prepare_frame(pd.read_parquet(PRICE_PATH))
     indicators = _prepare_frame(pd.read_parquet(INDICATOR_PATH))
     indicators = indicators[indicators["timeframe"].astype(str).str.upper() == TIMEFRAME].copy()
@@ -314,7 +320,9 @@ def collect_targets(bundle: SequenceDataset) -> np.ndarray:
     return targets
 
 
-def split_overlap_summary(train: SequenceDataset, val: SequenceDataset, test: SequenceDataset) -> dict[str, Any]:
+def split_overlap_summary(
+    train: SequenceDataset, val: SequenceDataset, test: SequenceDataset
+) -> dict[str, Any]:
     def keys(bundle: SequenceDataset) -> set[tuple[str, int]]:
         return {(str(ticker), int(end_idx)) for ticker, end_idx in bundle.sample_refs}
 
@@ -340,7 +348,9 @@ def split_overlap_summary(train: SequenceDataset, val: SequenceDataset, test: Se
     }
 
 
-def feature_quality_summary(indicators: pd.DataFrame, targets_by_split: dict[str, np.ndarray]) -> dict[str, Any]:
+def feature_quality_summary(
+    indicators: pd.DataFrame, targets_by_split: dict[str, np.ndarray]
+) -> dict[str, Any]:
     enriched = indicators.copy()
     if "has_fundamentals" not in enriched.columns:
         enriched["has_fundamentals"] = False
@@ -363,8 +373,7 @@ def feature_quality_summary(indicators: pd.DataFrame, targets_by_split: dict[str
                 total_nonfinite += count
 
     target_nonfinite_by_split = {
-        split: int((~np.isfinite(values)).sum())
-        for split, values in targets_by_split.items()
+        split: int((~np.isfinite(values)).sum()) for split, values in targets_by_split.items()
     }
     return {
         "feature_version": FEATURE_CONTRACT_VERSION,
@@ -519,8 +528,12 @@ def build_rolling_cache(dataset: SequenceDataset, quantiles: list[float]) -> dic
             step = horizon_idx + 1
             series = pd.Series(returns[horizon_idx].astype(np.float64))
             shifted = series.shift(step)
-            mean60[horizon_idx] = shifted.rolling(window=60, min_periods=30).mean().to_numpy(dtype=np.float32)
-            std60[horizon_idx] = shifted.rolling(window=60, min_periods=30).std(ddof=0).to_numpy(dtype=np.float32)
+            mean60[horizon_idx] = (
+                shifted.rolling(window=60, min_periods=30).mean().to_numpy(dtype=np.float32)
+            )
+            std60[horizon_idx] = (
+                shifted.rolling(window=60, min_periods=30).std(ddof=0).to_numpy(dtype=np.float32)
+            )
 
         cache[str(ticker)] = {
             "quantiles": quantile_payload,
@@ -606,7 +619,9 @@ def _date_cross_sectional_width_ic(
         del asof_date
         indices = group.index.to_numpy(dtype=np.int64)
         band_corr = _spearman_corr(width[indices].reshape(-1), realized_abs[indices].reshape(-1))
-        downside_corr = _spearman_corr(downside_width[indices].reshape(-1), downside[indices].reshape(-1))
+        downside_corr = _spearman_corr(
+            downside_width[indices].reshape(-1), downside[indices].reshape(-1)
+        )
         if band_corr is not None:
             band_values.append(band_corr)
         if downside_corr is not None:
@@ -614,10 +629,16 @@ def _date_cross_sectional_width_ic(
 
     return {
         "band_width_ic_date_cs_mean": float(np.mean(band_values)) if band_values else None,
-        "band_width_ic_date_cs_std": float(np.std(band_values, ddof=1)) if len(band_values) > 1 else None,
+        "band_width_ic_date_cs_std": float(np.std(band_values, ddof=1))
+        if len(band_values) > 1
+        else None,
         "band_width_ic_date_cs_count": len(band_values),
-        "downside_width_ic_date_cs_mean": float(np.mean(downside_values)) if downside_values else None,
-        "downside_width_ic_date_cs_std": float(np.std(downside_values, ddof=1)) if len(downside_values) > 1 else None,
+        "downside_width_ic_date_cs_mean": float(np.mean(downside_values))
+        if downside_values
+        else None,
+        "downside_width_ic_date_cs_std": float(np.std(downside_values, ddof=1))
+        if len(downside_values) > 1
+        else None,
         "downside_width_ic_date_cs_count": len(downside_values),
     }
 
@@ -809,21 +830,36 @@ def baseline_sota_and_gates(rows: list[dict[str, Any]]) -> dict[str, Any]:
             finite = [row for row in subset if _safe_float(row.get(metric)) is not None]
             if finite:
                 best = min(finite, key=lambda row: float(row[metric]))
-                sota[metric] = {"value": float(best[metric]), "baseline": best["baseline"], "direction": "lower"}
+                sota[metric] = {
+                    "value": float(best[metric]),
+                    "baseline": best["baseline"],
+                    "direction": "lower",
+                }
         for metric in high_is_good:
             finite = [row for row in subset if _safe_float(row.get(metric)) is not None]
             if finite:
                 best = max(finite, key=lambda row: float(row[metric]))
-                sota[metric] = {"value": float(best[metric]), "baseline": best["baseline"], "direction": "higher"}
+                sota[metric] = {
+                    "value": float(best[metric]),
+                    "baseline": best["baseline"],
+                    "direction": "higher",
+                }
 
         coverage_pass_rows = [
             row
             for row in subset
-            if (_safe_float(row.get("coverage_abs_error")) is not None and float(row["coverage_abs_error"]) <= 0.05)
+            if (
+                _safe_float(row.get("coverage_abs_error")) is not None
+                and float(row["coverage_abs_error"]) <= 0.05
+            )
             and _safe_float(row.get("p90_band_width")) is not None
         ]
-        p90_base_rows = coverage_pass_rows or [row for row in subset if _safe_float(row.get("p90_band_width")) is not None]
-        p90_min = min(float(row["p90_band_width"]) for row in p90_base_rows) if p90_base_rows else None
+        p90_base_rows = coverage_pass_rows or [
+            row for row in subset if _safe_float(row.get("p90_band_width")) is not None
+        ]
+        p90_min = (
+            min(float(row["p90_band_width"]) for row in p90_base_rows) if p90_base_rows else None
+        )
         p90_overwide = (p90_min * 1.25) if p90_min is not None else None
 
         by_q[q_label] = {
@@ -831,7 +867,9 @@ def baseline_sota_and_gates(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "q_high": q_high,
             "baseline_sota_validation": sota,
             "hard_gate_lock": {
-                "coverage_abs_error_max": min(0.05, float(sota.get("coverage_abs_error", {}).get("value", 0.05)) * 1.10),
+                "coverage_abs_error_max": min(
+                    0.05, float(sota.get("coverage_abs_error", {}).get("value", 0.05)) * 1.10
+                ),
                 "lower_breach_rate_max": q_low + 0.03,
                 "lower_breach_abs_error_max": (
                     float(sota.get("lower_breach_abs_error", {}).get("value", 0.05)) + 0.005
@@ -839,14 +877,22 @@ def baseline_sota_and_gates(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "upper_breach_abs_error_max": (
                     float(sota.get("upper_breach_abs_error", {}).get("value", 0.05)) + 0.005
                 ),
-                "asymmetric_interval_score_max": sota.get("asymmetric_interval_score", {}).get("value"),
-                "band_width_ic_min": max(0.15, float(sota.get("band_width_ic", {}).get("value", 0.0))),
-                "downside_width_ic_min": max(0.0, float(sota.get("downside_width_ic", {}).get("value", 0.0))),
+                "asymmetric_interval_score_max": sota.get("asymmetric_interval_score", {}).get(
+                    "value"
+                ),
+                "band_width_ic_min": max(
+                    0.15, float(sota.get("band_width_ic", {}).get("value", 0.0))
+                ),
+                "downside_width_ic_min": max(
+                    0.0, float(sota.get("downside_width_ic", {}).get("value", 0.0))
+                ),
                 "width_bucket_realized_vol_ratio_min": 1.0,
                 "squeeze_breakout_rate_max": sota.get("squeeze_breakout_rate", {}).get("value"),
                 "p90_band_width_overwide_threshold": p90_overwide,
                 "p90_band_width_overwide_basis": (
-                    "coverage_pass_baseline_min_p90_x1p25" if coverage_pass_rows else "all_baseline_min_p90_x1p25"
+                    "coverage_pass_baseline_min_p90_x1p25"
+                    if coverage_pass_rows
+                    else "all_baseline_min_p90_x1p25"
                 ),
             },
         }
@@ -888,7 +934,9 @@ def baseline_sota_and_gates(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _load_checkpoint_for_replay(checkpoint_path: Path) -> tuple[Any, dict[str, Any]]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     config = dict(checkpoint.get("config") or {})
-    raw_role = str(config.get("model_role") or config.get("output_role") or config.get("role") or "legacy").lower()
+    raw_role = str(
+        config.get("model_role") or config.get("output_role") or config.get("role") or "legacy"
+    ).lower()
     if raw_role == "band_model":
         raw_role = "band"
         config["model_role"] = "band"
@@ -913,7 +961,9 @@ def _load_checkpoint_for_replay(checkpoint_path: Path) -> tuple[Any, dict[str, A
         model_kwargs["fp32_modules"] = str(config.get("fp32_modules", "none"))
     if config["model"] == "tide":
         use_future_covariate = bool(config.get("use_future_covariate", True))
-        model_kwargs["future_cov_dim"] = config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        model_kwargs["future_cov_dim"] = (
+            config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        )
     if config["model"] == "patchtst":
         model_kwargs["use_revin"] = bool(config.get("use_revin", True))
         model_kwargs["ci_aggregate"] = config.get("ci_aggregate", "target")
@@ -945,14 +995,20 @@ def run_cp72_replay(
         cp72.get("storage_verification", {}).get("checkpoint_path", "")
     )
     if not checkpoint_path.exists():
-        return {"status": "skipped", "reason": "checkpoint_missing", "checkpoint_path": str(checkpoint_path)}
+        return {
+            "status": "skipped",
+            "reason": "checkpoint_missing",
+            "checkpoint_path": str(checkpoint_path),
+        }
     try:
         model, checkpoint = _load_checkpoint_for_replay(checkpoint_path)
         config = dict(checkpoint.get("config") or {})
         registry = resolve_checkpoint_ticker_registry(config, TIMEFRAME)
         if registry is None:
             return {"status": "skipped", "reason": "checkpoint_registry_missing"}
-        known_tickers = sorted(set(registry.get("mapping") or {}).intersection(set(indicators["ticker"].unique())))
+        known_tickers = sorted(
+            set(registry.get("mapping") or {}).intersection(set(indicators["ticker"].unique()))
+        )
         replay_payload = build_split_payload(
             price=price,
             indicators=indicators,
@@ -967,7 +1023,9 @@ def run_cp72_replay(
             replay_payload.test,
         )
         del train_norm
-        feature_columns = list(config.get("feature_columns") or resolve_feature_columns(FEATURE_SET))
+        feature_columns = list(
+            config.get("feature_columns") or resolve_feature_columns(FEATURE_SET)
+        )
         _, val_selected, test_selected, _, _ = apply_feature_columns_to_splits(
             replay_payload.train,
             val_norm,
@@ -1026,7 +1084,14 @@ def evaluate_model_bundle_for_band(
     upper_predictions: list[torch.Tensor] = []
     raw_targets: list[torch.Tensor] = []
     with torch.no_grad():
-        for features, line_target, band_target, raw_future_returns, ticker_id, future_covariates in loader:
+        for (
+            features,
+            line_target,
+            band_target,
+            raw_future_returns,
+            ticker_id,
+            future_covariates,
+        ) in loader:
             del line_target, band_target
             features = features.to(device, non_blocking=True)
             ticker_id = ticker_id.to(device, non_blocking=True)
@@ -1040,10 +1105,16 @@ def evaluate_model_bundle_for_band(
                     output.upper_band.detach().cpu(),
                 )
             elif isinstance(output, BandOutput):
-                lower = torch.minimum(output.lower_band.detach().cpu(), output.upper_band.detach().cpu())
-                upper = torch.maximum(output.lower_band.detach().cpu(), output.upper_band.detach().cpu())
+                lower = torch.minimum(
+                    output.lower_band.detach().cpu(), output.upper_band.detach().cpu()
+                )
+                upper = torch.maximum(
+                    output.lower_band.detach().cpu(), output.upper_band.detach().cpu()
+                )
             else:
-                raise TypeError(f"band replay에서 지원하지 않는 출력입니다: {type(output).__name__}")
+                raise TypeError(
+                    f"band replay에서 지원하지 않는 출력입니다: {type(output).__name__}"
+                )
             lower_predictions.append(lower)
             upper_predictions.append(upper)
             raw_targets.append(raw_future_returns.detach().cpu())
@@ -1103,6 +1174,8 @@ def prepare_snapshot_overlay() -> dict[str, Any]:
     ]
     results: list[dict[str, Any]] = []
     for source, target in links:
+        if not source.exists():
+            continue
         if target.exists():
             target.unlink()
         try:
@@ -1228,7 +1301,9 @@ def run_timing_smoke() -> dict[str, Any]:
     vram_peak = _extract_number_from_lines(output_lines, r"vram_peak_allocated_mb[=: ]+([0-9.]+)")
     epoch_seconds = _extract_number_from_lines(output_lines, r"epoch(?:_seconds)?[=: ]+([0-9.]+)")
     if result_payload:
-        epoch_seconds = _safe_float(result_payload.get("epoch_1_seconds_from_stdout")) or epoch_seconds
+        epoch_seconds = (
+            _safe_float(result_payload.get("epoch_1_seconds_from_stdout")) or epoch_seconds
+        )
         execution = result_payload.get("execution") or {}
         vram_peak = _safe_float(execution.get("vram_peak_allocated_mb")) or vram_peak
     return {
@@ -1272,7 +1347,9 @@ def _extract_number_from_lines(lines: list[str], pattern: str) -> float | None:
     return None
 
 
-def _estimate_stage_time(epoch_seconds: float | None, elapsed_seconds: float, vram_peak: float | None) -> dict[str, Any]:
+def _estimate_stage_time(
+    epoch_seconds: float | None, elapsed_seconds: float, vram_peak: float | None
+) -> dict[str, Any]:
     base_epoch = epoch_seconds or elapsed_seconds
     full_epoch_low = base_epoch * 5.0 * 1.10
     full_epoch_high = base_epoch * 5.0 * 1.50
@@ -1283,8 +1360,12 @@ def _estimate_stage_time(epoch_seconds: float | None, elapsed_seconds: float, vr
         "full_500_one_epoch_seconds_high": round(full_epoch_high, 1),
         "stage2_100ticker_8_candidates_1epoch_minutes": round((base_epoch * 8) / 60.0, 1),
         "stage2_100ticker_8_candidates_3epoch_minutes": round((base_epoch * 8 * 3) / 60.0, 1),
-        "stage3_500ticker_3_candidates_3epoch_minutes_low": round((full_epoch_low * 3 * 3) / 60.0, 1),
-        "stage3_500ticker_3_candidates_3epoch_minutes_high": round((full_epoch_high * 3 * 3) / 60.0, 1),
+        "stage3_500ticker_3_candidates_3epoch_minutes_low": round(
+            (full_epoch_low * 3 * 3) / 60.0, 1
+        ),
+        "stage3_500ticker_3_candidates_3epoch_minutes_high": round(
+            (full_epoch_high * 3 * 3) / 60.0, 1
+        ),
         "estimated_vram_peak_mb": vram_peak,
         "estimated_vram_note": "500 ticker는 배치 크기가 같으면 VRAM보다 wall time 증가가 주효하다고 본다.",
     }
@@ -1490,7 +1571,11 @@ def determine_status(stage0: dict[str, Any]) -> str:
         contract_fail_reasons.append("target_nonfinite")
     if any(
         stage0["split_overlap"][key] != 0
-        for key in ["train_val_sample_overlap", "train_test_sample_overlap", "val_test_sample_overlap"]
+        for key in [
+            "train_val_sample_overlap",
+            "train_test_sample_overlap",
+            "val_test_sample_overlap",
+        ]
     ):
         contract_fail_reasons.append("split_overlap")
     if stage0["dataset_plan"]["eligible_ticker_count"] <= 0:
@@ -1549,8 +1634,14 @@ def main() -> None:
             "feature_version": FEATURE_CONTRACT_VERSION,
         }
     )
-    source_data_hash = str(indicator_manifest.get("source_data_hash") or price_manifest.get("source_data_hash") or contract_hash)
-    payload = build_split_payload(price=price, indicators=indicators, source_data_hash=source_data_hash)
+    source_data_hash = str(
+        indicator_manifest.get("source_data_hash")
+        or price_manifest.get("source_data_hash")
+        or contract_hash
+    )
+    payload = build_split_payload(
+        price=price, indicators=indicators, source_data_hash=source_data_hash
+    )
     train_targets = collect_targets(payload.train)
     val_targets = collect_targets(payload.val)
     test_targets = collect_targets(payload.test)
