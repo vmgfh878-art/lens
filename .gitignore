@@ -131,6 +131,12 @@ docs/daily_yfinance_append_gate_runs/
 
 # 로컬 yfinance 데이터셋/수집 상태 메타
 data/parquet/*yfinance*.manifest.json
+# 재현 입력 — 운영 모델 로더 load_source_frames 가 읽는 yfinance manifest 4개는 명시 예외로 추적한다.
+# git archive HEAD 가 ignore 파일을 떨구므로 추적해야 zip·clone 에 포함된다.
+!data/parquet/price_data_yfinance_500.manifest.json
+!data/parquet/indicators_yfinance_1D_500.manifest.json
+!data/parquet/price_data_yfinance_1W_500.manifest.json
+!data/parquet/indicators_yfinance_1W_500.manifest.json
 data/parquet/yfinance*_state.json
 
 # CP254 로컬 Supabase 리허설 스택 (포터블 PG + PostgREST) — 로컬 전용

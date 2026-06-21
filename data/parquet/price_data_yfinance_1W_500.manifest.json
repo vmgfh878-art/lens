@@ -1,0 +1,22 @@
+{
+  "schema": "lens.price_data.v1",
+  "timeframe": "1W",
+  "ticker_count": 501,
+  "row_count": 288962,
+  "date_min": "2015-01-02",
+  "date_max": "2026-05-29",
+  "source_parquet": "data\\parquet\\price_data_yfinance_500.parquet",
+  "source_data_hash": "ef6d6bb950806d72",
+  "resample_rule": "ISO_week_Mon_start_anchor_Friday_last_trading_day",
+  "ohlcv_agg": {
+    "open": "first",
+    "high": "max",
+    "low": "min",
+    "close": "last",
+    "adjusted_close": "last",
+    "volume": "sum",
+    "amount": "sum"
+  },
+  "generated_by": "scripts/cp216_2_weekly_resample.py (CP216.2)",
+  "generated_at": "2026-05-30T14:37:55.571961+00:00"
+}
