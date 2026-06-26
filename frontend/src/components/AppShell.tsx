@@ -236,7 +236,7 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
               </svg>
             </span>
             <span className="app-notice__text">
-              <strong>데스크탑 화면을 권장합니다.</strong> 첫 접속 시 무료 백엔드가 깨어나는 데 최대 10초쯤 걸릴 수 있어요 — 잠시만 기다려 주세요.
+              <strong>데스크탑 화면을 권장합니다.</strong> 첫 접속 시 백엔드가 깨어나는 데 최대 10초쯤 걸릴 수 있어요 — 잠시만 기다려 주세요.
             </span>
             <button
               className="app-notice__close"
