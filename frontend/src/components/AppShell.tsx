@@ -155,6 +155,7 @@ function Icon({ name }: { name: IconName }) {
 
 export default function AppShell({ activeView, onViewChange, children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(true);
 
   const activeLabel =
     NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.id === activeView)?.label ??
@@ -225,6 +226,30 @@ export default function AppShell({ activeView, onViewChange, children }: AppShel
       </aside>
 
       <section className="workspace">
+        {noticeOpen ? (
+          <div className="app-notice" role="note">
+            <span className="app-notice__icon" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="11" x2="12" y2="16" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+            </span>
+            <span className="app-notice__text">
+              <strong>데스크탑 화면을 권장합니다.</strong> 첫 접속 시 무료 백엔드가 깨어나는 데 최대 10초쯤 걸릴 수 있어요 — 잠시만 기다려 주세요.
+            </span>
+            <button
+              className="app-notice__close"
+              type="button"
+              onClick={() => setNoticeOpen(false)}
+              aria-label="공지 닫기"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
         <header className="topbar">
           <div className="topbar__crumbs">
             <span>Lens</span>

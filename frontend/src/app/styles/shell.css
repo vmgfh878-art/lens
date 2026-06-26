@@ -10,6 +10,46 @@
   grid-template-columns: var(--side-nav-w-collapsed) 1fr;
 }
 
+/* ─── 첫 진입 공지 (데스크탑 권장 + 콜드스타트) ─── */
+.app-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 18px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg2);
+}
+.app-notice__icon {
+  color: var(--accent-600);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.app-notice__text {
+  flex: 1;
+}
+.app-notice__text strong {
+  color: var(--fg1);
+  font-weight: 600;
+}
+.app-notice__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--fg-faint);
+  padding: 3px;
+  border-radius: var(--r-sm);
+  transition: background var(--motion), color var(--motion);
+}
+.app-notice__close:hover {
+  background: var(--surface-strong);
+  color: var(--fg2);
+}
+
 /* ─── Sidebar ─── */
 .side-nav {
   background: var(--bg-elevated);
