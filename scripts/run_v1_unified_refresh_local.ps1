@@ -75,6 +75,13 @@ function Invoke-PythonStep {
     Write-Log "$Name 시작"
     $ExitCode = 0
     $Status = "PASS"
+    # CP256 — PS 5.1 quirk 회피: ErrorActionPreference=Stop 하에서 native 프로세스가
+    # stderr 로 한 줄이라도 쓰면 PowerShell 이 이를 terminating error(NativeCommandError)
+    # 로 바꿔 catch 로 떨어뜨린다. yfinance 의 일시적 티커 경고(stderr) 때문에 append 가
+    # 오탐 FAIL 나서 일일 refresh 가 4일 멈췄다. 이 함수 안에서는 Continue 로 낮추고,
+    # 성공/실패는 오직 프로세스 종료코드($LASTEXITCODE)로만 판정한다.
+    $PreviousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         & $Python @Arguments 1> $StdoutPath 2> $StderrPath
         $ExitCode = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 0 }
@@ -85,6 +92,8 @@ function Invoke-PythonStep {
         $ExitCode = 1
         $Status = "FAIL"
         Add-Content -Path $StderrPath -Value $_.Exception.Message -Encoding UTF8
+    } finally {
+        $ErrorActionPreference = $PreviousEap
     }
     $Elapsed = [math]::Round(((Get-Date) - $Started).TotalSeconds, 3)
     Write-Log "$Name 종료: status=$Status exit_code=$ExitCode elapsed=${Elapsed}s"
@@ -317,9 +326,49 @@ $PushStatus = Invoke-V1ProductionPush `
     -FailedNames (($FailedSteps | ForEach-Object { $_.name }) -join ", ") `
     -LogPath $PipelineLogPath
 
-Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus"
+# CP256 — 서빙 예측을 프로덕션 DB(Supabase)에 발행.
+# 배포 백엔드는 예측을 Supabase 에서 서빙하는데, 일일 refresh 는 git push 만 하고
+# Supabase 발행은 별도 수동 스크립트라 6/18 형태의 예측 정체가 반복됐다(가격은 최신인데
+# 밴드/라인만 낡아 stale 가드가 차트에서 숨김). publish_serving_to_supabase.py 를 여기서
+# 자동 호출해 정체를 막는다.
+# 안전장치: Apply 모드 + 모든 단계 성공(= git push 됨) 일 때만. 발행이 실패해도 git push 는
+# 이미 끝났으므로 여기서 exit 1 하지 않고 WARN 만 남긴다(민감한 push 경로 불간섭 원칙).
+$PublishStatus = "SKIPPED"
+if ($Apply -and $FailedSteps.Count -eq 0) {
+    Write-Log "supabase_publish 시작"
+    $PublishLog = Join-Path $RunDirPath "supabase_publish_${SafeDate}_${RunStamp}.log"
+    $PrevPyEnc = $env:PYTHONIOENCODING
+    $env:PYTHONIOENCODING = "utf-8"
+    $PrevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Python "backend\scripts\publish_serving_to_supabase.py" 1> $PublishLog 2>&1
+        $PublishExit = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 0 }
+    } catch {
+        $PublishExit = 1
+        Add-Content -Path $PublishLog -Value $_.Exception.Message -Encoding UTF8
+    } finally {
+        $ErrorActionPreference = $PrevEap
+        $env:PYTHONIOENCODING = $PrevPyEnc
+    }
+    if ($PublishExit -eq 0) {
+        $PublishStatus = "PASS"
+    } else {
+        $PublishStatus = "WARN_PUBLISH_FAILED"
+        Write-Log "WARN: supabase publish 실패(exit=$PublishExit). git push 는 완료됨. 로그 확인: $PublishLog"
+    }
+    Write-Log "supabase_publish 종료: status=$PublishStatus exit=$PublishExit"
+} elseif ($Apply) {
+    $PublishStatus = "SKIPPED_STEP_FAILURE"
+    Write-Log "supabase_publish skip: 단계 실패로 push 안 됨 → 발행도 건너뜀"
+} else {
+    $PublishStatus = "SKIPPED_DRY_RUN"
+}
+
+Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus publish=$PublishStatus"
 Write-Host "status=$FinalStatus"
 Write-Host "push=$PushStatus"
+Write-Host "publish=$PublishStatus"
 Write-Host "metrics=$MetricsPath"
 Write-Host "report=$ReportPath"
 Write-Host "schedule_status=$LatestSchedulePath"

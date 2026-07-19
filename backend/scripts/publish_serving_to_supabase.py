@@ -33,6 +33,15 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# CP256 — 진행 로그에 em-dash(—) 등 비-ASCII 가 있어 Windows cp949 콘솔에서
+# UnicodeEncodeError 로 죽던 문제 방지. 자동화(일일 refresh)에서도 안전하게 발행되도록
+# stdout/stderr 를 utf-8 로 고정한다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 from backend.scripts.import_v1_serving_to_supabase import run_import  # noqa: E402
 from backend.scripts.supabase_retention import run_retention  # noqa: E402
 
