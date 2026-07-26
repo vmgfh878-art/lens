@@ -116,6 +116,37 @@ function Read-JsonFile {
     return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+# CP256 — 일일 refresh 결과를 Slack 으로 알림. 환경변수 LENS_SLACK_WEBHOOK 이 설정된
+# 경우에만 동작하며(없으면 조용히 skip), 실패해도 refresh 에 영향 주지 않는다.
+# webhook URL 은 비밀이라 코드/깃에 넣지 않고 환경변수로만 읽는다.
+function Send-SlackNotification {
+    param(
+        [string]$Text,
+        [string]$Color = "good"
+    )
+    $webhook = $env:LENS_SLACK_WEBHOOK
+    if (-not $webhook) {
+        # setx 로 저장한 사용자 환경변수를 레지스트리에서 직접 읽는 fallback.
+        # 프로세스가 setx 이전에 떠서 상속 못 받은 경우(예약 작업 포함) 대비 — 로그오프/재시작 불필요.
+        try { $webhook = [Environment]::GetEnvironmentVariable("LENS_SLACK_WEBHOOK", "User") } catch { }
+    }
+    if (-not $webhook) { return "SKIPPED_NO_WEBHOOK" }
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $payload = @{
+            attachments = @(@{ color = $Color; text = $Text; mrkdwn_in = @("text") })
+        } | ConvertTo-Json -Depth 6
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        Invoke-RestMethod -Uri $webhook -Method Post -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec 15 | Out-Null
+        return "SENT"
+    } catch {
+        return "SEND_FAILED"
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 Write-Log "CP212 unified v1 refresh 시작: mode=$ModeText run_date=$RunDate skip_append=$SkipAppend"
 
 $AppendMetricsPath = Join-Path $RunDirPath "append_metrics_${SafeDate}_${RunStamp}.json"
@@ -365,10 +396,57 @@ if ($Apply -and $FailedSteps.Count -eq 0) {
     $PublishStatus = "SKIPPED_DRY_RUN"
 }
 
-Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus publish=$PublishStatus"
+# CP256 — 배포 프로덕션이 실제로 최신 예측을 서빙하는지 검수(git push 완료가 아니라 웹 반영까지).
+# 배포 백엔드를 직접 조회해 프론트 stale 가드와 같은 기준으로 1D(h5)/1W(4주) 최신 여부 판정.
+# Apply + 모든 단계 성공(= push/발행 흐름) 일 때만. STALE 면 알림이 빨간색으로 뜬다.
+$VerifyStatus = "SKIPPED"
+$VerifyDetail = ""
+if ($Apply -and $FailedSteps.Count -eq 0) {
+    Write-Log "deployed_verify 시작"
+    $VerifyLog = Join-Path $RunDirPath "deployed_verify_${SafeDate}_${RunStamp}.log"
+    $PrevPyEnc2 = $env:PYTHONIOENCODING
+    $env:PYTHONIOENCODING = "utf-8"
+    $PrevEap2 = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $VerifyOut = & $Python "backend\scripts\verify_deployed_serving.py" 2>&1
+        $VerifyExit = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 1 }
+        $VerifyOut | Out-File -FilePath $VerifyLog -Encoding UTF8
+        $VerifyDetail = ($VerifyOut | Where-Object { "$_" -match '^VERIFY ' } | Select-Object -Last 1)
+    } catch {
+        $VerifyExit = 1
+        $VerifyDetail = "VERIFY result=ERROR"
+    } finally {
+        $ErrorActionPreference = $PrevEap2
+        $env:PYTHONIOENCODING = $PrevPyEnc2
+    }
+    $VerifyStatus = switch ($VerifyExit) { 0 { "VERIFIED" } 2 { "STALE" } default { "ERROR" } }
+    Write-Log "deployed_verify 종료: status=$VerifyStatus detail=$VerifyDetail"
+} elseif (-not $Apply) {
+    $VerifyStatus = "SKIPPED_DRY_RUN"
+}
+
+Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus publish=$PublishStatus verify=$VerifyStatus"
+
+# CP256 — 결과 Slack 알림 (LENS_SLACK_WEBHOOK 설정 시에만).
+# 색: 단계실패 또는 프로덕션 미반영(STALE/ERROR)=danger, 부분/경고=warning, 정상=good.
+$SlackColor = if (($FailedSteps.Count -gt 0) -or ($VerifyStatus -eq "STALE") -or ($VerifyStatus -eq "ERROR")) {
+    "danger"
+} elseif (($PublishStatus -like "WARN*") -or ($ReloadStatus -like "WARN*") -or ($FinalStatus -like "*PARTIAL*")) {
+    "warning"
+} else {
+    "good"
+}
+$SlackSteps = ($Steps | ForEach-Object { "$($_.name)=$($_.status)" }) -join "  "
+$SlackText = "Lens daily refresh - $RunDate`nmode=$ModeText  result=$FinalStatus`npush=$PushStatus  publish=$PublishStatus`n프로덕션 검수: $VerifyStatus`n$VerifyDetail`n$SlackSteps"
+$SlackNotify = Send-SlackNotification -Text $SlackText -Color $SlackColor
+Write-Log "slack_notify: $SlackNotify"
+
 Write-Host "status=$FinalStatus"
 Write-Host "push=$PushStatus"
 Write-Host "publish=$PublishStatus"
+Write-Host "verify=$VerifyStatus"
+Write-Host "slack=$SlackNotify"
 Write-Host "metrics=$MetricsPath"
 Write-Host "report=$ReportPath"
 Write-Host "schedule_status=$LatestSchedulePath"
