@@ -1,6 +1,6 @@
 {
   "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
-  "$comment": "CP238 Step 6 — high+ gate. allowlist 15 GHSA: 8 justified (Lens 사용 패턴 0) + 7 acknowledged (rewrites + RSC, v2 next 16 bump 시점에 정리). 근거 docs/security/cve_exceptions.md + docs/cp238_grep_evidence.md.",
+  "$comment": "CP238 Step 6 — high+ gate. allowlist 15 GHSA: 8 justified (Lens 사용 패턴 0) + 7 acknowledged (rewrites + RSC, v2 next 16 bump 시점에 정리). 근거 docs/security/cve_exceptions.md + docs/cp238_grep_evidence.md. +5 (2026-07-29) — next Server Actions 미사용/rewrites destination이 build-time env(request 무관)/postcss build-time only, 전부 justified 영향 0. axios(GHSA-gcfj-64vw-6mp9)는 allowlist 대신 1.18.0 실제 업데이트로 해결.",
   "high": true,
   "allowlist": [
     "GHSA-9g9p-9gw9-jx7f",
@@ -18,6 +18,11 @@
     "GHSA-8h8q-6873-q5fj",
     "GHSA-vfv6-92ff-j949",
     "GHSA-wfc6-r584-vfw7",
-    "GHSA-hmw2-7cc7-3qxx"
+    "GHSA-hmw2-7cc7-3qxx",
+    "GHSA-m99w-x7hq-7vfj",
+    "GHSA-89xv-2m56-2m9x",
+    "GHSA-p9j2-gv94-2wf4",
+    "GHSA-6g55-p6wh-862q",
+    "GHSA-r28c-9q8g-f849"
   ]
 }

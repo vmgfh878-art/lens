@@ -72,30 +72,26 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
     )
 
 
-@router.get("/debug-state")
-def debug_state(request: Request):
-    """503 원인 진단용. 환경변수 KEY 존재 여부 / parquet 파일 / 메모리 / market 경로 dump.
-
-    sensitive value 노출 X — KEY 존재 여부와 path / size 만 보고. 인증 없이 호출 가능.
-    """
-    base_dir = Path(__file__).resolve().parents[3] / "data" / "v1"
-
-    # 1) parquet 파일 점검
+def _debug_state_parquet_files(request: Request, base_dir: Path) -> dict[str, dict]:
     parquet_files: dict[str, dict] = {}
-    if base_dir.exists():
-        for p in sorted(base_dir.glob("*.parquet")):
-            try:
-                size = p.stat().st_size
-                parquet_files[p.name] = {
-                    "exists": True,
-                    "size_mb": round(size / 1024 / 1024, 2),
-                }
-            except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
-                rid = getattr(request.state, "request_id", "-")
-                logger.warning("[%s] debug-state parquet stat '%s' 실패", rid, p.name, exc_info=exc)
-                parquet_files[p.name] = {"exists": False}
+    if not base_dir.exists():
+        return parquet_files
+    for p in sorted(base_dir.glob("*.parquet")):
+        try:
+            size = p.stat().st_size
+            parquet_files[p.name] = {
+                "exists": True,
+                "size_mb": round(size / 1024 / 1024, 2),
+            }
+        except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
+            rid = getattr(request.state, "request_id", "-")
+            logger.warning("[%s] debug-state parquet stat '%s' 실패", rid, p.name, exc_info=exc)
+            parquet_files[p.name] = {"exists": False}
+    return parquet_files
 
-    # 2) 관심 환경변수 (값 노출 X, 존재 여부만)
+
+def _debug_state_env() -> dict[str, str]:
+    # 관심 환경변수 (값 노출 X, 존재 여부만)
     interesting_keys = [
         "SUPABASE_URL",
         "SUPABASE_KEY",
@@ -110,9 +106,11 @@ def debug_state(request: Request):
         "RENDER",
         "RENDER_SERVICE_NAME",
     ]
-    interesting_env = {k: ("set" if os.environ.get(k) else "empty") for k in interesting_keys}
+    return {k: ("set" if os.environ.get(k) else "empty") for k in interesting_keys}
 
-    # 3) 메모리 (Linux /proc/self/status 또는 resource fallback)
+
+def _debug_state_memory(request: Request) -> dict[str, str | float]:
+    # Linux /proc/self/status 또는 resource fallback
     memory: dict[str, str | float] = {}
     try:
         with open("/proc/self/status") as f:
@@ -120,17 +118,22 @@ def debug_state(request: Request):
                 if line.startswith(("VmRSS:", "VmPeak:", "VmSize:")):
                     parts = line.split(":")
                     memory[parts[0]] = parts[1].strip()
+        return memory
     except Exception:
-        try:
-            import resource  # type: ignore
+        pass
+    try:
+        import resource  # type: ignore
 
-            ru = resource.getrusage(resource.RUSAGE_SELF)
-            memory["max_rss_mb"] = round(ru.ru_maxrss / 1024, 2)
-        except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
-            rid = getattr(request.state, "request_id", "-")
-            logger.warning("[%s] debug-state memory probe 실패", rid, exc_info=exc)
+        ru = resource.getrusage(resource.RUSAGE_SELF)
+        memory["max_rss_mb"] = round(ru.ru_maxrss / 1024, 2)
+    except Exception as exc:  # noqa: BLE001 — debug 엔드포인트, 원인은 로그로만
+        rid = getattr(request.state, "request_id", "-")
+        logger.warning("[%s] debug-state memory probe 실패", rid, exc_info=exc)
+    return memory
 
-    # 4) market 경로 probe — 실제 lazy-load 가 어떻게 행동하는지
+
+def _debug_state_market_probes(request: Request) -> dict[str, dict]:
+    # market 경로 probe — 실제 lazy-load 가 어떻게 행동하는지
     market_probes: dict[str, dict] = {}
     for slot, getter in (
         ("prices_1d", local_market_svc.get_prices_1d),
@@ -152,7 +155,10 @@ def debug_state(request: Request):
             rid = getattr(request.state, "request_id", "-")
             logger.warning("[%s] debug-state market probe '%s' 실패", rid, slot, exc_info=exc)
             market_probes[slot] = {"status": "error"}
+    return market_probes
 
+
+def _debug_state_supabase_probe() -> dict[str, object]:
     # CP256 컷오버 진단 — 어느 프로젝트(host)·키 role·실패 원인(예외)을 노출. 키 값은 안 보인다.
     supabase_probe: dict[str, object] = {}
     try:
@@ -179,22 +185,32 @@ def debug_state(request: Request):
             supabase_probe["error"] = f"{type(_exc).__name__}: {str(_exc)[:300]}"
     except Exception as _outer:  # noqa: BLE001
         supabase_probe["meta_error"] = str(_outer)[:200]
+    return supabase_probe
+
+
+@router.get("/debug-state")
+def debug_state(request: Request):
+    """503 원인 진단용. 환경변수 KEY 존재 여부 / parquet 파일 / 메모리 / market 경로 dump.
+
+    sensitive value 노출 X — KEY 존재 여부와 path / size 만 보고. 인증 없이 호출 가능.
+    """
+    base_dir = Path(__file__).resolve().parents[3] / "data" / "v1"
 
     return success_response(
         request,
         {
             "base_dir": str(base_dir),
             "base_dir_exists": base_dir.exists(),
-            "parquet_files": parquet_files,
+            "parquet_files": _debug_state_parquet_files(request, base_dir),
             "supabase_is_configured": supabase_is_configured(),
             # CP254/255 — 서빙 read 가 실제로 타는 백엔드 + 자동 폴백이 보는 도달성
             # (전환 상태 즉시 확인용). reachable=None 이면 미구성(=항상 로컬).
             "data_backend": "supabase" if data_backend.use_supabase() else "local",
             "supabase_reachable": data_backend.supabase_reachable_now(),
-            "supabase_probe": supabase_probe,
-            "interesting_env": interesting_env,
-            "memory": memory,
-            "market_probes": market_probes,
+            "supabase_probe": _debug_state_supabase_probe(),
+            "interesting_env": _debug_state_env(),
+            "memory": _debug_state_memory(request),
+            "market_probes": _debug_state_market_probes(request),
             "parquet_store": parquet_store.stats(),
             "sys_path_first5": sys.path[:5],
             "python_version": sys.version,

@@ -33,4 +33,12 @@ paths = [
 # CP239 ci-gate 검증 테스트 잔재(test_cigate.txt, 가짜 PAT ghp_...)는 커밋
 # 16f6652 한 곳에만 존재(작업 파일은 308c7ec 에서 삭제). 히스토리 재작성 없이
 # 이 테스트 커밋 하나만 좁게 흡수 — 진짜 secret 탐지엔 영향 0.
-commits = ["16f6652699957e92ad69dab55bcb488760a9d38f"]
+#
+# 80507627 (CP239 Step 8-9 closure report, docs/cp239_secrets_history_report.md:60)
+# 는 gitleaks false positive 예시로 인용한 `metricKey: "..."` 문자열 자체가
+# generic-api-key 룰에 걸림 (실제 secret 아님). 문서 자체가 이 케이스를
+# 설명하는 내용이라 rewrite 대신 커밋 단위로 흡수.
+commits = [
+    "16f6652699957e92ad69dab55bcb488760a9d38f",
+    "80507627f0cb8a5703496bb768f721be0bd8b2e0",
+]
