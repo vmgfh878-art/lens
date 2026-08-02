@@ -90,10 +90,11 @@ jobs:
             echo "::warning::No characterization snapshot tests collected"
 
       - name: pip-audit (CP238 — backend dep CVE gate)
-        # 잔여 4 CVE 는 docs/security/cve_exceptions.md 에 사용 패턴 justification
-        # 박혀 있음 (host header / multipart / FileResponse / pyarrow IPC 모두
-        # Lens 사용 0 grep 확인). fastapi 가 starlette 1.x 호환 minor 출시
-        # 또는 pyarrow 23.x major bump 정리되면 본 ignore 목록도 같이 정리.
+        # 잔여 8 CVE 는 docs/security/cve_exceptions.md 에 사용 패턴 justification
+        # 박혀 있음 (host header / multipart / FileResponse / pyarrow IPC /
+        # urlencoded form / Windows StaticFiles UNC / HTTPEndpoint 모두 Lens
+        # 사용 0 grep 확인). fastapi 가 starlette 1.x 호환 minor 출시 또는
+        # pyarrow 23.x major bump 정리되면 본 ignore 목록도 같이 정리.
         env:
           PYTHONUTF8: '1'
         run: |
@@ -102,7 +103,11 @@ jobs:
             --ignore-vuln PYSEC-2026-113 \
             --ignore-vuln PYSEC-2026-161 \
             --ignore-vuln GHSA-2c2j-9gv5-cj73 \
-            --ignore-vuln GHSA-7f5h-v6xp-fcq8
+            --ignore-vuln GHSA-7f5h-v6xp-fcq8 \
+            --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-248 \
+            --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-2280
 
   frontend:
     runs-on: ubuntu-latest
