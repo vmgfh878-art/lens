@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
 
 from ai.torch_bootstrap import bootstrap_torch
@@ -16,12 +16,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.loss import PinballLoss
-from ai.models.cnn_lstm import CNNLSTM
-from ai.models.common import BandOutput, ForecastOutput, LineV2Output
-from ai.models.patchtst import PatchTST
-from ai.models.tide import TiDE
-from ai.calibration_artifacts import apply_product_band_calibration, resolve_product_band_calibration
+from ai.calibration_artifacts import (
+    apply_product_band_calibration,
+    resolve_product_band_calibration,
+)
 from ai.evaluation import (
     build_single_sample_evaluation,
     summarize_band_metrics,
@@ -30,16 +28,23 @@ from ai.evaluation import (
 )
 from ai.inference_contract import (
     INFERENCE_PAYLOAD_SUPPORTED_ROLES,
-    assert_output_matches_model_role as contract_assert_output_matches_model_role,
     require_role_supported,
     resolve_execution_market_data_provider,
-    resolve_model_role_from_config,
     role_contract_table,
     select_bundle_features_for_checkpoint,
     select_bundle_features_for_columns,
     validate_checkpoint_runtime_contract,
 )
+from ai.inference_contract import (
+    assert_output_matches_model_role as contract_assert_output_matches_model_role,
+)
 from ai.inference_save_guard import resolve_inference_save_contract
+from ai.loss import PinballLoss
+from ai.models.cnn_lstm import CNNLSTM
+from ai.models.common import BandOutput, ForecastOutput, LineV2Output
+from ai.models.patchtst import PatchTST
+from ai.models.tcn_quantile import TCNQuantile
+from ai.models.tide import TiDE
 from ai.postprocess import apply_band_postprocess
 from ai.preprocessing import (
     FUTURE_COVARIATE_DIM,
@@ -66,6 +71,7 @@ MODEL_REGISTRY = {
     "patchtst": PatchTST,
     "cnn_lstm": CNNLSTM,
     "tide": TiDE,
+    "tcn_quantile": TCNQuantile,
 }
 MODEL_ROLE_ALIASES = {
     "legacy": "legacy",
@@ -88,6 +94,8 @@ MODEL_ROLE_ALIASES = {
     "band": "band",
     "band_model": "band",
 }
+
+
 def resolve_checkpoint_model_role(config: dict[str, Any]) -> str:
     raw_role_value = config.get("model_role") or config.get("output_role")
     if raw_role_value is None and str(config.get("role") or "").strip():
@@ -142,7 +150,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     parser.add_argument("--tickers", nargs="*", default=None)
     parser.add_argument("--limit-tickers", type=int, default=None)
-    parser.add_argument("--save", action="store_true", help="predictions와 prediction_evaluations에 저장합니다.")
+    parser.add_argument(
+        "--save", action="store_true", help="predictions와 prediction_evaluations에 저장합니다."
+    )
     parser.add_argument(
         "--save-product-latest-only",
         action="store_true",
@@ -196,7 +206,9 @@ def load_checkpoint(checkpoint_path: str | Path):
         model_kwargs["fp32_modules"] = str(config.get("fp32_modules", "none"))
     if config["model"] == "tide":
         use_future_covariate = bool(config.get("use_future_covariate", True))
-        model_kwargs["future_cov_dim"] = config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        model_kwargs["future_cov_dim"] = (
+            config.get("future_cov_dim", FUTURE_COVARIATE_DIM) if use_future_covariate else 0
+        )
     model = model_cls(**model_kwargs)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -217,7 +229,9 @@ def load_checkpoint_config(checkpoint_path: str | Path) -> dict[str, Any]:
     return dict(checkpoint.get("config") or {})
 
 
-def resolve_checkpoint_ticker_registry(checkpoint_config: dict[str, Any], timeframe: str) -> dict[str, Any] | None:
+def resolve_checkpoint_ticker_registry(
+    checkpoint_config: dict[str, Any], timeframe: str
+) -> dict[str, Any] | None:
     num_tickers = int(checkpoint_config.get("num_tickers") or 0)
     if num_tickers <= 0:
         return None
@@ -278,7 +292,9 @@ def _matches_calibration_target(payload: dict[str, Any], *, run_id: str, timefra
     return run_id in ids
 
 
-def _calibration_from_payload(payload: dict[str, Any], *, source_path: Path) -> dict[str, Any] | None:
+def _calibration_from_payload(
+    payload: dict[str, Any], *, source_path: Path
+) -> dict[str, Any] | None:
     if payload.get("schema_version") == "calibration_artifact_manifest_v1":
         params = payload.get("calibration_params")
         method = payload.get("calibration_method")
@@ -335,7 +351,9 @@ def _legacy_resolve_product_band_calibration_unused(
             timeframe=timeframe,
             model_run_id=run_id,
         )
-        path = default_calibration_manifest_path(role="band", timeframe=timeframe, model_run_id=run_id)
+        path = default_calibration_manifest_path(
+            role="band", timeframe=timeframe, model_run_id=run_id
+        )
         artifact = _calibration_from_payload(manifest, source_path=path)
         if artifact:
             return artifact
@@ -346,7 +364,9 @@ def _legacy_resolve_product_band_calibration_unused(
     for pattern in ("*config_lock.json", "*calibration_params.json"):
         for path in sorted(docs_dir.glob(pattern)):
             payload = _safe_json(path)
-            if not payload or not _matches_calibration_target(payload, run_id=run_id, timeframe=timeframe):
+            if not payload or not _matches_calibration_target(
+                payload, run_id=run_id, timeframe=timeframe
+            ):
                 continue
             artifact = _calibration_from_payload(payload, source_path=path)
             if artifact:
@@ -374,7 +394,14 @@ def _legacy_apply_product_band_calibration_unused(
     lower_width = torch.clamp(center - lower_returns, min=1e-6)
     upper_width = torch.clamp(upper_returns - center, min=1e-6)
 
-    if method in {"scalar_width", "lower_focused", "separate_scale", "symmetric_expand", "upper_trimmed", "lower_breach_guard"}:
+    if method in {
+        "scalar_width",
+        "lower_focused",
+        "separate_scale",
+        "symmetric_expand",
+        "upper_trimmed",
+        "lower_breach_guard",
+    }:
         scale = float(params.get("scale", 1.0))
         lower_scale = float(params.get("lower_scale", scale))
         upper_scale = float(params.get("upper_scale", scale))
@@ -389,7 +416,9 @@ def _legacy_apply_product_band_calibration_unused(
     else:
         raise ValueError(f"지원하지 않는 band calibration method입니다: {method}")
 
-    return torch.minimum(calibrated_lower, calibrated_upper), torch.maximum(calibrated_lower, calibrated_upper)
+    return torch.minimum(calibrated_lower, calibrated_upper), torch.maximum(
+        calibrated_lower, calibrated_upper
+    )
 
 
 def resolve_bundle(
@@ -449,7 +478,9 @@ def infer_bundle(
     use_future_covariate = bool(model_config.get("use_future_covariate", model_name == "tide"))
     line_target_type = str(model_config.get("line_target_type", "raw_future_return"))
     band_target_type = str(model_config.get("band_target_type", "raw_future_return"))
-    raw_return_mode = line_target_type == "raw_future_return" and band_target_type == "raw_future_return"
+    raw_return_mode = (
+        line_target_type == "raw_future_return" and band_target_type == "raw_future_return"
+    )
     batch_size = int(model_config.get("batch_size", 64))
     num_workers = model_config.get("num_workers", "auto")
     feature_subset = select_bundle_features_for_checkpoint(bundle, model_config)
@@ -493,7 +524,14 @@ def infer_bundle(
     summary_raw_targets: list[torch.Tensor] = []
 
     with torch.no_grad():
-        for features, line_target, band_target, raw_future_returns, ticker_ids, future_covariates in loader:
+        for (
+            features,
+            line_target,
+            band_target,
+            raw_future_returns,
+            ticker_ids,
+            future_covariates,
+        ) in loader:
             features = features.to(device, non_blocking=True)
             line_target = line_target.to(device, non_blocking=True)
             band_target = band_target.to(device, non_blocking=True)
@@ -503,7 +541,9 @@ def infer_bundle(
 
             with autocast_context(device):
                 if isinstance(getattr(model, "_orig_mod", model), TiDE) and use_future_covariate:
-                    output = model(features, ticker_id=ticker_ids, future_covariate=future_covariates)
+                    output = model(
+                        features, ticker_id=ticker_ids, future_covariate=future_covariates
+                    )
                 else:
                     output = model(features, ticker_id=ticker_ids)
 
@@ -527,7 +567,9 @@ def infer_bundle(
             elif model_role == "band":
                 assert isinstance(output, BandOutput)
                 ordered_band = torch.sort(
-                    torch.stack((output.lower_band.detach().cpu(), output.upper_band.detach().cpu()), dim=-1),
+                    torch.stack(
+                        (output.lower_band.detach().cpu(), output.upper_band.detach().cpu()), dim=-1
+                    ),
                     dim=-1,
                 ).values
                 line_returns = None
@@ -555,9 +597,9 @@ def infer_bundle(
                 anchor_batch = torch.tensor(
                     [
                         float(
-                            bundle.ticker_arrays[bundle.sample_refs[offset + batch_index][0]]["closes"][
-                                bundle.sample_refs[offset + batch_index][1]
-                            ]
+                            bundle.ticker_arrays[bundle.sample_refs[offset + batch_index][0]][
+                                "closes"
+                            ][bundle.sample_refs[offset + batch_index][1]]
                         )
                         if isinstance(bundle, SequenceDataset)
                         else float(bundle.anchor_closes[offset + batch_index].item())
@@ -568,12 +610,18 @@ def infer_bundle(
                 if model_role == "line_v2" and line_returns is not None:
                     line_prices = (anchor_batch.unsqueeze(-1) * (1.0 + line_returns)).tolist()
                     lower_prices, upper_prices = [], []
-                elif model_role == "band" and lower_returns is not None and upper_returns is not None:
+                elif (
+                    model_role == "band" and lower_returns is not None and upper_returns is not None
+                ):
                     lower_prices = (anchor_batch.unsqueeze(-1) * (1.0 + lower_returns)).tolist()
                     upper_prices = (anchor_batch.unsqueeze(-1) * (1.0 + upper_returns)).tolist()
                     line_prices = []
                 else:
-                    assert line_returns is not None and lower_returns is not None and upper_returns is not None
+                    assert (
+                        line_returns is not None
+                        and lower_returns is not None
+                        and upper_returns is not None
+                    )
                     line_prices, lower_prices, upper_prices = decode_return_forecasts(
                         line_returns,
                         lower_returns,
@@ -612,7 +660,12 @@ def infer_bundle(
                             "meta": {"layer": "line", "model_role": "line_v2"},
                         }
                     )
-                elif raw_return_mode and model_role == "band" and lower_returns is not None and upper_returns is not None:
+                elif (
+                    raw_return_mode
+                    and model_role == "band"
+                    and lower_returns is not None
+                    and upper_returns is not None
+                ):
                     lower_series = lower_prices[batch_index]
                     upper_series = upper_prices[batch_index]
                     prediction_records.append(
@@ -637,15 +690,24 @@ def infer_bundle(
                                 "layer": "band",
                                 "model_role": "band",
                                 "band_calibration_status": product_band_calibration.get("status"),
-                                "band_calibration_applied": bool(product_band_calibration.get("applied")),
+                                "band_calibration_applied": bool(
+                                    product_band_calibration.get("applied")
+                                ),
                                 "band_calibration_method": product_band_calibration.get("method"),
-                                "band_calibration_params": product_band_calibration.get("params") or {},
-                                "band_calibration_artifact": product_band_calibration.get("artifact_path"),
+                                "band_calibration_params": product_band_calibration.get("params")
+                                or {},
+                                "band_calibration_artifact": product_band_calibration.get(
+                                    "artifact_path"
+                                ),
                             },
                         }
                     )
                 elif raw_return_mode:
-                    assert line_returns is not None and lower_returns is not None and upper_returns is not None
+                    assert (
+                        line_returns is not None
+                        and lower_returns is not None
+                        and upper_returns is not None
+                    )
                     line_series = line_prices[batch_index]
                     lower_series = lower_prices[batch_index]
                     upper_series = upper_prices[batch_index]
@@ -682,7 +744,9 @@ def infer_bundle(
                     )
 
                 if raw_return_mode:
-                    actual_series = (anchor_batch[batch_index] * (1.0 + band_target_cpu[batch_index])).tolist()
+                    actual_series = (
+                        anchor_batch[batch_index] * (1.0 + band_target_cpu[batch_index])
+                    ).tolist()
                 else:
                     actual_series = band_target_cpu[batch_index].tolist()
                 base_evaluation = {
@@ -709,7 +773,9 @@ def infer_bundle(
                             "meta": {"layer": "line", "model_role": "line_v2"},
                         }
                     )
-                elif model_role == "band" and lower_returns is not None and upper_returns is not None:
+                elif (
+                    model_role == "band" and lower_returns is not None and upper_returns is not None
+                ):
                     actual_return_tensor = band_target_cpu[batch_index].unsqueeze(0)
                     mid_returns = (lower_returns[batch_index] + upper_returns[batch_index]) / 2.0
                     quantile_return_tensor = torch.stack(
@@ -719,7 +785,9 @@ def infer_bundle(
                     evaluation_records.append(
                         {
                             **base_evaluation,
-                            "pinball_loss": float(pinball(quantile_return_tensor, actual_return_tensor).item()),
+                            "pinball_loss": float(
+                                pinball(quantile_return_tensor, actual_return_tensor).item()
+                            ),
                             "coverage": float(
                                 (
                                     (band_target_cpu[batch_index] >= lower_returns[batch_index])
@@ -729,23 +797,47 @@ def infer_bundle(
                                 .mean()
                                 .item()
                             ),
-                            "lower_breach_rate": float((band_target_cpu[batch_index] < lower_returns[batch_index]).to(torch.float32).mean().item()),
-                            "upper_breach_rate": float((band_target_cpu[batch_index] > upper_returns[batch_index]).to(torch.float32).mean().item()),
-                            "normalized_band_width": float((upper_returns[batch_index] - lower_returns[batch_index]).mean().item()),
+                            "lower_breach_rate": float(
+                                (band_target_cpu[batch_index] < lower_returns[batch_index])
+                                .to(torch.float32)
+                                .mean()
+                                .item()
+                            ),
+                            "upper_breach_rate": float(
+                                (band_target_cpu[batch_index] > upper_returns[batch_index])
+                                .to(torch.float32)
+                                .mean()
+                                .item()
+                            ),
+                            "normalized_band_width": float(
+                                (upper_returns[batch_index] - lower_returns[batch_index])
+                                .mean()
+                                .item()
+                            ),
                             "meta": {"layer": "band", "model_role": "band"},
                         }
                     )
                 else:
-                    assert line_returns is not None and lower_returns is not None and upper_returns is not None
+                    assert (
+                        line_returns is not None
+                        and lower_returns is not None
+                        and upper_returns is not None
+                    )
                     actual_return_tensor = band_target_cpu[batch_index].unsqueeze(0)
                     quantile_return_tensor = torch.stack(
-                        (lower_returns[batch_index], line_returns[batch_index], upper_returns[batch_index]),
+                        (
+                            lower_returns[batch_index],
+                            line_returns[batch_index],
+                            upper_returns[batch_index],
+                        ),
                         dim=-1,
                     ).unsqueeze(0)
                     evaluation_records.append(
                         {
                             **base_evaluation,
-                            "pinball_loss": float(pinball(quantile_return_tensor, actual_return_tensor).item()),
+                            "pinball_loss": float(
+                                pinball(quantile_return_tensor, actual_return_tensor).item()
+                            ),
                             **build_single_sample_evaluation(
                                 actual_series=band_target_cpu[batch_index].tolist(),
                                 line_series=line_returns[batch_index].tolist(),
@@ -753,7 +845,11 @@ def infer_bundle(
                                 upper_series=upper_returns[batch_index].tolist(),
                                 line_target_type=line_target_type,
                             ),
-                            "normalized_band_width": float((upper_returns[batch_index] - lower_returns[batch_index]).mean().item()),
+                            "normalized_band_width": float(
+                                (upper_returns[batch_index] - lower_returns[batch_index])
+                                .mean()
+                                .item()
+                            ),
                         }
                     )
             offset += batch_size_now
@@ -842,9 +938,19 @@ def run_inference(
         checkpoint_config,
         run_config=model_run,
     )
-    line_target_type = str(checkpoint_config.get("line_target_type", config.get("line_target_type", "raw_future_return")))
-    band_target_type = str(checkpoint_config.get("band_target_type", config.get("band_target_type", "raw_future_return")))
-    raw_return_mode = line_target_type == "raw_future_return" and band_target_type == "raw_future_return"
+    line_target_type = str(
+        checkpoint_config.get(
+            "line_target_type", config.get("line_target_type", "raw_future_return")
+        )
+    )
+    band_target_type = str(
+        checkpoint_config.get(
+            "band_target_type", config.get("band_target_type", "raw_future_return")
+        )
+    )
+    raw_return_mode = (
+        line_target_type == "raw_future_return" and band_target_type == "raw_future_return"
+    )
     checkpoint_ticker_registry = resolve_checkpoint_ticker_registry(
         checkpoint_config,
         str(model_run["timeframe"]),
@@ -857,9 +963,14 @@ def run_inference(
         seq_len=int(config.get("seq_len") or checkpoint_config["seq_len"]),
         horizon=int(model_run["horizon"]),
         tickers=tickers or config.get("tickers") or checkpoint_config.get("tickers"),
-        limit_tickers=limit_tickers or config.get("limit_tickers") or checkpoint_config.get("limit_tickers"),
+        limit_tickers=limit_tickers
+        or config.get("limit_tickers")
+        or checkpoint_config.get("limit_tickers"),
         include_future_covariate=bool(
-            checkpoint_config.get("use_future_covariate", config.get("use_future_covariate", model_run["model_name"] == "tide"))
+            checkpoint_config.get(
+                "use_future_covariate",
+                config.get("use_future_covariate", model_run["model_name"] == "tide"),
+            )
         ),
         line_target_type=line_target_type,
         band_target_type=band_target_type,
@@ -892,7 +1003,9 @@ def run_inference(
 
     effective_save = save or save_product_latest_only
     if effective_save and not raw_return_mode:
-        raise ValueError("비 raw target 체크포인트는 predictions 저장과 시그널 생성을 지원하지 않습니다. score 모드로만 실행해 주세요.")
+        raise ValueError(
+            "비 raw target 체크포인트는 predictions 저장과 시그널 생성을 지원하지 않습니다. score 모드로만 실행해 주세요."
+        )
 
     storage_contract = resolve_inference_save_contract(
         save=effective_save,
@@ -905,7 +1018,9 @@ def run_inference(
     if storage_contract == "product_latest_only":
         storage_audit = save_product_latest_predictions(prediction_records, evaluation_records)
     elif storage_contract == STORAGE_CONTRACT_EVALUATION_BULK:
-        save_predictions(with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_EVALUATION_BULK))
+        save_predictions(
+            with_prediction_storage_contract(prediction_records, STORAGE_CONTRACT_EVALUATION_BULK)
+        )
         save_prediction_evaluations(evaluation_records)
 
     return {

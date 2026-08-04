@@ -1,18 +1,15 @@
 {
-  "affected_ticker_count": 1,
-  "checksum": "792316273fa1a998",
-  "created_at": "2026-06-21T02:34:12.626278Z",
-  "date_max": "2026-06-12",
+  "checksum": "d224a1fd985e457c",
+  "created_at": "2026-08-04T01:51:14.823956Z",
+  "date_max": "2026-07-31",
   "date_min": "2016-02-19",
-  "indicator_build_mode": "incremental",
   "kind": "indicators",
   "path": "data\\parquet\\indicators_yfinance_1W_500.parquet",
-  "price_source_data_hash": "6c8a997de8394b5a",
   "provider": "yfinance",
   "provider_adjustment_policy": "yfinance_auto_adjust_false_adj_close_factor_v3_adjusted_ohlc",
-  "row_count": 260302,
+  "row_count": 263119,
   "source": "yfinance",
-  "source_data_hash": "6c8a997de8394b5a",
+  "source_data_hash": "5c513795dc8a2b37",
   "ticker_count": 500,
   "timeframe": "1W"
 }
