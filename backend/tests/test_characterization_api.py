@@ -12,7 +12,13 @@ CP237.5 정규화 (전략 C, `_snapshot_normalize.normalize_response`):
 
 비결정성 회피 (CP223 그대로):
 - `X-Request-Id="test-fixed"` 헤더 (request_id.py:9의 uuid4 박제).
-- `aapl_prices` 의 start/end 명시 (api_service.py:58의 date.today() 회피).
+- `aapl_prices` 의 start/end 는 테스트 실행 시점 기준 상대 날짜(최근 180일)로 계산.
+  CP237.5 정규화가 scalar 값(날짜 포함)을 안 박고 dtype만 비교하므로 절대 날짜를
+  고정할 필요가 없다 — 오히려 절대 날짜 고정은 `backend/data/v1/*.parquet`가
+  롤링 윈도우(최근 ~13개월만 유지)라 daily refresh가 계속 지나가면 그 구간이
+  서빙 데이터 범위 밖으로 밀려나 404가 나는 시한폭탄이었다(2026-08-12 실제 발생,
+  api_service.py:58의 date.today() 비결정성 회피 목적으로 2025-01-02~06-30을
+  박아뒀던 게 원인). 상대 날짜는 이 클래스의 문제를 구조적으로 없앤다.
 - float 은 `normalize_floats(r.json(), ndigits=9)` 로 정규화. 현 정규화 전략에선
   값 비교가 빠져 무해하지만, request_id leak 점검과 향후 fixture 기반 row-level
   비교 회복 시 활용 위해 유지.
@@ -25,9 +31,14 @@ baseline 생성: `pytest backend/tests/test_characterization_api.py --snapshot-u
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pytest
 from tests._snapshot_normalize import normalize_response
 from tests.conftest import FIXED_HEADERS, normalize_floats
+
+_AAPL_PRICES_END = datetime.now().date()
+_AAPL_PRICES_START = _AAPL_PRICES_END - timedelta(days=180)
 
 # 9개 케이스. (id, method, path, params).
 # AAPL은 9개 모두 200을 반환함을 directive 진단 단계에서 실측 확인.
@@ -36,8 +47,8 @@ CASES = [
     (
         "aapl_prices",
         "/api/v1/stocks/AAPL/prices",
-        # start/end 명시 고정 → date.today() 비결정성 회피.
-        {"start": "2025-01-02", "end": "2025-06-30"},
+        # 최근 180일 상대 윈도 — 서빙 데이터의 롤링 윈도(최근 ~13개월) 안에 항상 들어옴.
+        {"start": _AAPL_PRICES_START.isoformat(), "end": _AAPL_PRICES_END.isoformat()},
     ),
     ("aapl_indicators", "/api/v1/stocks/AAPL/indicators", {"limit": 300}),
     (
