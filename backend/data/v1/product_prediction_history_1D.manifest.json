@@ -2,10 +2,10 @@
   "line_run_id": "cp210_F4_b4_ensemble_mean",
   "band_run_id": "tide-1D-ea54dcae654d",
   "asof_start": "2024-11-12",
-  "asof_end": "2026-08-17",
-  "row_count": 801776,
+  "asof_end": "2026-08-18",
+  "row_count": 804443,
   "source": "v1_local_parquet",
-  "built_at": "2026-08-18T04:04:40.289508+00:00",
+  "built_at": "2026-08-18T15:23:26.234114+00:00",
   "cp": "CP212",
   "line_policy": "current_predictions_line_1d_serving_rows",
   "band_policy": "current_predictions_band_1d_serving_rows"
