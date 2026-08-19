@@ -134,6 +134,16 @@ jobs:
       - name: Vitest
         run: npm run test:unit
 
+      - name: audit-ci (CP238 — high+ with documented allowlist)
+        # 15 advisories (next 14 + postcss 1) allowlist 박힘. 8 justified
+        # (Lens 사용 패턴 grep 0) + 7 acknowledged (rewrites + RSC, v2 next
+        # 16 major bump 동시 진행 commitment). 근거는 docs/security/
+        # cve_exceptions.md + docs/cp238_grep_evidence.md.
+        # Playwright(아래) 와 무관한 게이트라 그 앞으로 옮김 — Playwright 설치가
+        # 멈춰도(2026-08-19 실측: 38분 hang, 결국 사용자가 수동 취소) 이 진짜
+        # 보안 게이트가 같이 막히면 안 됨.
+        run: npx audit-ci --config audit-ci.json
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -141,6 +151,12 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browsers
+        # 2026-08-19 — GitHub 러너/Playwright CDN 쪽에서 이 단계가 38분간 무한
+        # hang(수동 취소해야 끝남)한 사례 발생. timeout-minutes 로 상한을 걸어
+        # hang 이 "몇 분 뒤 실패"로 끝나게 만듦. Playwright 트랙 자체가 이미
+        # best-effort(아래 continue-on-error) 라 이 단계도 동일 취급.
+        continue-on-error: true
+        timeout-minutes: 5
         run: npx playwright install --with-deps chromium
 
       - name: Playwright tests
@@ -149,14 +165,8 @@ jobs:
         # 하지 않으므로 CI 첫 도입 시 빈 결과나 skip 가능. 실패해도 머지를
         # 막지 않도록 continue-on-error (cleanup CP 에서 strict 화).
         continue-on-error: true
+        timeout-minutes: 10
         run: npm run test:e2e
-
-      - name: audit-ci (CP238 — high+ with documented allowlist)
-        # 15 advisories (next 14 + postcss 1) allowlist 박힘. 8 justified
-        # (Lens 사용 패턴 grep 0) + 7 acknowledged (rewrites + RSC, v2 next
-        # 16 major bump 동시 진행 commitment). 근거는 docs/security/
-        # cve_exceptions.md + docs/cp238_grep_evidence.md.
-        run: npx audit-ci --config audit-ci.json
 
   secrets:
     # CP239 Step 7 — secrets gate. Windows pre-commit hook 가 unreliable 라
