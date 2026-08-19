@@ -25,8 +25,14 @@ fragile. 실측 후 (Step 1): 응답이 `{data: dict{data: list[row...]}}` 중�
 검출 불가 (trade-off — 별도 fixture 테스트로 보강):
 - row 의 정밀 float 값 회귀
 - list 길이 변경 (cumulative 증가 면역의 대가)
-- heterogeneous list (row 마다 dtype 다른 경우; 첫 row 기준)
-- 첫 row 의 nullable 필드가 dtype 바뀜 (오늘 str / 내일 None)
+
+2026-08 수정: row_schema 를 첫 row 만 보고 정하면, nullable 필드(예:
+scan_indicator 의 sector — 섹터 미분류 종목은 null)가 그날그날 정렬 순서에
+따라 첫 row가 null 이냐 아니냐로 갈려서 스냅샷이 뒤집히는 시한폭탄이었다
+(2026-08-19 실제 발생: baseline null → 재실행 str). 첫 row 대신 list의 모든
+row를 훑어서 key별 dtype **합집합**을 구하는 걸로 바꿔서, nullable 필드는
+항상 "null|str" 처럼 안정적으로 표현되게 했다 — heterogeneous list(row마다
+dtype 다른 경우) 도 같은 방식으로 부수적으로 해결됨.
 """
 
 from __future__ import annotations
@@ -82,11 +88,53 @@ def _dtype_name(value: Any) -> str:
     return type(value).__name__
 
 
+def _merge_shapes(shapes: list[Any]) -> Any:
+    """여러 row의 _shape() 결과를 하나로 합친다 (같은 자리의 값들이 서로 다른
+    dtype/구조일 수 있으니 합집합으로 안정화).
+
+    - 전부 dict shape → key 합집합 + key별 재귀 병합
+    - 전부 list shape → 내부 list_row_schema 재귀 병합
+    - 나머지(스칼라·혼합) → dtype 이름 합집합을 "|"로 join (nullable 필드가
+      "null|str" 처럼 안정적으로 표현됨)
+    """
+    if not shapes:
+        return {}
+    dict_shapes = [s for s in shapes if isinstance(s, dict) and "dict_keys" in s]
+    list_shapes = [s for s in shapes if isinstance(s, dict) and "list_row_schema" in s]
+    is_pure_dict = len(dict_shapes) == len(shapes)
+    is_pure_list = len(list_shapes) == len(shapes)
+
+    if is_pure_dict:
+        all_keys = sorted({key for s in dict_shapes for key in s["dict_keys"]})
+        merged_schema = {
+            key: _merge_shapes(
+                [s["dict_schema"][key] for s in dict_shapes if key in s["dict_schema"]]
+            )
+            for key in all_keys
+        }
+        return {"dict_keys": all_keys, "dict_schema": merged_schema}
+    if is_pure_list:
+        inner = [s["list_row_schema"] for s in list_shapes if s["list_row_schema"]]
+        return {"list_row_schema": _merge_shapes(inner) if inner else {}}
+
+    dtypes: set[str] = set()
+    for s in shapes:
+        if isinstance(s, str):
+            dtypes.add(s)
+        elif isinstance(s, dict) and "dict_keys" in s:
+            dtypes.add("dict")
+        elif isinstance(s, dict) and "list_row_schema" in s:
+            dtypes.add("list")
+    return "|".join(sorted(dtypes)) if dtypes else "null"
+
+
 def _shape(value: Any) -> Any:
     """재귀 shape 추출.
 
     - dict → {"dict_keys": sorted_keys, "dict_schema": {k: _shape(v)}}
-    - list → {"list_row_schema": _shape(first_row_or_empty)}
+    - list → {"list_row_schema": 전체 row shape 를 합친 결과} (2026-08 수정 —
+      첫 row 만 보면 nullable 필드가 그날그날 정렬 순서에 따라 스냅샷이
+      뒤집히는 시한폭탄이라, 모든 row를 훑어 dtype 합집합으로 안정화)
     - scalar → dtype 이름 문자열
 
     JSON 응답은 finite tree (cycle 없음) → 무한 재귀 위험 없음.
@@ -98,10 +146,9 @@ def _shape(value: Any) -> Any:
             "dict_schema": {k: _shape(value[k]) for k in keys},
         }
     if isinstance(value, list):
-        # 빈 list 는 빈 dict. 첫 row 기준 (heterogeneous list trade-off).
-        return {
-            "list_row_schema": _shape(value[0]) if value else {},
-        }
+        if not value:
+            return {"list_row_schema": {}}
+        return {"list_row_schema": _merge_shapes([_shape(item) for item in value])}
     return _dtype_name(value)
 
 
