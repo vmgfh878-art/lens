@@ -3,9 +3,9 @@
   "band_run_id": "tide-1D-ea54dcae654d",
   "asof_start": "2024-11-12",
   "asof_end": "2026-09-16",
-  "row_count": 813502,
+  "row_count": 813598,
   "source": "v1_local_parquet",
-  "built_at": "2026-09-16T23:24:19.201218+00:00",
+  "built_at": "2026-09-17T01:22:59.986650+00:00",
   "cp": "CP212",
   "line_policy": "current_predictions_line_1d_serving_rows",
   "band_policy": "current_predictions_band_1d_serving_rows"
