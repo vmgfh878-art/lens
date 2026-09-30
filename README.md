@@ -28,7 +28,7 @@
 
 ### 서빙 운영 전환
 
-원본 수집·백필·딥러닝 계산은 로컬 PC에서 유지하고, 작은 서빙 결과만 비공개 GitHub 릴리스에 최신·이전 두 벌로 전달하는 전환을 준비 중입니다. Render API와 Vercel 화면 배포는 유지합니다. 일일 데이터 커밋 제거는 실제 운영 전환 확인 후 적용합니다. 완료·미완료 단계와 인증·실행 절차는 [서빙 전환 진행표](docs/github_serving_migration_plan.md)에 정리했습니다.
+원본 수집·백필·딥러닝 계산과 큰 데이터 보관은 로컬 PC에서 유지합니다. 검증한 서빙 결과만 비공개 GitHub 릴리스에 최신·이전 두 벌로 전달하고, Render API가 이를 읽어 Vercel 화면에 제공합니다. 일일 데이터 Git 커밋은 중지했습니다. 실제 운영 검증과 장애 시 동작은 [서빙 전환 진행표](docs/github_serving_migration_plan.md)에 정리했습니다.
 
 ### 문제 정의
 
@@ -160,7 +160,7 @@ Lens 는 두 가지 보조지표를 제시합니다.
 | Baselines | Bollinger · Historical Quantile · GARCH(1,1) · Linear Regression |
 | Data | yfinance local parquet (501 ticker × 11 년) |
 | Deploy | Vercel (frontend) · Render (backend) |
-| DB | Supabase (Postgres + REST) 서빙 + 로컬 parquet 자동 폴백 (얇은 7테이블, 1년 retention) |
+| 서빙 데이터 | 비공개 GitHub 릴리스의 검증된 파일을 Render가 캐시에 내려받음. 고정 Git 폴백 한 벌 유지 |
 
 ---
 
@@ -168,13 +168,14 @@ Lens 는 두 가지 보조지표를 제시합니다.
 
 ```text
 [로컬]
-  └─ parquet 생성 / 평가 / 검증
-       ↓ git push
-[GitHub Repo]
-  └─ backend/data/v1/*.parquet (~18 MB)
+  └─ 수집 / 백필 / 계산 / parquet 검증
+       ↓ 릴리스 파일 발행, 데이터 Git 커밋 없음
+[비공개 GitHub 릴리스]
+  └─ 서빙 스냅샷 최신·이전 두 벌
        ↓
 [Render — Backend (FastAPI)]
-  └─ startup 시 parquet 메모리 로드
+  └─ 시작 시 및 실행 중 5분마다 검증 후 활성화
+       └─ 원격 장애 시 코드에 고정된 폴백 한 벌 사용
        └─ /api/v1/stocks/{ticker}/predictions/product-history
        └─ /api/v1/predictions/{slot}/{ticker}
             ↓ axios
@@ -336,7 +337,8 @@ bit-exact 일치는 GPU / CUDA / kernel 구현 차이로 불가능하지만 stat
 | 소스코드 (`backend / frontend / ai / scripts`) | **깃** | 운영 + 추론 + 재현 wrapper |
 | v1 운영 매니페스트 (`docs/v1_operating_models_reproducibility.md`) | **깃** | 환경 / fold / seeds / GPU 단일 진리 |
 | 운영 모델 관련 핵심 보고서 (CP210 / CP153 / CP178 / CP216.2) | **깃** | 결과 narrative + 통계 검정 |
-| v1 product signal parquet (`backend/data/v1/*.parquet`) | **깃** (~18 MB) | frontend 서빙용 (Render 배포 동봉) |
+| 일일 서빙 parquet (`backend/data/v1/*.parquet`) | **로컬 PC + 비공개 GitHub 릴리스** | 검증 후 Render API가 읽음. Git 커밋 대상 아님 |
+| 고정 서빙 폴백 (`backend/data/bootstrap/v1`) | **깃** (한 벌) | 원격 접근 실패 시 서비스 유지용. 매일 갱신하지 않음 |
 | 학습 entry + cascade 의존 (`ai/cp{209,210,153,178}*.py` + 9 cascade) | **깃** (텍스트 작음) | 학습 재현 wrapper 가 호출 |
 | 모델 checkpoint (`20_per_model/*/checkpoints/*.pt`) | **Google Drive** (~수 GB) | 재현 시 필요 |
 | 학습·추론 parquet (`10_training_data/*.parquet`) | **Google Drive** (~1 GB) | 재현 시 필요 |
@@ -347,7 +349,7 @@ bit-exact 일치는 GPU / CUDA / kernel 구현 차이로 불가능하지만 stat
 
 - **운영 모델 3개만** 깃에 핵심 보고서 + 학습 entry + cascade 의존 포함 (`.gitignore` 예외)
 - 대량 binary (checkpoint, parquet, W&B) 는 깃 제외 → Google Drive 재현 패키지
-- v1 product signal parquet 만 깃 포함 (Render 배포 동봉)
+- 일일 서빙 parquet은 Git 추적에서 제외하고, 고정 폴백 한 벌만 코드 배포에 포함
 - provider / source / hash / asof_date 기록으로 재현성 확보
 - 모델 결과는 product slot 에 수동 승인 후 연결 (`build_v1_predictions_local.py` → `git push`)
 - **v1 운영 매니페스트** (`docs/v1_operating_models_reproducibility.md`) 가 단일 진리. 화면 (AI 모델 상세 → 재현 매니페스트) 이 같은 출처
