@@ -1,7 +1,7 @@
-from pathlib import Path
+from threading import Event, Thread
 
 import structlog
-from app.config import get_cache_config, get_cors_config
+from app.config import get_cache_config, get_cors_config, get_remote_sync_config
 from app.core.exceptions import AppError
 from app.core.http import error_response, success_response
 from app.core.logging import configure_logging
@@ -9,6 +9,16 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import request_id_middleware
 from app.routers.v1 import admin, ai, health, stocks, strategies
 from app.routers.v1 import predictions as v1_predictions
+from app.services.serving_paths import (
+    configured_serving_data_dir,
+    get_serving_bootstrap_dir,
+    get_serving_data_dir,
+)
+from app.services.serving_storage import get_remote_serving_config
+from app.services.serving_sync import (
+    activate_bootstrap_serving_snapshot,
+    sync_latest_serving_snapshot,
+)
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,6 +62,81 @@ app.include_router(strategies.router, prefix="/api/v1")
 
 
 @app.on_event("startup")
+def _activate_packaged_serving_fallback() -> None:
+    """배포 기본 경로가 고정 폴백이면 해시 검증 후 먼저 활성화한다."""
+    if configured_serving_data_dir() != get_serving_bootstrap_dir():
+        return
+    try:
+        result = activate_bootstrap_serving_snapshot()
+        logger.info(
+            "bundled serving fallback ready: snapshot_id=%s",
+            result["snapshot_id"],
+        )
+    except Exception as exc:  # noqa: BLE001 — R2 성공 가능성이 있어 다음 시작 단계를 계속한다.
+        logger.error("bundled serving fallback validation failed: %s", exc)
+
+
+@app.on_event("startup")
+def _sync_remote_serving_snapshot() -> None:
+    """원격 저장소가 설정되면 캐시 로드 전에 최신 완성 버전을 활성화한다."""
+    config = get_remote_serving_config()
+    if not config.configured:
+        logger.info("원격 서빙 동기화 비활성")
+        return
+    try:
+        result = sync_latest_serving_snapshot(config=config)
+        logger.info(
+            "원격 서빙 스냅샷 준비 완료: snapshot_id=%s changed=%s",
+            result["snapshot_id"],
+            result["changed"],
+        )
+    except Exception as exc:  # noqa: BLE001 — 검증된 고정 폴백으로 서버는 계속 기동한다.
+        logger.warning("원격 서빙 동기화 실패. 검증된 폴백을 유지합니다: %s", exc)
+
+
+def _periodic_remote_sync(stop_event: Event, interval_seconds: int) -> None:
+    """서버가 켜진 동안만 원격 최신 버전을 재확인한다."""
+    while not stop_event.wait(interval_seconds):
+        try:
+            result = sync_latest_serving_snapshot()
+            if result["changed"]:
+                logger.info("새 서빙 스냅샷 활성화: snapshot_id=%s", result["snapshot_id"])
+        except Exception as exc:  # noqa: BLE001 — 현재 활성 버전을 유지하고 다음 간격에 재시도한다.
+            logger.warning("주기적 원격 서빙 동기화 실패. 기존 버전을 유지합니다: %s", exc)
+
+
+@app.on_event("startup")
+def _start_periodic_remote_sync() -> None:
+    """관리 토큰 없이도 켜져 있는 Render가 새 릴리스를 받도록 선택적으로 켠다."""
+    interval_seconds = get_remote_sync_config().interval_seconds
+    if interval_seconds == 0 or not get_remote_serving_config().configured:
+        return
+    stop_event = Event()
+    thread = Thread(
+        target=_periodic_remote_sync,
+        args=(stop_event, interval_seconds),
+        name="lens-remote-serving-sync",
+        daemon=True,
+    )
+    app.state.remote_sync_stop_event = stop_event
+    app.state.remote_sync_thread = thread
+    thread.start()
+    logger.info("주기적 원격 서빙 동기화 시작: 간격=%s초", interval_seconds)
+
+
+@app.on_event("shutdown")
+def _stop_periodic_remote_sync() -> None:
+    stop_event = getattr(app.state, "remote_sync_stop_event", None)
+    thread = getattr(app.state, "remote_sync_thread", None)
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None:
+        thread.join(timeout=1)
+    app.state.remote_sync_stop_event = None
+    app.state.remote_sync_thread = None
+
+
+@app.on_event("startup")
 def _load_v1_predictions_cache() -> None:
     """Startup 시 v1 predictions parquet 메모리 로드.
     Render free tier (512MB) 메모리 제약 때문에 startup 일괄 로드 비활성.
@@ -64,7 +149,7 @@ def _load_v1_predictions_cache() -> None:
             "v1 predictions cache eager load disabled (set LENS_EAGER_V1_CACHE=1 to enable)"
         )
         return
-    base = Path(__file__).resolve().parent.parent / "data" / "v1"
+    base = get_serving_data_dir()
     try:
         summary = v1_predictions.load_caches(base)
         for slot, info in summary.items():

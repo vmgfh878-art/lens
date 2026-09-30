@@ -11,6 +11,7 @@ from app.config import get_market_config
 from app.core.exceptions import UpstreamUnavailableError
 from app.repositories import prediction_repo
 from app.services import data_backend
+from app.services.serving_paths import get_serving_data_dir
 from pandas.api import types as pdt
 
 # Render free tier (512MB) 에서 매 요청마다 11MB parquet 을 메모리에 로드하면
@@ -33,24 +34,16 @@ _HISTORY_COLUMNS = [
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 # Render rootDir=backend 호환을 위해 backend/data/v1 우선, 기존 data/parquet 폴백 지원.
-BACKEND_DIR = Path(__file__).resolve().parents[2]
-V1_SNAPSHOT_DIR = BACKEND_DIR / "data" / "v1"
 LEGACY_SNAPSHOT_DIR = ROOT_DIR / "data" / "parquet"
-DEFAULT_SNAPSHOT_DIR = (
-    V1_SNAPSHOT_DIR
-    if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists()
-    else LEGACY_SNAPSHOT_DIR
-)
-PRODUCT_HISTORY_PARQUET_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.parquet"
-PRODUCT_HISTORY_MANIFEST_PATH = DEFAULT_SNAPSHOT_DIR / "product_prediction_history_1D.manifest.json"
 PRODUCT_HISTORY_RESPONSE_SOURCE = "product_rolling_replay"
 SUPPORTED_TIMEFRAME = "1D"
 
 
 def _snapshot_dir() -> Path:
     # product history는 raw parquet가 아니라 serving snapshot을 우선 사용해야 한다.
-    if (V1_SNAPSHOT_DIR / "product_prediction_history_1D.parquet").exists():
-        return V1_SNAPSHOT_DIR
+    serving_dir = get_serving_data_dir()
+    if (serving_dir / "product_prediction_history_1D.parquet").exists():
+        return serving_dir
     override = get_market_config().local_snapshot_dir
     if override:
         override_path = Path(override)
@@ -61,12 +54,10 @@ def _snapshot_dir() -> Path:
 
 def _history_paths() -> tuple[Path, Path]:
     snapshot_dir = _snapshot_dir()
-    parquet_path = PRODUCT_HISTORY_PARQUET_PATH
-    manifest_path = PRODUCT_HISTORY_MANIFEST_PATH
-    if snapshot_dir != DEFAULT_SNAPSHOT_DIR:
-        parquet_path = snapshot_dir / "product_prediction_history_1D.parquet"
-        manifest_path = snapshot_dir / "product_prediction_history_1D.manifest.json"
-    return parquet_path, manifest_path
+    return (
+        snapshot_dir / "product_prediction_history_1D.parquet",
+        snapshot_dir / "product_prediction_history_1D.manifest.json",
+    )
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:

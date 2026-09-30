@@ -9,19 +9,20 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
-_MOCK_PATH = Path(__file__).resolve().parents[2] / "data" / "v1" / "ai_runs_mock.json"
+from app.services.serving_paths import serving_file
+
 LEGACY_COMPOSITE_MODEL_NAMES = {"line_band_composite"}
 
 
 @lru_cache(maxsize=1)
 def _load_mock() -> dict[str, Any]:
-    if not _MOCK_PATH.exists():
+    mock_path = serving_file("ai_runs_mock.json")
+    if not mock_path.exists():
         return {"runs": [], "evaluations": {}, "backtests": {}}
     try:
-        return json.loads(_MOCK_PATH.read_text(encoding="utf-8"))
+        return json.loads(mock_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {"runs": [], "evaluations": {}, "backtests": {}}
 

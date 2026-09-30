@@ -8,12 +8,19 @@ import unittest
 from unittest.mock import patch
 
 from app.config import (
+    GitHubReleaseConfig,
     get_admin_config,
     get_cache_config,
     get_cors_config,
     get_database_config,
+    get_github_release_config,
     get_market_config,
+    get_r2_config,
+    get_remote_sync_config,
+    get_serving_data_config,
 )
+from app.services.serving_storage import get_remote_serving_config
+from pydantic import ValidationError
 
 
 class DatabaseConfigTestCase(unittest.TestCase):
@@ -80,6 +87,130 @@ class MarketConfigTestCase(unittest.TestCase):
             self.assertEqual(cfg.local_snapshot_dir, "/tmp/x")
 
 
+class ServingDataConfigTestCase(unittest.TestCase):
+    def test_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = get_serving_data_config()
+            self.assertIsNone(cfg.data_dir)
+            self.assertIsNone(cfg.bootstrap_dir)
+            self.assertIsNone(cfg.cache_dir)
+
+    def test_paths_strip_and_empty_to_none(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LENS_SERVING_DATA_DIR": "  data/current  ",
+                "LENS_SERVING_BOOTSTRAP_DIR": "   ",
+                "LENS_SERVING_CACHE_DIR": " runtime/cache ",
+            },
+            clear=True,
+        ):
+            cfg = get_serving_data_config()
+            self.assertEqual(cfg.data_dir, "data/current")
+            self.assertIsNone(cfg.bootstrap_dir)
+            self.assertEqual(cfg.cache_dir, "runtime/cache")
+
+
+class R2ConfigTestCase(unittest.TestCase):
+    def test_default_is_not_configured(self):
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = get_r2_config()
+            self.assertFalse(cfg.configured)
+            self.assertEqual(cfg.object_prefix, "serving/v1")
+            self.assertEqual(cfg.region, "auto")
+            self.assertIn("LENS_R2_BUCKET", cfg.missing_required_fields)
+
+    def test_account_id_builds_official_endpoint(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LENS_R2_ACCOUNT_ID": " account-123 ",
+                "LENS_R2_BUCKET": " lens-private ",
+                "LENS_R2_ACCESS_KEY_ID": " access ",
+                "LENS_R2_SECRET_ACCESS_KEY": " secret ",
+                "LENS_R2_PREFIX": "/snapshots/v1/",
+            },
+            clear=True,
+        ):
+            cfg = get_r2_config()
+            self.assertTrue(cfg.configured)
+            self.assertEqual(
+                cfg.endpoint_url,
+                "https://account-123.r2.cloudflarestorage.com",
+            )
+            self.assertEqual(cfg.bucket, "lens-private")
+            self.assertEqual(cfg.object_prefix, "snapshots/v1")
+
+    def test_explicit_endpoint_works_without_account_id(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LENS_R2_ENDPOINT_URL": "http://127.0.0.1:9000/",
+                "LENS_R2_BUCKET": "test",
+                "LENS_R2_ACCESS_KEY_ID": "access",
+                "LENS_R2_SECRET_ACCESS_KEY": "secret",
+            },
+            clear=True,
+        ):
+            cfg = get_r2_config()
+            self.assertTrue(cfg.configured)
+            self.assertEqual(cfg.endpoint_url, "http://127.0.0.1:9000")
+
+
+class GitHubReleaseConfigTestCase(unittest.TestCase):
+    def test_missing_token_is_not_configured(self):
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = get_github_release_config()
+            self.assertEqual(cfg.repository, "vmgfh878-art/lens-serving")
+            self.assertEqual(cfg.release_tag, "serving-snapshots")
+            self.assertEqual(cfg.missing_required_fields, ["LENS_GITHUB_TOKEN"])
+            self.assertFalse(cfg.configured)
+
+    def test_token_is_trimmed_and_hidden_from_repr(self):
+        with patch.dict(os.environ, {"LENS_GITHUB_TOKEN": "  private-test-token  "}, clear=True):
+            cfg = get_github_release_config()
+            self.assertTrue(cfg.configured)
+            self.assertEqual(cfg.token, "private-test-token")
+            self.assertNotIn("private-test-token", repr(cfg))
+
+    def test_invalid_repository_and_tag_are_rejected(self):
+        for key, value in (
+            ("LENS_GITHUB_REPOSITORY", "https://github.com/owner/repo"),
+            ("LENS_GITHUB_REPOSITORY", "../repo"),
+            ("LENS_GITHUB_REPOSITORY", "owner/repo/extra"),
+            ("LENS_GITHUB_RELEASE_TAG", "../snapshot"),
+        ):
+            with (
+                self.subTest(key=key, value=value),
+                patch.dict(os.environ, {key: value}, clear=True),
+                self.assertRaises(ValidationError),
+            ):
+                get_github_release_config()
+
+    def test_explicit_github_does_not_fall_back_to_r2_credentials(self):
+        env = {
+            "LENS_SERVING_STORAGE": "github_release",
+            "LENS_R2_ACCOUNT_ID": "test",
+            "LENS_R2_BUCKET": "test",
+            "LENS_R2_ACCESS_KEY_ID": "test",
+            "LENS_R2_SECRET_ACCESS_KEY": "test",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            cfg = get_remote_serving_config()
+            self.assertIsInstance(cfg, GitHubReleaseConfig)
+            self.assertFalse(cfg.configured)
+
+    def test_github_serving_never_uses_supabase_reads(self):
+        from app.services.data_backend import use_supabase
+
+        with (
+            patch.dict(os.environ, {"LENS_GITHUB_TOKEN": "test-token"}, clear=True),
+            patch("app.services.data_backend.supabase_is_configured", return_value=True) as db,
+        ):
+            self.assertFalse(use_supabase())
+            db.assert_not_called()
+
+
 class CorsConfigTestCase(unittest.TestCase):
     def test_default_origins(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -132,6 +263,23 @@ class AdminConfigTestCase(unittest.TestCase):
         ]:
             with patch.dict(os.environ, {"LENS_ALLOW_LOCAL_ADMIN_RELOAD": raw}, clear=True):
                 self.assertEqual(get_admin_config().allow_local_reload, expected, raw)
+
+
+class RemoteSyncConfigTestCase(unittest.TestCase):
+    def test_default_is_disabled(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(get_remote_sync_config().interval_seconds, 0)
+
+    def test_interval_is_bounded(self):
+        with patch.dict(os.environ, {"LENS_REMOTE_SYNC_INTERVAL_SECONDS": "300"}, clear=True):
+            self.assertEqual(get_remote_sync_config().interval_seconds, 300)
+        for value in ("1", "59", "3601", "invalid"):
+            with (
+                self.subTest(value=value),
+                patch.dict(os.environ, {"LENS_REMOTE_SYNC_INTERVAL_SECONDS": value}, clear=True),
+                self.assertRaises(ValidationError),
+            ):
+                get_remote_sync_config()
 
 
 class CacheConfigTestCase(unittest.TestCase):

@@ -15,10 +15,9 @@ from typing import Any
 import pandas as pd
 import structlog
 from app.schemas import frames as _frames
+from app.services.serving_paths import serving_file
 
 logger = structlog.get_logger("lens.local_market")
-
-_BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
 
 # CP227/CP246 — read 경계 dtype 계약은 frames.assert_contract(파일명 키) 가 담당.
 
@@ -104,7 +103,7 @@ def get_prices_1d() -> pd.DataFrame | None:
     global _PRICES_1D
     with _LOCK:
         if _PRICES_1D is None:
-            _PRICES_1D = _load(_BASE / "market_prices_1d.parquet")
+            _PRICES_1D = _load(serving_file("market_prices_1d.parquet"))
     return _PRICES_1D
 
 
@@ -112,7 +111,7 @@ def get_prices_1w() -> pd.DataFrame | None:
     global _PRICES_1W
     with _LOCK:
         if _PRICES_1W is None:
-            _PRICES_1W = _load(_BASE / "market_prices_1w.parquet")
+            _PRICES_1W = _load(serving_file("market_prices_1w.parquet"))
     return _PRICES_1W
 
 
@@ -120,7 +119,7 @@ def get_indicators_1d() -> pd.DataFrame | None:
     global _INDICATORS_1D
     with _LOCK:
         if _INDICATORS_1D is None:
-            _INDICATORS_1D = _load(_BASE / "market_indicators_1d.parquet")
+            _INDICATORS_1D = _load(serving_file("market_indicators_1d.parquet"))
     return _INDICATORS_1D
 
 
@@ -128,7 +127,7 @@ def get_stock_info() -> pd.DataFrame | None:
     global _STOCK_INFO
     with _LOCK:
         if _STOCK_INFO is None:
-            _STOCK_INFO = _load(_BASE / "market_stock_info.parquet")
+            _STOCK_INFO = _load(serving_file("market_stock_info.parquet"))
     return _STOCK_INFO
 
 

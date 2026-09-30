@@ -291,6 +291,20 @@ class DataBackendToggleTestCase(unittest.TestCase):
             self._call({"SUPABASE_URL": "http://x", "SUPABASE_KEY": "k", "LENS_FORCE_LOCAL": "1"})
         )
 
+    def test_r2_configuration_wins(self):
+        self.assertFalse(
+            self._call(
+                {
+                    "SUPABASE_URL": "http://x",
+                    "SUPABASE_KEY": "k",
+                    "LENS_R2_ACCOUNT_ID": "account",
+                    "LENS_R2_BUCKET": "lens-private",
+                    "LENS_R2_ACCESS_KEY_ID": "access",
+                    "LENS_R2_SECRET_ACCESS_KEY": "secret",
+                }
+            )
+        )
+
     def test_data_backend_local_wins(self):
         self.assertFalse(
             self._call(
@@ -515,9 +529,8 @@ class PredictionRepoTestCase(unittest.TestCase):
 class RestModeEndpointTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         cls.client = TestClient(app)
 
@@ -907,14 +920,18 @@ class Phase4aTestCase(unittest.TestCase):
         from backend.scripts import import_v1_serving_to_supabase as imp
 
         # dry_run 은 네트워크 0. 기본 호출이 product_history 를 selected 에서 빼는지.
-        counts = imp.run_import(tickers=["AAPL"], dry_run=True)
+        bootstrap = imp.ROOT / "backend" / "data" / "bootstrap" / "v1"
+        with patch.object(imp, "V1_DIR", bootstrap):
+            counts = imp.run_import(tickers=["AAPL"], dry_run=True)
         self.assertNotIn("product_prediction_history_1d", counts)
         self.assertIn("predictions_band_1d", counts)
 
     def test_run_import_opt_in_history(self):
         from backend.scripts import import_v1_serving_to_supabase as imp
 
-        counts = imp.run_import(tickers=["AAPL"], dry_run=True, include_product_history=True)
+        bootstrap = imp.ROOT / "backend" / "data" / "bootstrap" / "v1"
+        with patch.object(imp, "V1_DIR", bootstrap):
+            counts = imp.run_import(tickers=["AAPL"], dry_run=True, include_product_history=True)
         self.assertIn("product_prediction_history_1d", counts)
 
     def test_retention_invariant_rejects_short_window(self):

@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from app.core.exceptions import (
@@ -7,6 +8,11 @@ from app.core.exceptions import (
 )
 from app.db import reset_supabase_client
 from app.main import app
+from app.services.serving_paths import reset_active_serving_data_dir
+from app.services.serving_sync import (
+    activate_bootstrap_serving_snapshot,
+    reset_serving_sync_state,
+)
 from fastapi.testclient import TestClient
 
 
@@ -24,14 +30,40 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(body["data"]["service"], "lens-backend")
         self.assertIn("request_id", body["meta"])
 
-    def test_ready_health_returns_config_error_when_env_missing(self):
-        with patch.dict(os.environ, {}, clear=True):
+    def test_ready_health_uses_bootstrap_snapshot_when_supabase_env_missing(self):
+        bootstrap_dir = Path(__file__).resolve().parents[1] / "data" / "bootstrap" / "v1"
+        env = {
+            "LENS_SERVING_DATA_DIR": str(bootstrap_dir),
+            "LENS_SERVING_BOOTSTRAP_DIR": str(bootstrap_dir),
+        }
+        with patch.dict(os.environ, env, clear=True):
+            reset_active_serving_data_dir()
+            reset_serving_sync_state()
+            activate_bootstrap_serving_snapshot()
             response = self.client.get("/api/v1/health/ready")
 
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["error"]["code"], "CONFIG_ERROR")
+        self.assertEqual(body["data"]["status"], "ok")
+        self.assertEqual(body["data"]["source"], "bootstrap")
+        self.assertTrue(body["data"]["checks"]["required_files"])
+        self.assertTrue(body["data"]["checks"]["bootstrap_verified"])
         self.assertIn("request_id", body["meta"])
+        reset_active_serving_data_dir()
+        reset_serving_sync_state()
+
+    def test_ready_health_fails_when_local_snapshot_is_missing(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "app.routers.v1.health.get_serving_data_dir",
+                return_value=Path("missing-serving-data"),
+            ),
+        ):
+            response = self.client.get("/api/v1/health/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "UPSTREAM_UNAVAILABLE")
 
     def test_stock_prices_success(self):
         payload = {

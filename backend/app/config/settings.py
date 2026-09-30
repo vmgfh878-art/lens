@@ -1,13 +1,15 @@
 """CP235 — 도메인별 BaseSettings.
 
 규약:
-- 단일 거대 Settings 금지 — 도메인별 (Database/Market/Cors/Admin/Cache).
+- 단일 거대 Settings 금지 — 도메인별 (Database/Market/ServingData/R2/Cors/Admin/Cache).
 - 접근자 get_*_config()는 매 호출 새 인스턴스를 만들어 env 재평가
   (test_api.py:26 patch.dict(clear=True) 계약 + collector get_settings() 정합).
 - truthy 파싱 / strip / CSV split은 코드 원본과 동일 (값 변경 0).
 """
 
 from __future__ import annotations
+
+import re
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,6 +70,165 @@ class MarketConfig(BaseSettings):
 
     market_data_provider: str = Field(default="yfinance", alias="MARKET_DATA_PROVIDER")
     local_snapshot_dir: str | None = Field(default=None, alias="LENS_LOCAL_SNAPSHOT_DIR")
+
+
+class ServingDataConfig(BaseSettings):
+    """서빙 스냅샷의 활성 경로와 번들 폴백 경로."""
+
+    model_config = _BASE_CONFIG
+
+    data_dir: str | None = Field(default=None, alias="LENS_SERVING_DATA_DIR")
+    bootstrap_dir: str | None = Field(default=None, alias="LENS_SERVING_BOOTSTRAP_DIR")
+    cache_dir: str | None = Field(default=None, alias="LENS_SERVING_CACHE_DIR")
+
+    @field_validator("data_dir", "bootstrap_dir", "cache_dir", mode="before")
+    @classmethod
+    def _clean_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+
+class RemoteSyncConfig(BaseSettings):
+    """실행 중인 서버의 원격 스냅샷 재확인 간격."""
+
+    model_config = _BASE_CONFIG
+
+    interval_seconds: int = Field(
+        default=0, ge=0, le=3600, alias="LENS_REMOTE_SYNC_INTERVAL_SECONDS"
+    )
+
+    @field_validator("interval_seconds")
+    @classmethod
+    def _validate_interval(cls, value: int) -> int:
+        if 0 < value < 60:
+            raise ValueError("원격 재확인 간격은 0(비활성) 또는 60~3600초여야 합니다.")
+        return value
+
+
+class R2Config(BaseSettings):
+    """비공개 Cloudflare R2 S3 API 연결 설정."""
+
+    model_config = _BASE_CONFIG
+
+    account_id: str | None = Field(default=None, alias="LENS_R2_ACCOUNT_ID")
+    bucket: str | None = Field(default=None, alias="LENS_R2_BUCKET")
+    access_key_id: str | None = Field(default=None, alias="LENS_R2_ACCESS_KEY_ID", repr=False)
+    secret_access_key: str | None = Field(
+        default=None,
+        alias="LENS_R2_SECRET_ACCESS_KEY",
+        repr=False,
+    )
+    session_token: str | None = Field(default=None, alias="LENS_R2_SESSION_TOKEN", repr=False)
+    endpoint_url_override: str | None = Field(default=None, alias="LENS_R2_ENDPOINT_URL")
+    object_prefix: str = Field(default="serving/v1", alias="LENS_R2_PREFIX")
+    region: str = Field(default="auto", alias="LENS_R2_REGION")
+
+    @field_validator(
+        "account_id",
+        "bucket",
+        "access_key_id",
+        "secret_access_key",
+        "session_token",
+        "endpoint_url_override",
+        mode="before",
+    )
+    @classmethod
+    def _clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    @field_validator("object_prefix", mode="before")
+    @classmethod
+    def _clean_prefix(cls, value: str | None) -> str:
+        cleaned = str(value or "serving/v1").strip().strip("/")
+        if not cleaned or any(part in {".", ".."} for part in cleaned.split("/")):
+            raise ValueError("LENS_R2_PREFIX가 올바르지 않습니다.")
+        return cleaned
+
+    @field_validator("region", mode="before")
+    @classmethod
+    def _clean_region(cls, value: str | None) -> str:
+        return str(value or "auto").strip() or "auto"
+
+    @property
+    def endpoint_url(self) -> str | None:
+        if self.endpoint_url_override:
+            return self.endpoint_url_override.rstrip("/")
+        if self.account_id:
+            return f"https://{self.account_id}.r2.cloudflarestorage.com"
+        return None
+
+    @property
+    def missing_required_fields(self) -> list[str]:
+        missing = []
+        if not self.endpoint_url:
+            missing.append("LENS_R2_ACCOUNT_ID 또는 LENS_R2_ENDPOINT_URL")
+        for env_name, value in (
+            ("LENS_R2_BUCKET", self.bucket),
+            ("LENS_R2_ACCESS_KEY_ID", self.access_key_id),
+            ("LENS_R2_SECRET_ACCESS_KEY", self.secret_access_key),
+        ):
+            if not value:
+                missing.append(env_name)
+        return missing
+
+    @property
+    def configured(self) -> bool:
+        return not self.missing_required_fields
+
+
+class GitHubReleaseConfig(BaseSettings):
+    """비공개 릴리스의 고정 채널과 접근 토큰 설정."""
+
+    model_config = _BASE_CONFIG
+
+    repository: str = Field(default="vmgfh878-art/lens-serving", alias="LENS_GITHUB_REPOSITORY")
+    token: str | None = Field(default=None, alias="LENS_GITHUB_TOKEN", repr=False)
+    release_tag: str = Field(default="serving-snapshots", alias="LENS_GITHUB_RELEASE_TAG")
+    object_prefix: str = "serving/v1"
+
+    @field_validator("repository", "release_tag", mode="before")
+    @classmethod
+    def _clean_identifier(cls, value: str) -> str:
+        return str(value).strip()
+
+    @field_validator("repository")
+    @classmethod
+    def _validate_repository(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+            raise ValueError("LENS_GITHUB_REPOSITORY는 소유자/저장소 형식이어야 합니다.")
+        if any(part in {".", ".."} for part in value.split("/")):
+            raise ValueError("GitHub 저장소 식별자가 올바르지 않습니다.")
+        return value
+
+    @field_validator("release_tag")
+    @classmethod
+    def _validate_tag(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", value):
+            raise ValueError("고정 릴리스 태그가 올바르지 않습니다.")
+        return value
+
+    @field_validator("token", mode="before")
+    @classmethod
+    def _clean_token(cls, value: str | None) -> str | None:
+        return str(value).strip() or None if value is not None else None
+
+    @property
+    def bucket(self) -> str:
+        # 기존 파일 무결성 발행기의 저장 위치 계약을 재사용한다.
+        return self.repository
+
+    @property
+    def missing_required_fields(self) -> list[str]:
+        return [] if self.token else ["LENS_GITHUB_TOKEN"]
+
+    @property
+    def configured(self) -> bool:
+        return not self.missing_required_fields
 
 
 class CorsConfig(BaseSettings):
@@ -149,6 +310,22 @@ def get_database_config() -> DatabaseConfig:
 
 def get_market_config() -> MarketConfig:
     return MarketConfig()
+
+
+def get_serving_data_config() -> ServingDataConfig:
+    return ServingDataConfig()
+
+
+def get_remote_sync_config() -> RemoteSyncConfig:
+    return RemoteSyncConfig()
+
+
+def get_r2_config() -> R2Config:
+    return R2Config()
+
+
+def get_github_release_config() -> GitHubReleaseConfig:
+    return GitHubReleaseConfig()
 
 
 def get_cors_config() -> CorsConfig:

@@ -15,7 +15,7 @@ CP222 보강: 운영 v1 parquet 재오염 영구 가드 (session-scoped autouse)
   비결정성 회피. 운영 코드 수정 없이 호출 측에서만 해결.
 - `normalize_floats()`: 응답 dict의 float 값을 round(v, 9)로 정규화.
   rtol≈1e-9 효과. numpy/pandas 버전 미세 변동 흡수.
-- `_guard_v1_parquet_integrity()` (CP222 보강): backend/data/v1/*.parquet의
+- `_guard_bootstrap_parquet_integrity()` (CP222 보강): 고정 폴백 parquet의
   세션 시작 sha256을 박제 → 세션 종료 시 비교 → 변경된 파일을 `git checkout`
   으로 즉시 복원하고 경고 출력. 어떤 테스트가 운영 데이터를 만져도 모두
   자동 복원 → 런북 §0.8 "운영 parquet 덮어쓰기 금지" 영구 보장.
@@ -46,6 +46,8 @@ for _p in (str(ROOT), str(BACKEND)):
 # Supabase 경로 차단, local parquet only. test_api.py의 env clear 테스트는
 # patch.dict(clear=True)로 일시 비웠다가 복원하므로 충돌 없음.
 os.environ["LENS_FORCE_LOCAL"] = "1"
+os.environ["LENS_SERVING_DATA_DIR"] = str(BACKEND / "data" / "bootstrap" / "v1")
+os.environ["LENS_SERVING_BOOTSTRAP_DIR"] = str(BACKEND / "data" / "bootstrap" / "v1")
 
 # --- 공용 fixture 헬퍼 ------------------------------------------------------
 FIXED_HEADERS = {"X-Request-Id": "test-fixed"}
@@ -78,13 +80,13 @@ def normalize_floats(obj, ndigits: int = 9):
     return obj
 
 
-# --- CP222 보강: 운영 v1 parquet 재오염 가드 ---------------------------------
-# backend/data/v1/*.parquet는 frontend serving 운영 데이터. .gitignore가
-# `!backend/data/v1/*.parquet` 로 명시 추적. 어떤 테스트도 덮어쓰면 안 됨.
+# --- CP222 보강: 고정 폴백 parquet 재오염 가드 -------------------------------
+# backend/data/bootstrap/v1/*.parquet는 배포 비상용 고정 데이터다.
+# 일일 생성 경로 backend/data/v1과 달리 어떤 테스트도 덮어쓰면 안 된다.
 # Step 3 pytest 실행 시 운영 데이터가 modified로 노출된 사례가 있었음 (런북
 # §0.8 위반). 사용자 결정: 영구 가드 신설.
 
-_V1_PARQUET_DIR = BACKEND / "data" / "v1"
+_BOOTSTRAP_PARQUET_DIR = BACKEND / "data" / "bootstrap" / "v1"
 
 
 def _sha256_of(path: Path) -> str | None:
@@ -110,16 +112,16 @@ def _emit_pollution_warning(lines: list[str]) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _guard_v1_parquet_integrity():
-    """운영 v1 parquet 재오염 가드 (CP222 보강, 영구).
+def _guard_bootstrap_parquet_integrity():
+    """고정 폴백 parquet 재오염 가드 (CP222 보강, 영구).
 
-    - 세션 시작: backend/data/v1/*.parquet 각 파일의 sha256 박제.
+    - 세션 시작: backend/data/bootstrap/v1/*.parquet 각 파일의 sha256 박제.
     - 세션 종료 (yield 후): sha256 재비교.
     - 변경된 파일이 있으면 `git checkout -- <파일>` 로 즉시 복원하고 경고.
     - 복원 실패 시: 차단 트리거. 사용자 보고 필요 (pytest 종료 후 git
-      status backend/data/v1/ 가 dirty 이면 발견됨).
+      status backend/data/bootstrap/v1/ 가 dirty 이면 발견됨).
     """
-    files = sorted(_V1_PARQUET_DIR.glob("*.parquet"))
+    files = sorted(_BOOTSTRAP_PARQUET_DIR.glob("*.parquet"))
     baseline = {f.name: _sha256_of(f) for f in files}
 
     yield
@@ -144,7 +146,7 @@ def _guard_v1_parquet_integrity():
 
     failed: list[str] = []
     for name in polluted:
-        rel = (_V1_PARQUET_DIR / name).relative_to(ROOT).as_posix()
+        rel = (_BOOTSTRAP_PARQUET_DIR / name).relative_to(ROOT).as_posix()
         try:
             subprocess.run(
                 ["git", "checkout", "--", rel],
@@ -163,7 +165,7 @@ def _guard_v1_parquet_integrity():
             [
                 "",
                 "[CP222 GUARD] 차단 트리거: 복원 실패한 파일이 있다. ",
-                "  `git status backend/data/v1/` 확인 후 보고하라.",
+                "  `git status backend/data/bootstrap/v1/` 확인 후 보고하라.",
                 "=" * 72,
             ]
         )
@@ -173,7 +175,7 @@ def _guard_v1_parquet_integrity():
 def client():
     """TestClient(app) — 세션 1개 공유 + 시작 시 캐시 cold reset.
 
-    backend/data/v1/*.parquet 디스크 read-only. Supabase 미접속.
+    backend/data/bootstrap/v1/*.parquet 디스크 read-only. Supabase 미접속.
     """
     from app.main import app
     from app.services import (

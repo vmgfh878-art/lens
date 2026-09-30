@@ -88,6 +88,11 @@ def configure_logging() -> None:
     root.addHandler(handler)
     root.setLevel(level)
 
+    # 통신 라이브러리의 요청 로그에는 비공개 다운로드 서명 URL이 포함될 수 있다.
+    # 앱이 DEBUG여도 통신 상세 로그는 남기지 않고 자체 상태·오류 로그로 진단한다.
+    for library in ("httpx", "httpcore"):
+        logging.getLogger(library).setLevel(logging.WARNING)
+
     _CONFIGURED = True
 
 

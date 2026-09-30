@@ -26,6 +26,7 @@ from app.core.http import success_response
 from app.core.validators import TickerStr
 from app.repositories import prediction_repo
 from app.services import data_backend, parquet_store
+from app.services.serving_paths import get_serving_data_dir
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 logger = logging.getLogger("lens.predictions")
@@ -85,7 +86,9 @@ def _get_df(slot: str) -> pd.DataFrame:
     if df is None:
         raise HTTPException(
             status_code=503,
-            detail=f"slot {slot} not loaded. Check backend/data/v1/ parquets and restart.",
+            detail=(
+                f"slot {slot} not loaded. " f"Check {get_serving_data_dir()} parquets and restart."
+            ),
         )
     return df
 

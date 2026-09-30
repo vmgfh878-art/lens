@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# 고정 폴백은 운영체제별 줄바꿈 변환 없이 매니페스트와 같은 바이트로 배포한다.
+backend/data/bootstrap/v1/* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

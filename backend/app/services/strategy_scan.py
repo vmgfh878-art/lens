@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from app.repositories import market_repo, prediction_repo
 from app.services import data_backend, parquet_store
+from app.services.serving_paths import get_serving_data_dir
 from app.services.strategy_backtest_engine import _ticker_metrics
 from app.services.strategy_indicators import (
     _align_date_dtype,
@@ -36,7 +37,7 @@ MIN_EVAL_DAYS = 120
 
 
 def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "v1"
+    return get_serving_data_dir()
 
 
 @lru_cache(maxsize=1)

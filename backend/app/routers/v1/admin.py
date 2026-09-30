@@ -12,6 +12,8 @@ from app.repositories.ai_repo import _load_mock
 from app.routers.v1 import predictions as v1_predictions
 from app.services import data_backend, local_market_svc, parquet_store
 from app.services.product_prediction_history_svc import clear_product_history_cache
+from app.services.serving_paths import get_serving_data_dir
+from app.services.serving_sync import get_serving_sync_state, sync_latest_serving_snapshot
 from app.services.strategy_backtest_svc import clear_strategy_cache
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
@@ -49,7 +51,7 @@ def _require_reload_allowed(request: Request, token: str | None) -> None:
 def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Header(default=None)):
     """로컬 v1 parquet cache를 명시적으로 다시 읽는다."""
     _require_reload_allowed(request, x_lens_admin_token)
-    base_dir = Path(__file__).resolve().parents[3] / "data" / "v1"
+    base_dir = get_serving_data_dir()
     # Clear shared prediction parquet store first; derived caches follow.
     store_summary = parquet_store.clear_all()
     prediction_summary = v1_predictions.load_caches(base_dir)
@@ -70,6 +72,24 @@ def reload_v1_predictions(request: Request, x_lens_admin_token: str | None = Hea
             "ai_runs_mock_cache": "cleared",
         },
     )
+
+
+@router.post("/sync-serving")
+def sync_serving_snapshot(
+    request: Request,
+    x_lens_admin_token: str | None = Header(default=None),
+):
+    """원격 최신 완성 버전을 내려받고 검증한 뒤 서빙 경로를 전환한다."""
+    _require_reload_allowed(request, x_lens_admin_token)
+    try:
+        result = sync_latest_serving_snapshot()
+    except Exception as exc:  # noqa: BLE001 — 기존 활성 버전은 유지하고 503으로 원인 전달.
+        logger.warning("원격 서빙 동기화 실패", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"원격 서빙 동기화 실패: {type(exc).__name__}: {str(exc)[:300]}",
+        ) from exc
+    return success_response(request, result)
 
 
 def _debug_state_parquet_files(request: Request, base_dir: Path) -> dict[str, dict]:
@@ -96,6 +116,20 @@ def _debug_state_env() -> dict[str, str]:
         "SUPABASE_URL",
         "SUPABASE_KEY",
         "LENS_FORCE_LOCAL",
+        "LENS_SERVING_DATA_DIR",
+        "LENS_SERVING_BOOTSTRAP_DIR",
+        "LENS_SERVING_CACHE_DIR",
+        "LENS_SERVING_STORAGE",
+        "LENS_GITHUB_REPOSITORY",
+        "LENS_GITHUB_RELEASE_TAG",
+        "LENS_GITHUB_TOKEN",
+        "LENS_R2_ACCOUNT_ID",
+        "LENS_R2_BUCKET",
+        "LENS_R2_ACCESS_KEY_ID",
+        "LENS_R2_SECRET_ACCESS_KEY",
+        "LENS_R2_SESSION_TOKEN",
+        "LENS_R2_ENDPOINT_URL",
+        "LENS_R2_PREFIX",
         "LENS_EAGER_V1_CACHE",
         "LENS_ADMIN_RELOAD_TOKEN",
         "LENS_ALLOW_LOCAL_ADMIN_RELOAD",
@@ -194,7 +228,7 @@ def debug_state(request: Request):
 
     sensitive value 노출 X — KEY 존재 여부와 path / size 만 보고. 인증 없이 호출 가능.
     """
-    base_dir = Path(__file__).resolve().parents[3] / "data" / "v1"
+    base_dir = get_serving_data_dir()
 
     return success_response(
         request,
@@ -206,6 +240,7 @@ def debug_state(request: Request):
             # CP254/255 — 서빙 read 가 실제로 타는 백엔드 + 자동 폴백이 보는 도달성
             # (전환 상태 즉시 확인용). reachable=None 이면 미구성(=항상 로컬).
             "data_backend": "supabase" if data_backend.use_supabase() else "local",
+            "serving_sync": get_serving_sync_state(),
             "supabase_reachable": data_backend.supabase_reachable_now(),
             "supabase_probe": _debug_state_supabase_probe(),
             "interesting_env": _debug_state_env(),

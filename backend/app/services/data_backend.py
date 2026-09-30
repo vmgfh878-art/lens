@@ -4,12 +4,13 @@
 read-site 가 env 를 직접 해석하는 것 금지 — 분기 조건이 흩어지면 전환이 한 곳에서 안 끝난다.
 
 판정 순서 (위에서 걸리면 즉시 로컬 parquet):
-1) LENS_DATA_BACKEND=local|parquet|snapshot 또는 LENS_REQUIRE_LOCAL_SNAPSHOTS truthy → 로컬.
-2) LENS_USE_LOCAL_SNAPSHOTS truthy → 로컬 (로컬 데모 기본).
-3) LENS_FORCE_LOCAL truthy → 로컬 (supabase_is_configured 가 False). **비상 강제 스위치.**
-4) SUPABASE_URL+KEY 미구성 → 로컬.
-5) (CP255 자동 폴백) LENS_SUPABASE_AUTOFALLBACK!=0 이고 Supabase 가 **현재 도달 불가**면 → 로컬.
-6) 그 외 → Supabase REST.
+1) 원격 서빙 저장소가 완전히 구성되어 있으면 → 로컬에 내려받은 검증 스냅샷.
+2) LENS_DATA_BACKEND=local|parquet|snapshot 또는 LENS_REQUIRE_LOCAL_SNAPSHOTS truthy → 로컬.
+3) LENS_USE_LOCAL_SNAPSHOTS truthy → 로컬 (로컬 데모 기본).
+4) LENS_FORCE_LOCAL truthy → 로컬 (supabase_is_configured 가 False). **비상 강제 스위치.**
+5) SUPABASE_URL+KEY 미구성 → 로컬.
+6) (CP255 자동 폴백) LENS_SUPABASE_AUTOFALLBACK!=0 이고 Supabase 가 **현재 도달 불가**면 → 로컬.
+7) 그 외 → Supabase REST.
 
 ★ CP255 자동 폴백 (사용자 요구: "복구되면 바로 Supabase, 죽으면 바로 윈도우, 자유롭게"):
    configured 상태에서 백엔드가 매번 env 를 안 바꿔도, Supabase REST 가 살아있으면 DB·죽으면
@@ -25,6 +26,7 @@ import os
 import time
 
 from app.db import get_supabase, supabase_is_configured
+from app.services.serving_storage import get_remote_serving_config
 
 try:
     from collector.repositories.local_snapshots import local_snapshots_required
@@ -75,8 +77,19 @@ def reset_reachable_cache() -> None:
     _reachable_cache.update({"ts": 0.0, "ok": False, "checked": False})
 
 
+def local_backend_forced() -> bool:
+    """원격 스냅샷 또는 로컬 설정 때문에 Supabase를 사용하면 안 되는지 반환한다."""
+    if get_remote_serving_config().configured:
+        return True
+    if local_snapshots_required():
+        return True
+    return os.environ.get("LENS_USE_LOCAL_SNAPSHOTS", "").strip().lower() in _TRUTHY
+
+
 def supabase_reachable_now() -> bool | None:
     """진단용 — 자동 폴백이 보는 현재 도달성 (configured 아니면 None)."""
+    if local_backend_forced():
+        return None
     if not supabase_is_configured():
         return None
     return _supabase_reachable()
@@ -84,9 +97,7 @@ def supabase_reachable_now() -> bool | None:
 
 def use_supabase() -> bool:
     """서빙 read 가 Supabase REST 를 타야 하면 True (아니면 로컬 parquet)."""
-    if local_snapshots_required():
-        return False
-    if os.environ.get("LENS_USE_LOCAL_SNAPSHOTS", "").strip().lower() in _TRUTHY:
+    if local_backend_forced():
         return False
     if not supabase_is_configured():  # LENS_FORCE_LOCAL 포함
         return False

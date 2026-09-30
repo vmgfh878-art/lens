@@ -9,6 +9,11 @@ docs/*
 !docs/lens_overview_report.html
 !docs/v1_operating_models_reproducibility.md
 !docs/lens_v2_master_plan.md
+!docs/r2_serving_migration_baseline.md
+!docs/r2_serving_migration_plan.md
+!docs/r2_data_quality_audit_prompt.md
+!docs/github_serving_migration_plan.md
+!docs/github_data_quality_audit_prompt.md
 
 # 리팩토링 작업 문서(로컬 실행용, git 미포함). 런북/지시서는 docs/cp* 로 이미 제외됨.
 docs/refactoring_master_plan.md
@@ -84,9 +89,14 @@ ai/cache/*.manifest.json
 ai/cache/*.pt.manifest.json
 
 backend/data/parquet/
+backend/data/runtime/
+backend/data/v1/
 *.parquet
-# v1 frontend serving parquets — must ship with backend deploy
-!backend/data/v1/*.parquet
+# 배포 비상용 고정 스냅샷 한 벌만 Git에 포함한다.
+!backend/data/bootstrap/
+!backend/data/bootstrap/v1/
+!backend/data/bootstrap/v1/*.parquet
+!backend/data/bootstrap/v1/*.json
 tmp/
 .claude/
 backend/logs/

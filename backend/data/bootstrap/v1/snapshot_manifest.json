@@ -1,0 +1,59 @@
+{
+  "content_sha256": "cb7e58f76fc4bfc78716482f2019cd0f6ffcc58b59867de2b65560418a5fd61d",
+  "created_at": "2026-09-30T05:44:37Z",
+  "files": [
+    {
+      "name": "ai_runs_mock.json",
+      "sha256": "b4ad3311423e0b14551a05d593c924cbd8e6b5a0467b7ea77af3715a68f44276",
+      "size_bytes": 1006248
+    },
+    {
+      "name": "market_indicators_1d.parquet",
+      "sha256": "ce7f21d573f3df4e29c41a9a6c645e2329c3a8bb2aaecae757fb0137584a0f97",
+      "size_bytes": 10615958
+    },
+    {
+      "name": "market_prices_1d.parquet",
+      "sha256": "85f0f6e2be7e9f62c431e10d33a6b84dcf08288b49cfae20ded1442a792e3627",
+      "size_bytes": 3147837
+    },
+    {
+      "name": "market_prices_1w.parquet",
+      "sha256": "b4b8ffd9b8dc436994cce2a0e58c42b1797f30b8d01add5b27b7949d9e20e987",
+      "size_bytes": 184284
+    },
+    {
+      "name": "market_stock_info.parquet",
+      "sha256": "fe4344e1d484ada5bff6fa8b9a1c8653be9beefceacb197eb30bca77992a07fe",
+      "size_bytes": 5312
+    },
+    {
+      "name": "predictions_band_1d.parquet",
+      "sha256": "32b04ac1f48a9edece79a302b8cea52e3154ebed83fafdb5d97a3263e000fada",
+      "size_bytes": 14077712
+    },
+    {
+      "name": "predictions_band_1w.parquet",
+      "sha256": "1d27322478e74ce6efea3a1dc2d1d7d3921197d9bb6bff0ec35b7c5e3f5b6c61",
+      "size_bytes": 4630821
+    },
+    {
+      "name": "predictions_line_1d.parquet",
+      "sha256": "4d1bca03bf29727230f66daf04e23f88484c845400fab19cdf60d703310791fd",
+      "size_bytes": 5008291
+    },
+    {
+      "name": "product_prediction_history_1D.manifest.json",
+      "sha256": "a638afd0aaca53e890bb52231e6c27726c3db83c21e8993b9ade8827a4fdaf67",
+      "size_bytes": 402
+    },
+    {
+      "name": "product_prediction_history_1D.parquet",
+      "sha256": "e8006adfe985b890686431d55954e4ed24556260c60d80449ce7b76e70f884ce",
+      "size_bytes": 6305261
+    }
+  ],
+  "schema_version": 1,
+  "snapshot_id": "bootstrap-20260930-once",
+  "total_size_bytes": 44982126
+}

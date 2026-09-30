@@ -13,8 +13,30 @@ services:
         value: 3.11.11
       - key: BACKEND_CORS_ORIGINS
         sync: false
-      # v1 local-parquet 모드는 Supabase 없어도 동작.
-      # Supabase 사용 시 아래 두 키를 Render dashboard 에서 설정.
+      # 비공개 GitHub 릴리스의 검증 스냅샷만 읽는다. Supabase 설정보다 우선한다.
+      - key: LENS_DATA_BACKEND
+        value: local
+      # 코드 저장소에는 검증된 폴백 한 벌만 고정한다. 정상 운영에서는 원격 버전을 쓴다.
+      - key: LENS_SERVING_DATA_DIR
+        value: backend/data/bootstrap/v1
+      - key: LENS_SERVING_BOOTSTRAP_DIR
+        value: backend/data/bootstrap/v1
+      - key: LENS_SERVING_STORAGE
+        value: github_release
+      - key: LENS_GITHUB_REPOSITORY
+        value: vmgfh878-art/lens-serving
+      - key: LENS_GITHUB_RELEASE_TAG
+        value: serving-snapshots
+      # 실행 중 새 릴리스를 5분마다 검사한다. 재시작 시에도 즉시 검사한다.
+      - key: LENS_REMOTE_SYNC_INTERVAL_SECONDS
+        value: '300'
+      # 이 저장소의 Contents 읽기 권한만 있는 전용 토큰을 사용한다.
+      - key: LENS_GITHUB_TOKEN
+        sync: false
+      # 관리 API로 수동 즉시 동기화할 때만 사용한다. 일일 발행은 주기 동기화한다.
+      - key: LENS_ADMIN_RELOAD_TOKEN
+        sync: false
+      # 이전 Supabase 설정이 남아 있어도 LENS_DATA_BACKEND=local이 우선한다.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -31,7 +53,7 @@ services:
       - key: SUPABASE_DB_NAME
         sync: false
 
-# Cron 비활성 — v1 학교 데모는 로컬에서 parquet 빌드 + git push 로 갱신.
+# 서버 크론 비활성. 로컬 윈도우 자동화가 계산 후 비공개 릴리스 첨부파일만 갱신한다.
 # 필요 시 아래 cron 블록 다시 활성화하고 환경변수 채워주세요.
 #
 #  - type: cron

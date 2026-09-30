@@ -11,18 +11,16 @@ share the same object reference.  Thread-safe via per-store Lock.
 from __future__ import annotations
 
 import gc
-from pathlib import Path
 from threading import Lock
 
 import numpy as np
 import pandas as pd
 import structlog
 from app.schemas import frames as _frames
+from app.services.serving_paths import serving_file
 from pandas.api import types as pdt
 
 logger = structlog.get_logger("lens.parquet_store")
-
-_BASE = Path(__file__).resolve().parents[2] / "data" / "v1"
 
 # Only prediction parquets live here.
 # market_prices / market_indicators stay in local_market_svc (different date
@@ -52,7 +50,7 @@ def get_raw(name: str) -> pd.DataFrame | None:
 
 
 def _load(name: str) -> pd.DataFrame | None:
-    path = _BASE / _FILE_MAP[name]
+    path = serving_file(_FILE_MAP[name])
     if not path.exists():
         logger.warning("parquet missing: %s", path)
         return None

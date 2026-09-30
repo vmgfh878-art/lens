@@ -19,11 +19,7 @@ if (-not $DryRun -and -not $Apply) {
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
-
-# CP255 — production push 로직(브랜치 견고화 포함)은 별도 헬퍼로 분리한다.
-# 어느 브랜치에서 실행되든 서빙 데이터를 항상 origin/main 으로 보내며, 헬퍼는
-# self-contained 라 샌드박스에서 단독 검증할 수 있다(CP255 §4).
-. (Join-Path $PSScriptRoot "v1_refresh_push.ps1")
+. (Join-Path $PSScriptRoot "serving_notification_status.ps1")
 
 $RunStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $SafeDate = $RunDate.Replace("-", "")
@@ -341,43 +337,30 @@ $ScheduleLines = @(
 )
 $ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
 
-# Production git push (Apply 모드 + serving parquet 변경 있을 때만).
-# Render/Vercel 은 git push 를 받아야 production 이 갱신된다. 윈도우 자동화가
-# 여기까지 해야 "PC 켜지면 production 까지 최신"이 된다.
-# 임시방편: DB(Supabase) 전환 시 이 git push 는 DB write 로 대체 예정 (lens_v2_master_plan §9).
-#
-# CP255 — push 를 브랜치 견고화: 현재 체크아웃이 어느 브랜치든 서빙 데이터는 항상 origin/main 으로
-# 간다(non-main 이면 전용 worktree 로 main 에 직접 커밋). CP238(단계실패 push 차단) +
-# PS5.1 native stderr quirk 회피는 헬퍼(scripts/v1_refresh_push.ps1) 안에 그대로 유지된다.
-$PushStatus = Invoke-V1ProductionPush `
-    -Root $Root `
-    -RunDate $RunDate `
-    -Apply ([bool]$Apply) `
-    -AnyStepFailed ($FailedSteps.Count -gt 0) `
-    -FailedNames (($FailedSteps | ForEach-Object { $_.name }) -join ", ") `
-    -LogPath $PipelineLogPath
-
-# CP256 — 서빙 예측을 프로덕션 DB(Supabase)에 발행.
-# 배포 백엔드는 예측을 Supabase 에서 서빙하는데, 일일 refresh 는 git push 만 하고
-# Supabase 발행은 별도 수동 스크립트라 6/18 형태의 예측 정체가 반복됐다(가격은 최신인데
-# 밴드/라인만 낡아 stale 가드가 차트에서 숨김). publish_serving_to_supabase.py 를 여기서
-# 자동 호출해 정체를 막는다.
-# 안전장치: Apply 모드 + 모든 단계 성공(= git push 됨) 일 때만. 발행이 실패해도 git push 는
-# 이미 끝났으므로 여기서 exit 1 하지 않고 WARN 만 남긴다(민감한 push 경로 불간섭 원칙).
+# 운영 데이터는 Git 이력이나 Supabase에 쓰지 않는다. 비공개 GitHub 릴리스에
+# 검증 스냅샷을 발행한 뒤 Render의 인증 동기화 API를 호출한다. 최신 포인터를
+# 마지막에 교체하고 최신·이전 첨부파일만 남긴다. 업로드 실패 시 기존 버전을 유지한다.
+$PushStatus = "DISABLED_GITHUB_RELEASE"
 $PublishStatus = "SKIPPED"
+$PublishResultPath = Join-Path $RunDirPath "github_publish_${SafeDate}_${RunStamp}.json"
+$ExpectedSnapshotId = ""
 if ($Apply -and $FailedSteps.Count -eq 0) {
-    Write-Log "supabase_publish 시작"
-    $PublishLog = Join-Path $RunDirPath "supabase_publish_${SafeDate}_${RunStamp}.log"
+    Write-Log "github_publish 시작"
+    $PublishLog = Join-Path $RunDirPath "github_publish_${SafeDate}_${RunStamp}.log"
+    $PublishErrorLog = Join-Path $RunDirPath "github_publish_stderr_${SafeDate}_${RunStamp}.log"
     $PrevPyEnc = $env:PYTHONIOENCODING
     $env:PYTHONIOENCODING = "utf-8"
     $PrevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python "backend\scripts\publish_serving_to_supabase.py" 1> $PublishLog 2>&1
+        & $Python "backend\scripts\publish_serving_to_github.py" `
+            --data-dir (Join-Path $Root "backend\data\v1") `
+            --sync-mode periodic `
+            --result-path $PublishResultPath 1> $PublishLog 2> $PublishErrorLog
         $PublishExit = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 0 }
     } catch {
         $PublishExit = 1
-        Add-Content -Path $PublishLog -Value $_.Exception.Message -Encoding UTF8
+        Add-Content -Path $PublishErrorLog -Value $_.Exception.Message -Encoding UTF8
     } finally {
         $ErrorActionPreference = $PrevEap
         $env:PYTHONIOENCODING = $PrevPyEnc
@@ -385,23 +368,32 @@ if ($Apply -and $FailedSteps.Count -eq 0) {
     if ($PublishExit -eq 0) {
         $PublishStatus = "PASS"
     } else {
-        $PublishStatus = "WARN_PUBLISH_FAILED"
-        Write-Log "WARN: supabase publish 실패(exit=$PublishExit). git push 는 완료됨. 로그 확인: $PublishLog"
+        $PublishStatus = "FAIL_GITHUB_PUBLISH"
+        Write-Log "CRITICAL: GitHub 릴리스 발행 또는 Render 동기화 실패(exit=$PublishExit). 현재 운영 버전은 유지된다. 로그 확인: $PublishLog, $PublishErrorLog"
     }
-    Write-Log "supabase_publish 종료: status=$PublishStatus exit=$PublishExit"
+    try {
+        $PublishResult = Read-JsonFile -Path $PublishResultPath
+        if ($PublishResult -and $PublishResult.snapshot_id) {
+            $ExpectedSnapshotId = [string]$PublishResult.snapshot_id
+        }
+    } catch {
+        Write-Log "GitHub 발행 결과 JSON을 읽지 못함. 로그와 배포 상태를 확인한다."
+    }
+    Write-Log "github_publish 종료: status=$PublishStatus exit=$PublishExit"
 } elseif ($Apply) {
     $PublishStatus = "SKIPPED_STEP_FAILURE"
-    Write-Log "supabase_publish skip: 단계 실패로 push 안 됨 → 발행도 건너뜀"
+    Write-Log "github_publish skip: 앞 단계 실패로 발행을 건너뜀"
 } else {
     $PublishStatus = "SKIPPED_DRY_RUN"
 }
 
-# CP256 — 배포 프로덕션이 실제로 최신 예측을 서빙하는지 검수(git push 완료가 아니라 웹 반영까지).
-# 배포 백엔드를 직접 조회해 프론트 stale 가드와 같은 기준으로 1D(h5)/1W(4주) 최신 여부 판정.
-# Apply + 모든 단계 성공(= push/발행 흐름) 일 때만. STALE 면 알림이 빨간색으로 뜬다.
+# 발행 실패 때도 정상 원격 버전, 고정 폴백, 오래된 데이터와 응답 불가를 구분한다.
+# 고정 폴백 정상 응답은 서비스 유지 경고이며 새 스냅샷 발행 성공으로 처리하지 않는다.
 $VerifyStatus = "SKIPPED"
 $VerifyDetail = ""
-if ($Apply -and $FailedSteps.Count -eq 0) {
+$VerifyData = $null
+$VerifyResultPath = Join-Path $RunDirPath "deployed_verify_${SafeDate}_${RunStamp}.json"
+if ($Apply) {
     Write-Log "deployed_verify 시작"
     $VerifyLog = Join-Path $RunDirPath "deployed_verify_${SafeDate}_${RunStamp}.log"
     $PrevPyEnc2 = $env:PYTHONIOENCODING
@@ -409,7 +401,11 @@ if ($Apply -and $FailedSteps.Count -eq 0) {
     $PrevEap2 = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $VerifyOut = & $Python "backend\scripts\verify_deployed_serving.py" 2>&1
+        $VerifyArguments = @("backend\scripts\verify_deployed_serving.py", "--output", $VerifyResultPath)
+        if ($ExpectedSnapshotId) {
+            $VerifyArguments += @("--expected-snapshot-id", $ExpectedSnapshotId)
+        }
+        $VerifyOut = & $Python @VerifyArguments 2>&1
         $VerifyExit = if ($LASTEXITCODE -ne $null) { [int]$LASTEXITCODE } else { 1 }
         $VerifyOut | Out-File -FilePath $VerifyLog -Encoding UTF8
         $VerifyDetail = ($VerifyOut | Where-Object { "$_" -match '^VERIFY ' } | Select-Object -Last 1)
@@ -420,27 +416,103 @@ if ($Apply -and $FailedSteps.Count -eq 0) {
         $ErrorActionPreference = $PrevEap2
         $env:PYTHONIOENCODING = $PrevPyEnc2
     }
-    $VerifyStatus = switch ($VerifyExit) { 0 { "VERIFIED" } 2 { "STALE" } default { "ERROR" } }
+    $VerifyStatus = switch ($VerifyExit) {
+        0 { "VERIFIED" }
+        2 { "STALE" }
+        3 { "FALLBACK" }
+        4 { "MISMATCH" }
+        5 { "REMOTE_DEGRADED" }
+        6 { "LEGACY" }
+        default { "ERROR" }
+    }
+    try {
+        $VerifyData = Read-JsonFile -Path $VerifyResultPath
+    } catch {
+        $VerifyStatus = "ERROR"
+        Write-Log "배포 검수 결과 JSON을 읽지 못함"
+    }
     Write-Log "deployed_verify 종료: status=$VerifyStatus detail=$VerifyDetail"
 } elseif (-not $Apply) {
     $VerifyStatus = "SKIPPED_DRY_RUN"
 }
 
+$ProductionFailed = $false
+if ($Apply -and $FailedSteps.Count -eq 0) {
+    if ($PublishStatus -ne "PASS") {
+        $FinalStatus = "FAIL_GITHUB_PUBLISH"
+        $ProductionFailed = $true
+    } elseif ($VerifyStatus -ne "VERIFIED") {
+        $FinalStatus = "FAIL_DEPLOYED_VERIFY"
+        $ProductionFailed = $true
+    }
+}
+
+# 앞에서 먼저 만든 실행 보고에 최종 운영 발행 결과를 반영해 다시 저장한다.
+$Metrics.final_status = $FinalStatus
+$Metrics | Add-Member -NotePropertyName git_data_push_status -NotePropertyValue $PushStatus -Force
+$Metrics | Add-Member -NotePropertyName github_publish_status -NotePropertyValue $PublishStatus -Force
+$Metrics | Add-Member -NotePropertyName deployed_verify_status -NotePropertyValue $VerifyStatus -Force
+$Metrics | Add-Member -NotePropertyName deployed_verify_detail -NotePropertyValue $VerifyDetail -Force
+$Metrics | Add-Member -NotePropertyName serving_verification -NotePropertyValue $VerifyData -Force
+$Metrics | ConvertTo-Json -Depth 20 | Set-Content -Path $MetricsPath -Encoding UTF8
+Copy-Item -LiteralPath $MetricsPath -Destination $LatestMetricsPath -Force
+
+$ReportLines += @(
+    "",
+    "## 운영 발행",
+    "",
+    "- Git 데이터 push: ``$PushStatus``",
+    "- GitHub 릴리스 발행 및 Render 동기화: ``$PublishStatus``",
+    "- 배포 데이터 검수: ``$VerifyStatus``",
+    "- 검수 상세: ``$VerifyDetail``"
+)
+$ReportLines[2] = "- final_status: ``$FinalStatus``"
+$ReportLines -join "`n" | Set-Content -Path $ReportPath -Encoding UTF8
+Copy-Item -LiteralPath $ReportPath -Destination $LatestReportPath -Force
+
+$ScheduleLines = @(
+    "# CP212 schedule status",
+    "",
+    "- updated_at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss KST')",
+    "- runner: scripts/run_v1_unified_refresh_local.ps1",
+    "- mode: $ModeText",
+    "- status: $FinalStatus",
+    "- reload_status: $ReloadStatus",
+    "- git_data_push_status: $PushStatus",
+    "- github_publish_status: $PublishStatus",
+    "- deployed_verify_status: $VerifyStatus",
+    "- metrics: $MetricsPath",
+    "- report: $ReportPath"
+)
+$ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
+
 Write-Log "CP212 unified v1 refresh 종료: status=$FinalStatus reload=$ReloadStatus push=$PushStatus publish=$PublishStatus verify=$VerifyStatus"
 
-# CP256 — 결과 Slack 알림 (LENS_SLACK_WEBHOOK 설정 시에만).
-# 색: 단계실패 또는 프로덕션 미반영(STALE/ERROR)=danger, 부분/경고=warning, 정상=good.
-$SlackColor = if (($FailedSteps.Count -gt 0) -or ($VerifyStatus -eq "STALE") -or ($VerifyStatus -eq "ERROR")) {
-    "danger"
-} elseif (($PublishStatus -like "WARN*") -or ($ReloadStatus -like "WARN*") -or ($FinalStatus -like "*PARTIAL*")) {
-    "warning"
-} else {
-    "good"
-}
+# 정상 폴백 또는 이전 원격 버전 유지 응답은 경고색으로 알리고 실패 종료코드는 유지한다.
+$SlackColor = Get-ServingNotificationColor `
+    -VerifyStatus $VerifyStatus `
+    -StepFailed ($FailedSteps.Count -gt 0) `
+    -ProductionFailed $ProductionFailed `
+    -OtherWarning (($ReloadStatus -like "WARN*") -or ($FinalStatus -like "*PARTIAL*"))
 $SlackSteps = ($Steps | ForEach-Object { "$($_.name)=$($_.status)" }) -join "  "
-$SlackText = "Lens daily refresh - $RunDate`nmode=$ModeText  result=$FinalStatus`npush=$PushStatus  publish=$PublishStatus`n프로덕션 검수: $VerifyStatus`n$VerifyDetail`n$SlackSteps"
+$ServingText = "서빙 상태: 확인 못함"
+if ($VerifyData) {
+    $ServingText = "서빙 출처=$($VerifyData.source)  버전=$($VerifyData.snapshot_id)  폴백=$($VerifyData.fallback_active)`n원격 동기화 상태=$($VerifyData.remote_sync_status)  마지막 성공=$($VerifyData.last_remote_success_at)`n$($VerifyData.reason)"
+}
+$SlackText = "Lens 일일 갱신 - $RunDate`n모드=$ModeText  결과=$FinalStatus`nGitHub 릴리스 발행=$PublishStatus  배포 검수=$VerifyStatus`n$ServingText`n$VerifyDetail`n$SlackSteps"
 $SlackNotify = Send-SlackNotification -Text $SlackText -Color $SlackColor
 Write-Log "slack_notify: $SlackNotify"
+
+# 실제 전송 결과는 알림 호출 뒤에야 알 수 있으므로 최종 보고서에 다시 기록한다.
+$Metrics | Add-Member -NotePropertyName slack_notification_status -NotePropertyValue $SlackNotify -Force
+$Metrics | Add-Member -NotePropertyName slack_notification_color -NotePropertyValue $SlackColor -Force
+$Metrics | ConvertTo-Json -Depth 20 | Set-Content -Path $MetricsPath -Encoding UTF8
+Copy-Item -LiteralPath $MetricsPath -Destination $LatestMetricsPath -Force
+$ReportLines += @("", "## Slack 알림", "", "- 전송 상태: ``$SlackNotify``", "- 표시 색상: ``$SlackColor``")
+$ReportLines -join "`n" | Set-Content -Path $ReportPath -Encoding UTF8
+Copy-Item -LiteralPath $ReportPath -Destination $LatestReportPath -Force
+$ScheduleLines += "- slack_notification_status: $SlackNotify"
+$ScheduleLines -join "`n" | Set-Content -Path $LatestSchedulePath -Encoding UTF8
 
 Write-Host "status=$FinalStatus"
 Write-Host "push=$PushStatus"
@@ -451,7 +523,7 @@ Write-Host "metrics=$MetricsPath"
 Write-Host "report=$ReportPath"
 Write-Host "schedule_status=$LatestSchedulePath"
 
-if ($FailedSteps.Count -gt 0) {
+if (($FailedSteps.Count -gt 0) -or $ProductionFailed) {
     exit 1
 }
 exit 0

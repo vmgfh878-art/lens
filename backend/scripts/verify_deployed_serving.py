@@ -1,113 +1,206 @@
-"""CP256 — 배포된 프로덕션 서빙이 실제로 최신인지 검수.
+"""배포 데이터의 출처·버전·가격 및 예측 최신성을 읽기 전용으로 검수한다.
 
-git push / Supabase 발행이 끝나도, 배포 백엔드가 최신 예측을 서빙하지 않으면 웹 화면엔
-안 뜬다(2026-07 예측 정체 사고). 이 스크립트는 배포된 백엔드를 직접 조회해서 프론트의
-stale 가드(CP215)와 같은 기준으로 "화면에 h5(1D)/4주(1W) 최신 예측이 뜨는 상태인가"를 판정한다.
-
-판정:
-  - 1D: band_1d / line 의 최신 asof 가 가격 최신일과 5거래일 이내면 화면에 뜬다(stale 가드 기준).
-  - 1W: band_1w 최신 asof 가 가격 최신일과 10거래일 이내면 뜬다(주봉이라 여유).
-
-출력 마지막 줄: `VERIFY result=<VERIFIED|STALE|ERROR> ...` (ps1 이 파싱).
-exit code: 0 VERIFIED / 2 STALE / 1 ERROR(도달 불가 등).
+정상 원격 버전, 고정 폴백, 이전 버전 유지, 오래된 데이터, 버전 불일치를 구분한다.
+폴백이 정상 응답해도 새 데이터 발행 성공으로 처리하지 않는다.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
-
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    except Exception:
-        pass
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
 
 BASE = os.environ.get("LENS_DEPLOYED_BACKEND_URL", "https://lens-backend-7stj.onrender.com").rstrip(
     "/"
 )
 TICKER = os.environ.get("LENS_VERIFY_TICKER", "AAPL")
-GAP_1D_MAX = 5  # 거래일. 프론트 stale 가드 임계값과 동일.
-GAP_1W_MAX = 10  # 거래일. 주봉은 여유.
+GAP_1D_MAX = 5
+GAP_1W_MAX = 10
+GAP_PRICE_MAX = 5
+EXIT_CODES = {
+    "VERIFIED": 0,
+    "ERROR": 1,
+    "STALE": 2,
+    "FALLBACK": 3,
+    "MISMATCH": 4,
+    "R2_DEGRADED": 5,
+    "REMOTE_DEGRADED": 5,
+    "LEGACY": 6,
+}
 
 
-def _get_json(url: str, attempts: int = 3, timeout: int = 30):
-    last = None
-    for i in range(attempts):
+def _get_json(url: str, attempts: int = 3, timeout: int = 30) -> dict[str, Any]:
+    for attempt in range(attempts):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "lens-verify"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.load(resp)
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            time.sleep(5 * (i + 1))  # Render 콜드스타트 흡수
-    raise RuntimeError(f"unreachable: {url} ({last})")
-
-
-def _latest_asof(endpoint: str) -> str | None:
-    rows = _get_json(f"{BASE}/api/v1/predictions/{endpoint}")["data"]["data"]
-    asofs = sorted({r["asof_date"] for r in rows if r.get("asof_date")})
-    return asofs[-1] if asofs else None
-
-
-def _latest_price() -> str | None:
-    start = (datetime.utcnow().date() - timedelta(days=60)).isoformat()
-    end = (datetime.utcnow().date() + timedelta(days=2)).isoformat()
-    rows = _get_json(f"{BASE}/api/v1/stocks/{TICKER}/prices?timeframe=1D&start={start}&end={end}")[
-        "data"
-    ]["data"]
-    return rows[-1]["date"] if rows else None
+            request = urllib.request.Request(url, headers={"User-Agent": "lens-verify"})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500 or attempt == attempts - 1:
+                raise
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+        time.sleep(5 * (attempt + 1))
+    raise RuntimeError("배포 상태를 조회하지 못했습니다.")
 
 
 def _business_days(d_from: str | None, d_to: str | None) -> int | None:
     if not d_from or not d_to:
         return None
-    a = datetime.strptime(d_from[:10], "%Y-%m-%d").date()
-    b = datetime.strptime(d_to[:10], "%Y-%m-%d").date()
-    if a >= b:
-        return 0
-    n, c = 0, a
-    while c < b:
-        c += timedelta(days=1)
-        if c.weekday() < 5:
-            n += 1
-    return n
+    start = date.fromisoformat(d_from[:10])
+    end = date.fromisoformat(d_to[:10])
+    count = 0
+    while start < end:
+        start += timedelta(days=1)
+        count += int(start.weekday() < 5)
+    return count
 
 
-def main() -> int:
+def verify_deployed_serving(
+    *,
+    base_url: str = BASE,
+    ticker: str = TICKER,
+    expected_snapshot_id: str | None = None,
+    get_json: Any = _get_json,
+    today: date | None = None,
+) -> dict[str, Any]:
+    """상태와 실제 가격·예측 응답을 함께 검사해 구조화된 결과를 반환한다."""
+    current_date = today or datetime.now(timezone.utc).date()
+    base_url = base_url.rstrip("/")
+    result: dict[str, Any] = {
+        "result": "ERROR",
+        "source": None,
+        "snapshot_id": None,
+        "expected_snapshot_id": expected_snapshot_id,
+        "expected_snapshot_match": None,
+        "r2_sync_status": None,
+        "last_r2_success_at": None,
+        "remote_sync_status": None,
+        "last_remote_success_at": None,
+        "fallback_active": False,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
     try:
-        price = _latest_price()
-        band_1d = _latest_asof(f"band/1d/{TICKER}?days=45")
-        band_1w = _latest_asof(f"band/1w/{TICKER}?days=90")
-        line = _latest_asof(f"line/{TICKER}?days=45")
-    except Exception as exc:  # noqa: BLE001
-        print(f'VERIFY result=ERROR reason="{exc}"')
-        return 1
+        health = get_json(f"{base_url}/api/v1/health/ready")["data"]
+        source = health.get("source")
+        result.update(
+            source=source,
+            snapshot_id=health.get("snapshot_id"),
+            health_status=health.get("status"),
+            r2_sync_status=health.get("r2_sync_status"),
+            last_r2_success_at=health.get("last_r2_success_at"),
+            remote_sync_status=health.get("remote_sync_status") or health.get("r2_sync_status"),
+            last_remote_success_at=health.get("last_remote_success_at")
+            or health.get("last_r2_success_at"),
+            fallback_active=source == "bootstrap",
+        )
+        if expected_snapshot_id:
+            result["expected_snapshot_match"] = health.get("snapshot_id") == expected_snapshot_id
+        checks = health.get("checks") or {}
+        if source in {"r2", "github_release", "bootstrap"} and not checks.get("required_files"):
+            result["reason"] = "필수 서빙 파일이 준비되지 않았습니다."
+            return result
+        if source == "bootstrap" and not checks.get("bootstrap_verified"):
+            result["reason"] = "고정 폴백의 해시 검증이 완료되지 않았습니다."
+            return result
 
-    gap_band_1d = _business_days(band_1d, price)
-    gap_line = _business_days(line, price)
-    gap_band_1w = _business_days(band_1w, price)
+        start = (current_date - timedelta(days=60)).isoformat()
+        end = (current_date + timedelta(days=2)).isoformat()
+        prices = get_json(
+            f"{base_url}/api/v1/stocks/{ticker}/prices?timeframe=1D&start={start}&end={end}"
+        )["data"]["data"]
+        price = max((row["date"] for row in prices if row.get("date")), default=None)
+        latest: dict[str, str | None] = {}
+        for key, endpoint in (
+            ("band_1d", f"band/1d/{ticker}?days=45"),
+            ("band_1w", f"band/1w/{ticker}?days=90"),
+            ("line", f"line/{ticker}?days=45"),
+        ):
+            rows = get_json(f"{base_url}/api/v1/predictions/{endpoint}")["data"]["data"]
+            latest[key] = max(
+                (row["asof_date"] for row in rows if row.get("asof_date")), default=None
+            )
+        gaps = {key: _business_days(value, price) for key, value in latest.items()}
+        price_age = _business_days(price, current_date.isoformat())
+        fresh = (
+            price is not None
+            and price_age is not None
+            and price_age <= GAP_PRICE_MAX
+            and all(value is not None for value in latest.values())
+            and gaps["band_1d"] is not None
+            and gaps["band_1d"] <= GAP_1D_MAX
+            and gaps["line"] is not None
+            and gaps["line"] <= GAP_1D_MAX
+            and gaps["band_1w"] is not None
+            and gaps["band_1w"] <= GAP_1W_MAX
+        )
+        result.update(
+            price=price,
+            price_age_business_days=price_age,
+            predictions=latest,
+            prediction_gaps=gaps,
+            data_fresh=fresh,
+        )
+        if not fresh:
+            result.update(
+                result="STALE", reason="가격 또는 예측이 비어 있거나 최신성 기준을 넘었습니다."
+            )
+        elif source == "bootstrap":
+            result.update(result="FALLBACK", reason="검증된 고정 폴백으로 응답하고 있습니다.")
+        elif source not in {"r2", "github_release"}:
+            result.update(
+                result="LEGACY", reason="배포가 아직 원격 스냅샷 서빙 출처를 보고하지 않습니다."
+            )
+        elif not health.get("snapshot_id"):
+            result.update(result="ERROR", reason="원격 서빙 스냅샷 ID가 없습니다.")
+        elif expected_snapshot_id and not result["expected_snapshot_match"]:
+            result.update(result="MISMATCH", reason="활성 버전이 발행한 스냅샷과 다릅니다.")
+        elif health.get("status") != "ok":
+            result.update(
+                result="R2_DEGRADED" if source == "r2" else "REMOTE_DEGRADED",
+                reason="동기화 실패 후 이전 원격 버전으로 응답하고 있습니다.",
+            )
+        else:
+            result.update(result="VERIFIED", reason="원격 데이터 출처와 최신성을 확인했습니다.")
+    except Exception as exc:
+        # URL이나 자격증명 문자열을 알림에 흘리지 않고 오류 종류만 기록한다.
+        result.update(
+            result="ERROR",
+            reason="배포 상태 또는 데이터 응답을 확인하지 못했습니다.",
+            error_type=type(exc).__name__,
+        )
+    return result
 
-    ok_1d = (
-        band_1d is not None
-        and line is not None
-        and (gap_band_1d is not None and gap_band_1d <= GAP_1D_MAX)
-        and (gap_line is not None and gap_line <= GAP_1D_MAX)
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="배포 서빙 출처·버전·최신성 검수")
+    parser.add_argument("--base-url", default=BASE)
+    parser.add_argument("--ticker", default=TICKER)
+    parser.add_argument("--expected-snapshot-id")
+    parser.add_argument("--output", help="구조화된 결과를 저장할 JSON 파일")
+    args = parser.parse_args(argv)
+    result = verify_deployed_serving(
+        base_url=args.base_url, ticker=args.ticker, expected_snapshot_id=args.expected_snapshot_id
     )
-    ok_1w = band_1w is not None and (gap_band_1w is not None and gap_band_1w <= GAP_1W_MAX)
-
-    verdict = "VERIFIED" if (ok_1d and ok_1w) else "STALE"
-    detail = (
-        f"price={price} band1d={band_1d}(gap{gap_band_1d}) "
-        f"line={line}(gap{gap_line}) band1w={band_1w}(gap{gap_band_1w}) "
-        f"1D_ok={int(bool(ok_1d))} 1W_ok={int(bool(ok_1w))}"
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    print(
+        f"VERIFY result={result['result']} source={result['source']} snapshot_id={result['snapshot_id']} "
+        f"remote_sync_status={result['remote_sync_status']} price={result.get('price')} "
+        f"expected_match={result['expected_snapshot_match']}"
     )
-    print(f"VERIFY result={verdict} {detail}")
-    return 0 if verdict == "VERIFIED" else 2
+    return EXIT_CODES[result["result"]]
 
 
 if __name__ == "__main__":
