@@ -695,9 +695,6 @@ export default function StockView() {
   return (
     <div className="view-stack stock-view">
       <section className="stock-topbar">
-        <p className="stock-intro">
-          Lens는 가격 차트 위에 보수적 기준선과 자동 갱신된 AI 밴드를 겹쳐 보며, 리스크를 먼저 확인하는 투자 보조 도구입니다.
-        </p>
         <form className="stock-topbar__form" onSubmit={handleSubmit}>
           <div className="ticker-box">
             <label className="ticker-field">

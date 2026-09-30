@@ -117,13 +117,6 @@
   align-items: flex-end;
 }
 
-.stock-intro {
-  margin: 0;
-  color: var(--fg2);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
 .ticker-box {
   display: flex;
   align-items: flex-end;
